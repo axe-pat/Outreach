@@ -17,8 +17,22 @@ from outreach.scoring import score_candidate
 from outreach.services.linkedin import LinkedInScraper
 from outreach.services.notes import NoteGenerator
 from outreach.models import CandidateProfile, LinkedInCompanyQueueItem
+from outreach.resume_jobs_bridge import (
+    DEFAULT_INCLUDE_STATUSES,
+    build_resume_opportunity_notes,
+    build_resume_organization_notes,
+    infer_opportunity_type,
+    load_resume_jobs,
+    map_resume_source_kind,
+    opportunity_status_from_resume_status,
+    organization_status_from_resume_status,
+    organization_type_for_resume_job,
+    select_resume_jobs,
+    target_lists_from_resume_status,
+)
 from outreach.tracking import (
     ContactRecord,
+    DiscoverySourceRecord,
     OpportunityRecord,
     OpportunityType,
     OrganizationRecord,
@@ -1273,7 +1287,7 @@ def generate_notes(
     polish_model: Annotated[
         str,
         typer.Option(help="Anthropic model to use for note polish"),
-    ] = "claude-sonnet-4-6",
+    ] = "claude-haiku-4-5-20251001",
 ) -> None:
     try:
         settings = OutreachSettings()
@@ -1666,6 +1680,120 @@ def build_target_action_queue(
             f"- {item['company']} | action={item['action']} | relevant_roles={item['relevant_role_count']} | "
             f"borderline_roles={item['borderline_role_count']} | fit={item['fit_band']} ({item['fit_score']})"
         )
+
+
+@app.command("import-resume-jobs")
+def import_resume_jobs(
+    jobs_xlsx: Annotated[
+        Path,
+        typer.Option(help="Path to ResumeGenerator v1 discovery/jobs.xlsx"),
+    ] = Path("../ResumeGenerator v1/discovery/jobs.xlsx"),
+    sheet_name: Annotated[str, typer.Option(help="Worksheet name inside the xlsx")] = "Jobs",
+    include_status: Annotated[
+        list[str] | None,
+        typer.Option("--include-status", help="ResumeGenerator statuses to import"),
+    ] = None,
+    min_score: Annotated[float, typer.Option(help="Minimum fit score to import")] = 7.0,
+    max_age_days: Annotated[
+        int,
+        typer.Option(help="Only import jobs found within this many days"),
+    ] = 10,
+    limit: Annotated[int | None, typer.Option(help="Optional max jobs to import")] = None,
+    dry_run: Annotated[bool, typer.Option(help="Preview matches without writing workbook")] = False,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    rows = load_resume_jobs(jobs_xlsx, sheet_name=sheet_name)
+    selection = select_resume_jobs(
+        rows,
+        include_statuses=tuple(include_status or DEFAULT_INCLUDE_STATUSES),
+        min_score=min_score,
+        max_age_days=max_age_days,
+    )
+    selected_jobs = selection.jobs[:limit] if limit else selection.jobs
+
+    typer.echo(f"Scanned {len(rows)} resume-tracker rows from {jobs_xlsx}")
+    typer.echo(
+        "Eligible rows: "
+        f"{len(selected_jobs)}"
+        f" | skipped_status={selection.skipped_status}"
+        f" | skipped_score={selection.skipped_score}"
+        f" | skipped_age={selection.skipped_age}"
+        f" | duplicates_removed={selection.duplicates_removed}"
+    )
+    for job in selected_jobs[:10]:
+        score_text = f"{job.fit_score:.1f}" if job.fit_score is not None else "n/a"
+        found_text = job.date_found.isoformat() if job.date_found else "n/a"
+        typer.echo(
+            f"- id={job.row_id} | {job.company} | {job.role_title} | "
+            f"score={score_text} | status={job.normalized_status} | found={found_text}"
+        )
+    if dry_run:
+        typer.echo("Dry run only. No workbook changes written.")
+        return
+
+    workbook.initialize()
+    source_id = workbook.make_source_id("resume-generator-jobs-xlsx", str(jobs_xlsx))
+    workbook.upsert_source(
+        DiscoverySourceRecord(
+            source_id=source_id,
+            label="ResumeGenerator v1 jobs.xlsx import",
+            source_kind=SourceKind.OTHER,
+            base_url=str(jobs_xlsx),
+            extraction_method="xlsx_import",
+            owner="outreach-engine",
+            last_run_at=utc_now_iso(),
+            notes=f"sheet={sheet_name} | min_score={min_score} | max_age_days={max_age_days}",
+        )
+    )
+
+    organizations_added = 0
+    opportunities_added = 0
+    for job in selected_jobs:
+        target_lists = target_lists_from_resume_status(job.status)
+        organization, created = workbook.upsert_organization(
+            OrganizationRecord(
+                organization_id=workbook.make_organization_id(job.company),
+                name=job.company,
+                organization_type=organization_type_for_resume_job(job),
+                target_lists=target_lists,
+                status=organization_status_from_resume_status(job.status),
+                city=job.location,
+                source_kind=map_resume_source_kind(job.source),
+                source_url=job.url,
+                notes=build_resume_organization_notes(job),
+            )
+        )
+        if created:
+            organizations_added += 1
+
+        _, created = workbook.upsert_opportunity(
+            OpportunityRecord(
+                opportunity_id=workbook.make_opportunity_id(
+                    organization.organization_id,
+                    job.role_title,
+                    source_url=job.url,
+                ),
+                organization_id=organization.organization_id,
+                title=job.role_title,
+                opportunity_type=infer_opportunity_type(job.role_title),
+                target_lists=target_lists,
+                location=job.location,
+                status=opportunity_status_from_resume_status(job.status),
+                source_kind=map_resume_source_kind(job.source),
+                source_url=job.url,
+                notes=build_resume_opportunity_notes(job),
+            )
+        )
+        if created:
+            opportunities_added += 1
+
+    typer.echo(
+        f"Imported {len(selected_jobs)} eligible resume jobs into {settings.resolved_tracking_workspace_dir}"
+    )
+    typer.echo(f"- organizations_added: {organizations_added}")
+    typer.echo(f"- opportunities_added: {opportunities_added}")
+    typer.echo(f"- source_id: {source_id}")
 
 
 @app.command("init-workbook")

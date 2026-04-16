@@ -26,6 +26,8 @@ Python is the cleanest fit for browser automation, API integration, scoring logi
 
 The app is structured so the LinkedIn layer is isolated. If selectors break or we later decide to split scraping and note generation into separate jobs, the rest of the pipeline stays stable.
 
+Note on AI usage: base LinkedIn note generation is deterministic. The optional `--ai-polish` rewrite layer now defaults to `claude-haiku-4-5-20251001`, which keeps the expensive model reserved for places where it matters more.
+
 ## Project Layout
 
 ```text

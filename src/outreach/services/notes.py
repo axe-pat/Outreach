@@ -96,7 +96,7 @@ class NoteGenerator:
         company: str,
         api_key: str,
         top_n: int = 10,
-        model: str = "claude-sonnet-4-6",
+        model: str = "claude-haiku-4-5-20251001",
         company_mode: str = "default",
     ) -> list[dict]:
         client = anthropic.Anthropic(api_key=api_key)

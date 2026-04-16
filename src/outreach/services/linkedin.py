@@ -390,10 +390,10 @@ class LinkedInScraper:
             capture_output=True,
             text=True,
         ).stdout.strip()
-        forbidden_path = str(self.settings.fallback_linkedin_user_data_dir)
-        if forbidden_path and forbidden_path in command:
+        if "--remote-debugging-port" not in command:
             raise RuntimeError(
-                f"Refusing to use fallback unsigned Chrome profile on port {debug_port}: {forbidden_path}"
+                f"Chrome is listening on port {debug_port}, but the owning process does not look like a "
+                "remote-debuggable Chrome launch."
             )
 
     def _goto(self, page: Page, url: str, steps: list[str], label: str) -> None:

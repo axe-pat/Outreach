@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 from outreach.cli import (
     build_linkedin_company_queue_items,
@@ -127,6 +128,19 @@ def test_force_broad_fallback_removes_pool_gate() -> None:
 
     assert passes["broad_fallback"]["enabled"] is True
     assert "run_if_below_pool_size" not in passes["broad_fallback"]
+
+
+def test_relative_linkedin_profile_is_treated_as_fallback() -> None:
+    settings = OutreachSettings(linkedin_chrome_user_data_dir=Path("playwright/chrome-data"))
+
+    assert settings.using_fallback_linkedin_profile() is True
+
+
+def test_absolute_linkedin_profile_is_explicit_even_if_it_points_to_outreach_profile() -> None:
+    settings = OutreachSettings(linkedin_chrome_user_data_dir=Path.cwd() / "playwright" / "chrome-data")
+
+    assert settings.using_fallback_linkedin_profile() is False
+    settings.validate_explicit_linkedin_profile()
 
 
 def test_parse_team_size_headcount_handles_commas() -> None:

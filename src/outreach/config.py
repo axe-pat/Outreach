@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+DEFAULT_LINKEDIN_USER_DATA_DIR = Path("playwright/chrome-data")
+
+
 class ScoringWeights(BaseModel):
     existing_connection: int = 100
     usc_marshall: int = 55
@@ -110,7 +113,7 @@ class OutreachSettings(BaseSettings):
     notion_api_token: str | None = Field(default=None, alias="NOTION_API_TOKEN")
     notion_database_id: str | None = Field(default=None, alias="NOTION_DATABASE_ID")
     linkedin_chrome_user_data_dir: Path = Field(
-        default=Path("playwright/chrome-data"),
+        default=DEFAULT_LINKEDIN_USER_DATA_DIR,
         alias="LINKEDIN_CHROME_USER_DATA_DIR",
     )
     linkedin_profile_name: str = Field(default="Default", alias="LINKEDIN_PROFILE_NAME")
@@ -150,11 +153,14 @@ class OutreachSettings(BaseSettings):
         return path if path.is_absolute() else Path.cwd() / path
 
     def using_fallback_linkedin_profile(self) -> bool:
-        return self.resolved_linkedin_user_data_dir == self.fallback_linkedin_user_data_dir
+        return (
+            not self.linkedin_chrome_user_data_dir.is_absolute()
+            and self.linkedin_chrome_user_data_dir == DEFAULT_LINKEDIN_USER_DATA_DIR
+        )
 
     def validate_explicit_linkedin_profile(self) -> None:
         if self.using_fallback_linkedin_profile():
             raise ValueError(
-                "LINKEDIN_CHROME_USER_DATA_DIR must point to an explicitly approved signed-in Chrome profile. "
-                f"Refusing to use fallback profile: {self.fallback_linkedin_user_data_dir}"
+                "LINKEDIN_CHROME_USER_DATA_DIR must point to an explicit absolute Chrome profile path. "
+                f"Refusing repo-relative fallback profile: {DEFAULT_LINKEDIN_USER_DATA_DIR}"
             )

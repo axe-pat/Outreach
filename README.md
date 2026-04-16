@@ -61,7 +61,7 @@ tests/
 3. Install Playwright browsers with `playwright install chromium`.
 4. Copy `.env.example` to `.env` and fill in your secrets.
 5. Run `python main.py doctor`.
-6. Run `./scripts/launch_outreach_browser.sh`.
+6. Set `LINKEDIN_CHROME_USER_DATA_DIR` to the absolute path of the signed-in Chrome profile you want Outreach to reuse, then run `./scripts/launch_outreach_browser.sh`.
 7. Log into LinkedIn in the dedicated browser window and keep that window open.
 8. Run `python main.py check-linkedin-live`.
 9. Run `python main.py run --company Snowflake --dry-run`.

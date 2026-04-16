@@ -53,6 +53,7 @@ tests/
 - `docs/system_overview.md`: current-state architecture with diagrams
 - `docs/architecture.md`: earlier design notes and original component split
 - `docs/discovery_strategy.md`: how the multi-source discovery model maps into the workbook
+- `docs/linkedin_browser_playbook.md`: canonical Chrome / LinkedIn session rules shared with ResumeGenerator v1
 
 ## Getting Started
 

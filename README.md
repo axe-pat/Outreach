@@ -85,6 +85,8 @@ instead of creating one sheet per avenue.
 
 - `python main.py init-workbook`
 - `python main.py workbook-summary`
+- `python main.py build-resume-outreach-queue`
+- `python main.py import-resume-jobs`
 - `python main.py list-discovery-sources`
 - `python main.py discover-source --source-id yc_los_angeles --limit 25`
 - `python main.py discover-source --source-id yc_los_angeles --require-jobs-url --max-team-size 50 --min-batch-year 2024`
@@ -98,6 +100,22 @@ instead of creating one sheet per avenue.
 - `python main.py add-contact --organization "Figma" --full-name "Avery Product"`
 - `python main.py log-touchpoint --organization "Figma" --full-name "Avery Product" --message-text "..."`
 - `python main.py import-linkedin-artifact --artifact-path artifacts/...json`
+
+## ResumeGenerator Bridge
+
+ResumeGenerator v1 can stay the upstream job tracker while Outreach consumes only
+fresh, apply-worthy jobs for pre-application outreach.
+
+- upstream file: `../ResumeGenerator v1/discovery/jobs.xlsx`
+- sheet read: `Jobs` only
+- default import filter: `status in {queued, generated}`, `fit_score >= 7.0`,
+  `date_found <= 10 days old`
+- dedupe: `url_hash` first, otherwise normalized `company + role_title`
+
+Outreach-specific prioritization lives downstream. Use
+`workspace/company_overrides.csv` to manually bias certain companies toward
+startup outreach or deprioritize big-company outreach without changing
+`jobs.xlsx`.
 
 ## Current Status
 

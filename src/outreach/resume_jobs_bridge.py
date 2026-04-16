@@ -10,6 +10,24 @@ from outreach.tracking import OpportunityType, OrganizationType, SourceKind
 
 DEFAULT_INCLUDE_STATUSES = ("queued", "generated")
 DEFAULT_TARGET_LISTS = "jobs;resume_generator;pre_apply"
+DEFAULT_COMPANY_OVERRIDES_FILENAME = "company_overrides.csv"
+
+STARTUP_BIAS_SCORES = {
+    "high": 2.0,
+    "medium": 1.0,
+    "low": 0.5,
+    "neutral": 0.0,
+    "none": 0.0,
+    "deprioritize": -1.0,
+}
+
+COMPANY_TYPE_SCORES = {
+    "startup": 1.5,
+    "growth": 1.0,
+    "big_company": -0.5,
+    "unknown": 0.0,
+    "company": 0.0,
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +58,32 @@ class ResumeImportSelection:
     skipped_score: int
     skipped_age: int
     duplicates_removed: int
+
+
+@dataclass(frozen=True)
+class CompanyOverride:
+    company: str
+    normalized_company: str
+    company_type_override: str
+    startup_bias: str
+    notes: str
+
+
+@dataclass(frozen=True)
+class ResumeOutreachQueueItem:
+    row_id: str
+    company: str
+    role_title: str
+    status: str
+    date_found: date | None
+    fit_score: float | None
+    outreach_priority_score: float
+    company_type: str
+    startup_bias: str
+    priority_reasons: list[str]
+    source: str
+    source_url: str
+    url_hash: str
 
 
 def load_resume_jobs(path: Path, sheet_name: str = "Jobs") -> list[ResumeJob]:
@@ -224,8 +268,182 @@ def target_lists_from_resume_status(status: str) -> str:
     return DEFAULT_TARGET_LISTS
 
 
-def organization_type_for_resume_job(_: ResumeJob) -> OrganizationType:
+def ensure_company_overrides_csv(path: Path) -> Path:
+    if path.exists():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "company,company_type_override,startup_bias,notes\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def load_company_overrides(path: Path) -> dict[str, CompanyOverride]:
+    import csv
+
+    ensure_company_overrides_csv(path)
+    overrides: dict[str, CompanyOverride] = {}
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            company = str(row.get("company") or "").strip()
+            if not company:
+                continue
+            normalized_company = normalize_dedupe_text(company)
+            overrides[normalized_company] = CompanyOverride(
+                company=company,
+                normalized_company=normalized_company,
+                company_type_override=normalize_company_type(str(row.get("company_type_override") or "")),
+                startup_bias=normalize_startup_bias(str(row.get("startup_bias") or "")),
+                notes=str(row.get("notes") or "").strip(),
+            )
+    return overrides
+
+
+def normalize_company_type(value: str) -> str:
+    normalized = normalize_dedupe_text(value).replace(" ", "_")
+    if normalized in {"startup", "growth", "big_company", "company"}:
+        return normalized
+    return "unknown"
+
+
+def normalize_startup_bias(value: str) -> str:
+    normalized = normalize_dedupe_text(value)
+    if normalized in STARTUP_BIAS_SCORES:
+        return normalized
+    return "neutral"
+
+
+def infer_company_type_for_job(
+    job: ResumeJob,
+    *,
+    company_override: CompanyOverride | None = None,
+) -> str:
+    if company_override and company_override.company_type_override != "unknown":
+        return company_override.company_type_override
+    source = normalize_dedupe_text(job.source)
+    company = normalize_dedupe_text(job.company)
+    if source == "screenshot":
+        return "unknown"
+    big_company_signals = {
+        "tiktok",
+        "ibm",
+        "cisco",
+        "nvidia",
+        "comcast",
+        "gen",
+    }
+    growth_signals = {
+        "typeface",
+        "cosm",
+        "arena",
+    }
+    if company in big_company_signals:
+        return "big_company"
+    if company in growth_signals:
+        return "growth"
+    return "unknown"
+
+
+def organization_type_for_resume_job(
+    job: ResumeJob,
+    *,
+    company_override: CompanyOverride | None = None,
+) -> OrganizationType:
+    company_type = infer_company_type_for_job(job, company_override=company_override)
+    if company_type in {"startup", "growth"}:
+        return OrganizationType.STARTUP
     return OrganizationType.COMPANY
+
+
+def build_resume_outreach_queue(
+    jobs: Iterable[ResumeJob],
+    *,
+    company_overrides: dict[str, CompanyOverride] | None = None,
+    max_per_company: int = 2,
+) -> list[ResumeOutreachQueueItem]:
+    company_overrides = company_overrides or {}
+    per_company_counts: dict[str, int] = {}
+    items: list[ResumeOutreachQueueItem] = []
+    for job in sorted(jobs, key=resume_job_sort_key, reverse=True):
+        normalized_company = normalize_dedupe_text(job.company)
+        if per_company_counts.get(normalized_company, 0) >= max_per_company:
+            continue
+        override = company_overrides.get(normalized_company)
+        company_type = infer_company_type_for_job(job, company_override=override)
+        startup_bias = override.startup_bias if override else "neutral"
+        priority_score, reasons = compute_outreach_priority(
+            job,
+            company_type=company_type,
+            startup_bias=startup_bias,
+        )
+        items.append(
+            ResumeOutreachQueueItem(
+                row_id=job.row_id,
+                company=job.company,
+                role_title=job.role_title,
+                status=job.normalized_status,
+                date_found=job.date_found,
+                fit_score=job.fit_score,
+                outreach_priority_score=priority_score,
+                company_type=company_type,
+                startup_bias=startup_bias,
+                priority_reasons=reasons,
+                source=job.source,
+                source_url=job.url,
+                url_hash=job.url_hash,
+            )
+        )
+        per_company_counts[normalized_company] = per_company_counts.get(normalized_company, 0) + 1
+
+    items.sort(
+        key=lambda item: (
+            item.outreach_priority_score,
+            item.date_found or date.min,
+            item.fit_score if item.fit_score is not None else -1.0,
+            normalize_dedupe_text(item.company),
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def compute_outreach_priority(
+    job: ResumeJob,
+    *,
+    company_type: str,
+    startup_bias: str,
+) -> tuple[float, list[str]]:
+    score = job.fit_score if job.fit_score is not None else 0.0
+    reasons = [f"fit_score={score:.1f}"]
+    company_bonus = COMPANY_TYPE_SCORES.get(company_type, 0.0)
+    if company_bonus:
+        reasons.append(f"company_type={company_type}")
+        score += company_bonus
+    bias_bonus = STARTUP_BIAS_SCORES.get(startup_bias, 0.0)
+    if bias_bonus:
+        reasons.append(f"startup_bias={startup_bias}")
+        score += bias_bonus
+    if job.normalized_status == "generated":
+        reasons.append("assets_ready")
+        score += 0.4
+    freshness_bonus = freshness_bonus_for_job(job)
+    if freshness_bonus:
+        reasons.append("fresh")
+        score += freshness_bonus
+    return round(score, 2), reasons
+
+
+def freshness_bonus_for_job(job: ResumeJob) -> float:
+    if job.date_found is None:
+        return 0.0
+    age_days = (date.today() - job.date_found).days
+    if age_days <= 3:
+        return 1.0
+    if age_days <= 7:
+        return 0.5
+    return 0.0
 
 
 def build_resume_opportunity_notes(job: ResumeJob) -> str:

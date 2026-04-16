@@ -19,11 +19,17 @@ from outreach.services.notes import NoteGenerator
 from outreach.models import CandidateProfile, LinkedInCompanyQueueItem
 from outreach.resume_jobs_bridge import (
     DEFAULT_INCLUDE_STATUSES,
+    DEFAULT_COMPANY_OVERRIDES_FILENAME,
     build_resume_opportunity_notes,
     build_resume_organization_notes,
+    build_resume_outreach_queue,
+    ensure_company_overrides_csv,
     infer_opportunity_type,
+    infer_company_type_for_job,
     load_resume_jobs,
+    load_company_overrides,
     map_resume_source_kind,
+    normalize_dedupe_text,
     opportunity_status_from_resume_status,
     organization_status_from_resume_status,
     organization_type_for_resume_job,
@@ -1703,6 +1709,10 @@ def import_resume_jobs(
 ) -> None:
     settings = OutreachSettings()
     workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    company_overrides_path = ensure_company_overrides_csv(
+        settings.resolved_tracking_workspace_dir / DEFAULT_COMPANY_OVERRIDES_FILENAME
+    )
+    company_overrides = load_company_overrides(company_overrides_path)
     rows = load_resume_jobs(jobs_xlsx, sheet_name=sheet_name)
     selection = select_resume_jobs(
         rows,
@@ -1724,9 +1734,11 @@ def import_resume_jobs(
     for job in selected_jobs[:10]:
         score_text = f"{job.fit_score:.1f}" if job.fit_score is not None else "n/a"
         found_text = job.date_found.isoformat() if job.date_found else "n/a"
+        override = company_overrides.get(normalize_dedupe_text(job.company))
+        company_type = infer_company_type_for_job(job, company_override=override)
         typer.echo(
             f"- id={job.row_id} | {job.company} | {job.role_title} | "
-            f"score={score_text} | status={job.normalized_status} | found={found_text}"
+            f"score={score_text} | status={job.normalized_status} | found={found_text} | company_type={company_type}"
         )
     if dry_run:
         typer.echo("Dry run only. No workbook changes written.")
@@ -1750,12 +1762,13 @@ def import_resume_jobs(
     organizations_added = 0
     opportunities_added = 0
     for job in selected_jobs:
+        override = company_overrides.get(normalize_dedupe_text(job.company))
         target_lists = target_lists_from_resume_status(job.status)
         organization, created = workbook.upsert_organization(
             OrganizationRecord(
                 organization_id=workbook.make_organization_id(job.company),
                 name=job.company,
-                organization_type=organization_type_for_resume_job(job),
+                organization_type=organization_type_for_resume_job(job, company_override=override),
                 target_lists=target_lists,
                 status=organization_status_from_resume_status(job.status),
                 city=job.location,
@@ -1794,6 +1807,84 @@ def import_resume_jobs(
     typer.echo(f"- organizations_added: {organizations_added}")
     typer.echo(f"- opportunities_added: {opportunities_added}")
     typer.echo(f"- source_id: {source_id}")
+    typer.echo(f"- company_overrides: {company_overrides_path}")
+
+
+@app.command("build-resume-outreach-queue")
+def build_resume_outreach_queue_command(
+    jobs_xlsx: Annotated[
+        Path,
+        typer.Option(help="Path to ResumeGenerator v1 discovery/jobs.xlsx"),
+    ] = Path("../ResumeGenerator v1/discovery/jobs.xlsx"),
+    sheet_name: Annotated[str, typer.Option(help="Worksheet name inside the xlsx")] = "Jobs",
+    min_score: Annotated[float, typer.Option(help="Minimum fit score to include")] = 7.0,
+    max_age_days: Annotated[int, typer.Option(help="Maximum age in days")] = 10,
+    max_per_company: Annotated[int, typer.Option(help="Cap entries per company")] = 2,
+    limit: Annotated[int, typer.Option(help="Maximum queue entries to return")] = 15,
+) -> None:
+    settings = OutreachSettings()
+    company_overrides_path = ensure_company_overrides_csv(
+        settings.resolved_tracking_workspace_dir / DEFAULT_COMPANY_OVERRIDES_FILENAME
+    )
+    company_overrides = load_company_overrides(company_overrides_path)
+    rows = load_resume_jobs(jobs_xlsx, sheet_name=sheet_name)
+    selection = select_resume_jobs(
+        rows,
+        include_statuses=DEFAULT_INCLUDE_STATUSES,
+        min_score=min_score,
+        max_age_days=max_age_days,
+    )
+    queue_items = build_resume_outreach_queue(
+        selection.jobs,
+        company_overrides=company_overrides,
+        max_per_company=max_per_company,
+    )[:limit]
+
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "resume-outreach-queue",
+        {
+            "count": len(queue_items),
+            "filters": {
+                "sheet_name": sheet_name,
+                "min_score": min_score,
+                "max_age_days": max_age_days,
+                "max_per_company": max_per_company,
+                "limit": limit,
+            },
+            "company_overrides_path": str(company_overrides_path),
+            "results": [
+                {
+                    "row_id": item.row_id,
+                    "company": item.company,
+                    "role_title": item.role_title,
+                    "status": item.status,
+                    "date_found": item.date_found.isoformat() if item.date_found else "",
+                    "fit_score": item.fit_score,
+                    "outreach_priority_score": item.outreach_priority_score,
+                    "company_type": item.company_type,
+                    "startup_bias": item.startup_bias,
+                    "priority_reasons": item.priority_reasons,
+                    "source": item.source,
+                    "source_url": item.source_url,
+                    "url_hash": item.url_hash,
+                }
+                for item in queue_items
+            ],
+        },
+    )
+
+    typer.echo(f"Built resume outreach queue with {len(queue_items)} jobs.")
+    typer.echo(f"Artifact: {artifact}")
+    typer.echo(f"Overrides: {company_overrides_path}")
+    for item in queue_items:
+        score_text = f"{item.outreach_priority_score:.1f}"
+        fit_text = f"{item.fit_score:.1f}" if item.fit_score is not None else "n/a"
+        found_text = item.date_found.isoformat() if item.date_found else "n/a"
+        typer.echo(
+            f"- {item.company} | {item.role_title} | outreach_score={score_text} | "
+            f"fit={fit_text} | type={item.company_type} | bias={item.startup_bias} | found={found_text}"
+        )
 
 
 @app.command("init-workbook")

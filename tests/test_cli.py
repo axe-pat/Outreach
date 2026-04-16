@@ -1,3 +1,5 @@
+from datetime import date
+
 from outreach.cli import (
     build_linkedin_company_queue_items,
     build_organization_intel_items,
@@ -23,6 +25,7 @@ from outreach.cli import (
     text_contains_signal,
 )
 from outreach.config import OutreachSettings
+from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, SourceKind, TouchpointRecord
 
 
@@ -520,3 +523,105 @@ def test_build_target_action_queue_distinguishes_apply_vs_outreach() -> None:
     outreach_item = next(item for item in items if item["company"] == "OutreachCo")
     assert outreach_item["action"] == "outreach_now"
     assert outreach_item["relevant_role_count"] == 0
+
+
+def test_build_resume_outreach_queue_applies_override_bias_and_company_cap() -> None:
+    jobs = [
+        ResumeJob(
+            row_id="1",
+            company="Typeface",
+            role_title="Product Manager Intern",
+            location="San Francisco",
+            url="https://example.com/typeface-1",
+            url_hash="hash-1",
+            source="linkedin_live_jobs_v1",
+            status="queued",
+            normalized_status="queued",
+            fit_score=7.4,
+            fit_rationale="good fit",
+            date_found=date.today(),
+            date_posted_raw="",
+            folder_path="",
+            jd_text="",
+            notes="",
+        ),
+        ResumeJob(
+            row_id="2",
+            company="Typeface",
+            role_title="PM Intern 2",
+            location="San Francisco",
+            url="https://example.com/typeface-2",
+            url_hash="hash-2",
+            source="linkedin_live_jobs_v1",
+            status="queued",
+            normalized_status="queued",
+            fit_score=7.2,
+            fit_rationale="good fit",
+            date_found=date.today(),
+            date_posted_raw="",
+            folder_path="",
+            jd_text="",
+            notes="",
+        ),
+        ResumeJob(
+            row_id="3",
+            company="Typeface",
+            role_title="PM Intern 3",
+            location="San Francisco",
+            url="https://example.com/typeface-3",
+            url_hash="hash-3",
+            source="linkedin_live_jobs_v1",
+            status="queued",
+            normalized_status="queued",
+            fit_score=7.1,
+            fit_rationale="good fit",
+            date_found=date.today(),
+            date_posted_raw="",
+            folder_path="",
+            jd_text="",
+            notes="",
+        ),
+        ResumeJob(
+            row_id="4",
+            company="TikTok",
+            role_title="Product Manager Intern",
+            location="San Jose",
+            url="https://example.com/tiktok",
+            url_hash="hash-4",
+            source="linkedin_live_jobs_v1",
+            status="generated",
+            normalized_status="generated",
+            fit_score=8.6,
+            fit_rationale="excellent fit",
+            date_found=date.today(),
+            date_posted_raw="",
+            folder_path="",
+            jd_text="",
+            notes="",
+        ),
+    ]
+    overrides = {
+        "typeface": CompanyOverride(
+            company="Typeface",
+            normalized_company="typeface",
+            company_type_override="startup",
+            startup_bias="high",
+            notes="High outreach value",
+        ),
+        "tiktok": CompanyOverride(
+            company="TikTok",
+            normalized_company="tiktok",
+            company_type_override="big_company",
+            startup_bias="deprioritize",
+            notes="Prefer startups first",
+        ),
+    }
+
+    queue = build_resume_outreach_queue(jobs, company_overrides=overrides, max_per_company=2)
+
+    assert len(queue) == 3
+    assert queue[0].company == "Typeface"
+    assert queue[0].company_type == "startup"
+    assert queue[0].startup_bias == "high"
+    assert queue[-1].company == "TikTok"
+    assert queue[-1].startup_bias == "deprioritize"

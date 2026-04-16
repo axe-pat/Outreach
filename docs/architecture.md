@@ -1,5 +1,11 @@
 # Architecture Notes
 
+This file captures the original design recommendations for the project.
+
+For the current implemented system, including discovery, workbook storage, queues,
+LinkedIn execution, and diagrams, see
+[docs/system_overview.md](/Users/akshat/Desktop/Claude Projects/Outreach/docs/system_overview.md).
+
 ## Recommendation
 
 Build this as a small Python service-oriented CLI first, not a web app.
@@ -12,7 +18,7 @@ That gives us:
 
 ## Core Design
 
-The pipeline should be split into five separable services:
+The pipeline should be split into six separable services:
 
 1. `LinkedInScraper`
    Owns browser startup, pacing, selectors, and profile extraction.
@@ -25,6 +31,8 @@ The pipeline should be split into five separable services:
 5. `OutreachWorkbook`
    Owns the local system of record for organizations, contacts, opportunities,
    touchpoints, and discovery sources.
+6. `DiscoveryAdapters`
+   Own source-specific extraction from startup directories, labs, or other public lists.
 
 ## Important Implementation Choices
 

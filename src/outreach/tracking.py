@@ -153,6 +153,13 @@ class LinkedInImportSummary(BaseModel):
     source_id: str
 
 
+class DiscoveryImportSummary(BaseModel):
+    source_id: str
+    organizations_added: int
+    opportunities_added: int
+    contacts_added: int
+
+
 class OutreachWorkbook:
     TABLE_MODELS = {
         "organizations": OrganizationRecord,
@@ -180,6 +187,18 @@ class OutreachWorkbook:
     def summary_counts(self) -> dict[str, int]:
         self.initialize()
         return {table_name: len(self._read_rows(table_name)) for table_name in self.TABLE_MODELS}
+
+    def list_organizations(self) -> list[OrganizationRecord]:
+        return [OrganizationRecord(**row) for row in self._read_rows("organizations")]
+
+    def list_opportunities(self) -> list[OpportunityRecord]:
+        return [OpportunityRecord(**row) for row in self._read_rows("opportunities")]
+
+    def list_contacts(self) -> list[ContactRecord]:
+        return [ContactRecord(**row) for row in self._read_rows("contacts")]
+
+    def list_touchpoints(self) -> list[TouchpointRecord]:
+        return [TouchpointRecord(**row) for row in self._read_rows("touchpoints")]
 
     def table_path(self, table_name: str) -> Path:
         return self.base_dir / f"{table_name}.csv"
@@ -367,6 +386,145 @@ class OutreachWorkbook:
             source_id=source.source_id,
         )
 
+    def import_discovery_batch(
+        self,
+        *,
+        source_id: str,
+        source_label: str,
+        source_kind: SourceKind,
+        base_url: str,
+        extraction_method: str,
+        target_lists: str,
+        organization_type: OrganizationType,
+        opportunity_type: OpportunityType | None,
+        items: list[dict[str, Any]],
+    ) -> DiscoveryImportSummary:
+        self.initialize()
+        source, _ = self.upsert_source(
+            DiscoverySourceRecord(
+                source_id=source_id,
+                label=source_label,
+                source_kind=source_kind,
+                base_url=base_url,
+                extraction_method=extraction_method,
+                owner="outreach-engine",
+                last_run_at=utc_now_iso(),
+                notes=f"target_lists={target_lists}",
+            )
+        )
+
+        organizations_added = 0
+        opportunities_added = 0
+        contacts_added = 0
+        for item in items:
+            organization_name = str(item.get("organization_name") or "").strip()
+            if not organization_name:
+                continue
+            organization, created = self.upsert_organization(
+                OrganizationRecord(
+                    organization_id=self.make_organization_id(organization_name),
+                    name=organization_name,
+                    organization_type=organization_type,
+                    target_lists=str(item.get("target_lists") or target_lists),
+                    status=str(item.get("status") or "Discovered"),
+                    city=str(item.get("city") or "").strip(),
+                    website=str(item.get("website") or "").strip(),
+                    linkedin_url="",
+                    source_kind=source_kind,
+                    source_url=str(item.get("source_item_url") or item.get("source_page_url") or base_url),
+                    notes=self._discovery_notes(item),
+                )
+            )
+            if created:
+                organizations_added += 1
+
+            for contact_item in item.get("contacts") or []:
+                full_name = str(contact_item.get("full_name") or "").strip()
+                if not full_name:
+                    continue
+                contact, created = self.upsert_contact(
+                    ContactRecord(
+                        contact_id=self.make_contact_id(
+                            organization.organization_id,
+                            full_name,
+                            linkedin_url=str(contact_item.get("linkedin_url") or "").strip(),
+                            email="",
+                        ),
+                        organization_id=organization.organization_id,
+                        full_name=full_name,
+                        title=str(contact_item.get("title") or "").strip(),
+                        contact_type=str(contact_item.get("contact_type") or "founder").strip(),
+                        target_lists=str(item.get("target_lists") or target_lists),
+                        preferred_channel=OutreachChannel.LINKEDIN,
+                        status="Discovered",
+                        linkedin_url=str(contact_item.get("linkedin_url") or "").strip(),
+                        source_kind=source_kind,
+                        source_url=str(item.get("source_item_url") or item.get("source_page_url") or base_url),
+                        notes=str(contact_item.get("bio") or "").strip(),
+                    )
+                )
+                if created:
+                    contacts_added += 1
+
+            opportunity_title = str(item.get("opportunity_title") or "").strip()
+            opportunities = item.get("opportunities") or []
+            if opportunities:
+                for opportunity_item in opportunities:
+                    title = str(opportunity_item.get("title") or "").strip()
+                    if not title:
+                        continue
+                    _, created = self.upsert_opportunity(
+                        OpportunityRecord(
+                            opportunity_id=self.make_opportunity_id(
+                                organization.organization_id,
+                                title,
+                                source_url=str(opportunity_item.get("apply_url") or item.get("source_item_url") or ""),
+                            ),
+                            organization_id=organization.organization_id,
+                            title=title,
+                            opportunity_type=self._coerce_opportunity_type(
+                                opportunity_item.get("opportunity_type") or opportunity_type or OpportunityType.OTHER
+                            ),
+                            target_lists=str(item.get("target_lists") or target_lists),
+                            location=str(opportunity_item.get("location") or item.get("location") or item.get("city") or "").strip(),
+                            status=str(opportunity_item.get("status") or "Discovered"),
+                            source_kind=source_kind,
+                            source_url=str(opportunity_item.get("apply_url") or item.get("source_item_url") or item.get("source_page_url") or ""),
+                            compensation_hint=self._combine_compensation_fields(opportunity_item),
+                            notes=self._discovery_opportunity_notes(opportunity_item | {"source_page_url": item.get("source_page_url", "")}),
+                        )
+                    )
+                    if created:
+                        opportunities_added += 1
+            elif opportunity_title:
+                _, created = self.upsert_opportunity(
+                    OpportunityRecord(
+                        opportunity_id=self.make_opportunity_id(
+                            organization.organization_id,
+                            opportunity_title,
+                            source_url=str(item.get("jobs_url") or item.get("source_item_url") or ""),
+                        ),
+                        organization_id=organization.organization_id,
+                        title=opportunity_title,
+                        opportunity_type=opportunity_type or OpportunityType.OTHER,
+                        target_lists=str(item.get("target_lists") or target_lists),
+                        location=str(item.get("location") or item.get("city") or "").strip(),
+                        status="Discovered",
+                        source_kind=source_kind,
+                        source_url=str(item.get("jobs_url") or item.get("source_item_url") or item.get("source_page_url") or ""),
+                        notes=self._discovery_opportunity_notes(item),
+                    )
+                )
+                if created:
+                    opportunities_added += 1
+
+        return DiscoveryImportSummary(
+            source_id=source.source_id,
+            organizations_added=organizations_added,
+            opportunities_added=opportunities_added,
+            contacts_added=contacts_added,
+        )
+
     def _create_or_get(
         self,
         table_name: str,
@@ -479,3 +637,52 @@ class OutreachWorkbook:
         if flags:
             parts.append(f"flags={','.join(str(item) for item in flags)}")
         return " | ".join(parts)
+
+    def _discovery_notes(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        if item.get("batch"):
+            parts.append(f"batch={item['batch']}")
+        if item.get("founded_year"):
+            parts.append(f"founded_year={item['founded_year']}")
+        if item.get("team_size"):
+            parts.append(f"team_size={item['team_size']}")
+        if item.get("location"):
+            parts.append(f"location={item['location']}")
+        if item.get("jobs_count"):
+            parts.append(f"jobs_count={item['jobs_count']}")
+        tags = item.get("tags") or []
+        if tags:
+            parts.append(f"tags={','.join(str(tag) for tag in tags)}")
+        if item.get("description"):
+            parts.append(f"description={item['description']}")
+        return " | ".join(parts)
+
+    def _discovery_opportunity_notes(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        if item.get("jobs_url"):
+            parts.append(f"jobs_url={item['jobs_url']}")
+        if item.get("apply_url"):
+            parts.append(f"apply_url={item['apply_url']}")
+        if item.get("source_page_url"):
+            parts.append(f"source_page={item['source_page_url']}")
+        if item.get("equity_hint"):
+            parts.append(f"equity={item['equity_hint']}")
+        if item.get("experience_hint"):
+            parts.append(f"experience={item['experience_hint']}")
+        return " | ".join(parts)
+
+    def _combine_compensation_fields(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        if item.get("compensation_hint"):
+            parts.append(str(item["compensation_hint"]))
+        if item.get("equity_hint"):
+            parts.append(f"equity {item['equity_hint']}")
+        return " | ".join(parts)
+
+    def _coerce_opportunity_type(self, value: Any) -> OpportunityType:
+        if isinstance(value, OpportunityType):
+            return value
+        text = str(value)
+        if text.startswith("OpportunityType."):
+            text = text.split(".", maxsplit=1)[1].lower()
+        return OpportunityType(text)

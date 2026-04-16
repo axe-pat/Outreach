@@ -15,6 +15,47 @@ from outreach.config import OutreachSettings
 from outreach.models import RawSearchCandidate
 
 
+def normalize_typeahead_text(value: str) -> str:
+    return " ".join((value or "").lower().split()).strip()
+
+
+def score_typeahead_option(trigger_text: str, requested_value: str, option_text: str) -> int:
+    trigger = normalize_typeahead_text(trigger_text)
+    requested = normalize_typeahead_text(requested_value)
+    option = normalize_typeahead_text(option_text)
+    if not requested or not option:
+        return -10_000
+
+    score = 0
+    if option == requested:
+        score += 200
+    if option.startswith(f"{requested} "):
+        score += 120
+    if option.startswith(requested):
+        score += 90
+    if f" {requested} " in f" {option} ":
+        score += 70
+
+    requested_tokens = [token for token in re.split(r"[^a-z0-9]+", requested) if token]
+    option_tokens = {token for token in re.split(r"[^a-z0-9]+", option) if token}
+    overlap = sum(1 for token in requested_tokens if token in option_tokens)
+    score += overlap * 15
+
+    if trigger == "add a company":
+        if any(word in option for word in {"university", "college", "school"}):
+            score -= 120
+        if any(word in option for word in {"inc", "labs", "health", "ai", "technologies", "tech"}):
+            score += 10
+    elif trigger == "add a school":
+        if any(word in option for word in {"university", "college", "school"}):
+            score += 40
+
+    if len(requested) <= 8 and option != requested and option.startswith("santa "):
+        score -= 80
+
+    return score
+
+
 @dataclass
 class LinkedInCheckResult:
     ok: bool
@@ -91,7 +132,7 @@ class LinkedInScraper:
             browser = playwright.chromium.connect_over_cdp(endpoint)
             try:
                 context = browser.contexts[0]
-                page = context.pages[0] if context.pages else context.new_page()
+                page = context.new_page()
                 page.set_default_timeout(15000)
                 base_query = quote_plus(search_query) if search_query else ""
                 page.goto(
@@ -697,9 +738,30 @@ class LinkedInScraper:
         active_input.fill(value)
         self._human_pause(page)
 
-        option = page.get_by_role("option").first
-        if option.count() > 0:
-            option.click()
+        options = page.get_by_role("option")
+        best_option = None
+        best_score = -10_000
+        try:
+            option_count = min(options.count(), 12)
+        except Exception:
+            option_count = 0
+        for index in range(option_count):
+            option = options.nth(index)
+            try:
+                text = option.inner_text().strip()
+            except Exception:
+                continue
+            score = score_typeahead_option(trigger_text, value, text)
+            if score > best_score:
+                best_score = score
+                best_option = option
+
+        if best_option is not None and best_score > 0:
+            best_option.click()
+        elif trigger_text == "Add a company":
+            raise PlaywrightTimeoutError(
+                f"Could not confidently match a company suggestion for '{value}'."
+            )
         else:
             page.keyboard.press("Enter")
         self._human_pause(page)
@@ -823,39 +885,53 @@ class LinkedInScraper:
 
     def _click_filter_control(self, page: Page, text: str) -> None:
         page.wait_for_load_state("domcontentloaded")
-        candidates = [
-            page.get_by_role("button", name=text),
-            page.locator("button", has_text=text),
-            page.locator(f"text={text}").locator("xpath=ancestor::button[1]"),
-            page.get_by_text(text, exact=True),
-        ]
-        for locator in candidates:
-            try:
-                if locator.count() == 0:
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(750)
+        button_pattern = re.compile(rf"^\s*{re.escape(text)}\s*$", re.IGNORECASE)
+        for _ in range(4):
+            candidates = [
+                page.get_by_role("button", name=button_pattern),
+                page.locator("button").filter(has_text=button_pattern),
+                page.locator(f"text={text}").locator("xpath=ancestor::button[1]"),
+                page.get_by_text(text, exact=True),
+                page.locator("[role='button']").filter(has_text=button_pattern),
+            ]
+            for locator in candidates:
+                try:
+                    if locator.count() == 0:
+                        continue
+                    target = locator.first
+                    target.scroll_into_view_if_needed(timeout=2000)
+                    try:
+                        target.click(timeout=2500)
+                    except Exception:
+                        target.click(timeout=2500, force=True)
+                    return
+                except Exception:
                     continue
-                locator.first.click(timeout=5000)
-                return
+            try:
+                clicked = page.evaluate(
+                    """
+                    (targetText) => {
+                      const normalizedTarget = (targetText || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                      const elements = Array.from(document.querySelectorAll('button, [role="button"], span, div, a'));
+                      for (const element of elements) {
+                        const text = (element.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                        const aria = (element.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                        const title = (element.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                        if (![text, aria, title].includes(normalizedTarget)) continue;
+                        const clickable = element.closest('button, [role="button"], a') || element;
+                        clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                        return true;
+                      }
+                      return false;
+                    }
+                    """,
+                    text,
+                )
+                if clicked:
+                    return
             except Exception:
-                continue
-        try:
-            clicked = page.evaluate(
-                """
-                (targetText) => {
-                  const elements = Array.from(document.querySelectorAll('button, span, div, a'));
-                  for (const element of elements) {
-                    const text = (element.textContent || '').replace(/\\s+/g, ' ').trim();
-                    if (text !== targetText) continue;
-                    const clickable = element.closest('button, a') || element;
-                    clickable.click();
-                    return true;
-                  }
-                  return false;
-                }
-                """,
-                text,
-            )
-            if clicked:
-                return
-        except Exception:
-            pass
+                pass
+            page.wait_for_timeout(1000)
         raise PlaywrightTimeoutError(f"Could not click filter control: {text}")

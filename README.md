@@ -32,6 +32,7 @@ The app is structured so the LinkedIn layer is isolated. If selectors break or w
 src/outreach/
   cli.py
   config.py
+  discovery/
   models.py
   tracking.py
   scoring.py
@@ -41,8 +42,15 @@ src/outreach/
     notion.py
 docs/
   architecture.md
+  system_overview.md
 tests/
 ```
+
+## Architecture Docs
+
+- `docs/system_overview.md`: current-state architecture with diagrams
+- `docs/architecture.md`: earlier design notes and original component split
+- `docs/discovery_strategy.md`: how the multi-source discovery model maps into the workbook
 
 ## Getting Started
 
@@ -75,6 +83,14 @@ instead of creating one sheet per avenue.
 
 - `python main.py init-workbook`
 - `python main.py workbook-summary`
+- `python main.py list-discovery-sources`
+- `python main.py discover-source --source-id yc_los_angeles --limit 25`
+- `python main.py discover-source --source-id yc_los_angeles --require-jobs-url --max-team-size 50 --min-batch-year 2024`
+- `python main.py discover-source --source-id yc_sf_bay_hiring --enrich-details --max-team-size 50 --min-batch-year 2025`
+- `python main.py discover-source --source-id builtin_la_companies --require-jobs-url --remote-only --include-tag robotics --max-team-size 200`
+- `python main.py build-linkedin-company-queue --limit 20 --include-target-list yc --include-target-list built_in --require-hiring-signal`
+- `python main.py dispatch-linkedin-company-queue --limit 5 --include-target-list yc --include-target-list built_in --require-hiring-signal`
+- `python main.py build-target-action-queue --limit 25 --include-target-list yc --include-target-list built_in`
 - `python main.py add-organization --name "Y Combinator" --organization-type accelerator`
 - `python main.py add-opportunity --organization "Figma" --title "Summer PM Intern"`
 - `python main.py add-contact --organization "Figma" --full-name "Avery Product"`
@@ -87,6 +103,7 @@ This repo now covers:
 
 - LinkedIn discovery, scoring, note generation, and invite sending workflows
 - a reusable outreach workbook for multi-source discovery and contact tracking
+- target-action classification for `apply_now`, `outreach_now`, and `skip`
 
 The next layer is source-specific discovery for startup directories, hacker houses,
 university labs, and job feeds.

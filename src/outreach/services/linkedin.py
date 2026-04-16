@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import subprocess
 from pathlib import Path
 import random
 import re
@@ -180,6 +181,7 @@ class LinkedInScraper:
                 browser.close()
 
     def prepare_browser(self, headless: bool = False) -> None:
+        self.settings.validate_explicit_linkedin_profile()
         user_data_dir = self.settings.resolved_linkedin_user_data_dir
         user_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,6 +204,7 @@ class LinkedInScraper:
         screenshots: list[str] = []
 
         try:
+            self._validate_cdp_owner()
             with sync_playwright() as playwright:
                 steps.append(
                     f"Connecting to running Chrome via CDP at http://127.0.0.1:{self.settings.linkedin_debug_port}"
@@ -349,10 +352,49 @@ class LinkedInScraper:
                 browser.close()
 
     def _validate_user_data_dir(self, path: Path) -> None:
+        self.settings.validate_explicit_linkedin_profile()
         if not path.exists():
             raise FileNotFoundError(f"Chrome user data dir does not exist: {path}")
         if not path.is_dir():
             raise NotADirectoryError(f"Chrome user data dir is not a directory: {path}")
+
+    def _validate_cdp_owner(self) -> None:
+        debug_port = self.settings.linkedin_debug_port
+        try:
+            result = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{debug_port}", "-sTCP:LISTEN"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Nothing is listening on 127.0.0.1:{debug_port}. "
+                "Launch your signed-in Chrome with the configured remote debugging port first."
+            ) from exc
+
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        if len(lines) < 2:
+            raise RuntimeError(
+                f"Nothing is listening on 127.0.0.1:{debug_port}. "
+                "Launch your signed-in Chrome with the configured remote debugging port first."
+            )
+
+        parts = lines[1].split()
+        if len(parts) < 2:
+            raise RuntimeError(f"Could not parse CDP owner for port {debug_port}.")
+        pid = parts[1]
+        command = subprocess.run(
+            ["ps", "-p", pid, "-o", "command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        forbidden_path = str(self.settings.fallback_linkedin_user_data_dir)
+        if forbidden_path and forbidden_path in command:
+            raise RuntimeError(
+                f"Refusing to use fallback unsigned Chrome profile on port {debug_port}: {forbidden_path}"
+            )
 
     def _goto(self, page: Page, url: str, steps: list[str], label: str) -> None:
         steps.append(f"Navigating to {label}: {url}")

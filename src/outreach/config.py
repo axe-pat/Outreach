@@ -136,6 +136,10 @@ class OutreachSettings(BaseSettings):
         return Path("artifacts")
 
     @property
+    def fallback_linkedin_user_data_dir(self) -> Path:
+        return Path.cwd() / "playwright" / "chrome-data"
+
+    @property
     def resolved_linkedin_user_data_dir(self) -> Path:
         path = self.linkedin_chrome_user_data_dir
         return path if path.is_absolute() else Path.cwd() / path
@@ -144,3 +148,13 @@ class OutreachSettings(BaseSettings):
     def resolved_tracking_workspace_dir(self) -> Path:
         path = self.tracking_workspace_dir
         return path if path.is_absolute() else Path.cwd() / path
+
+    def using_fallback_linkedin_profile(self) -> bool:
+        return self.resolved_linkedin_user_data_dir == self.fallback_linkedin_user_data_dir
+
+    def validate_explicit_linkedin_profile(self) -> None:
+        if self.using_fallback_linkedin_profile():
+            raise ValueError(
+                "LINKEDIN_CHROME_USER_DATA_DIR must point to an explicitly approved signed-in Chrome profile. "
+                f"Refusing to use fallback profile: {self.fallback_linkedin_user_data_dir}"
+            )

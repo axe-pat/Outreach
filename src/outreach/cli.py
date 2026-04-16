@@ -1085,6 +1085,7 @@ def doctor() -> None:
     typer.echo(f"- Chrome user data dir: {settings.resolved_linkedin_user_data_dir}")
     typer.echo(f"- Chrome profile name: {settings.linkedin_profile_name}")
     typer.echo(f"- Chrome debug port: {settings.linkedin_debug_port}")
+    typer.echo(f"- Using fallback Chrome profile: {settings.using_fallback_linkedin_profile()}")
     typer.echo(f"- Anthropic key configured: {bool(settings.anthropic_api_key)}")
     typer.echo(f"- Notion token configured: {bool(settings.notion_api_token)}")
     typer.echo(f"- Notion database configured: {bool(settings.notion_database_id)}")
@@ -1093,6 +1094,7 @@ def doctor() -> None:
 @app.command("prepare-browser-manual")
 def prepare_browser_manual() -> None:
     settings = OutreachSettings()
+    settings.validate_explicit_linkedin_profile()
     user_data_dir = settings.resolved_linkedin_user_data_dir
     user_data_dir.mkdir(parents=True, exist_ok=True)
     typer.echo("Use this Chrome window to log into LinkedIn normally, including Google if needed.")
@@ -1108,6 +1110,7 @@ def prepare_browser(
     ] = False,
 ) -> None:
     settings = OutreachSettings()
+    settings.validate_explicit_linkedin_profile()
     scraper = LinkedInScraper(settings)
     typer.echo("Opening dedicated automation browser for LinkedIn login.")
     typer.echo(f"User data dir: {settings.resolved_linkedin_user_data_dir}")

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import random
 import re
+import time
 from urllib.parse import quote_plus, urljoin
 
 from playwright.sync_api import Error as PlaywrightError
@@ -98,23 +99,31 @@ class LinkedInScraper:
         return self.extract_people_live(search_query=company, limit=limit)
 
     def extract_people_live(self, search_query: str, limit: int = 10) -> list[RawSearchCandidate]:
-        endpoint = f"http://127.0.0.1:{self.settings.linkedin_debug_port}"
         with sync_playwright() as playwright:
-            browser = playwright.chromium.connect_over_cdp(endpoint)
+            browser = self._connect_over_cdp(playwright)
             try:
                 context = browser.contexts[0]
-                page = context.pages[0] if context.pages else context.new_page()
+                preflight = self._session_preflight(context)
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before people extraction: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                page = context.new_page()
                 page.set_default_timeout(15000)
-
-                search_url = (
-                    "https://www.linkedin.com/search/results/people/"
-                    f"?keywords={quote_plus(search_query)}"
-                    "&origin=GLOBAL_SEARCH_HEADER"
-                )
-                page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-                self._human_pause(page)
-                self._scroll_results(page)
-                return self._extract_visible_people(page, limit=limit)
+                try:
+                    search_url = (
+                        "https://www.linkedin.com/search/results/people/"
+                        f"?keywords={quote_plus(search_query)}"
+                        "&origin=GLOBAL_SEARCH_HEADER"
+                    )
+                    if not self._safe_goto(page, search_url):
+                        raise RuntimeError(f"Could not load LinkedIn people search: {search_url}")
+                    self._human_pause(page)
+                    self._scroll_results(page)
+                    return self._extract_visible_people(page, limit=limit)
+                finally:
+                    self._close_page_safely(page)
             finally:
                 browser.close()
 
@@ -127,37 +136,46 @@ class LinkedInScraper:
         connection_degree: str | None = None,
         use_us_location: bool = True,
     ) -> FilterRunResult:
-        endpoint = f"http://127.0.0.1:{self.settings.linkedin_debug_port}"
         with sync_playwright() as playwright:
-            browser = playwright.chromium.connect_over_cdp(endpoint)
+            browser = self._connect_over_cdp(playwright)
             try:
                 context = browser.contexts[0]
+                preflight = self._session_preflight(context)
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before filtered people search: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
                 page = context.new_page()
                 page.set_default_timeout(15000)
-                base_query = quote_plus(search_query) if search_query else ""
-                page.goto(
-                    f"https://www.linkedin.com/search/results/people/?keywords={base_query}&origin=GLOBAL_SEARCH_HEADER",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
-                self._human_pause(page)
-                self._apply_people_filters(
-                    page=page,
-                    company=company,
-                    school=school,
-                    connection_degree=connection_degree,
-                    use_us_location=use_us_location,
-                )
-                self._scroll_results(page)
-                candidates = self._extract_visible_people(page, limit=limit)
-                filter_text = self._read_visible_filter_text(page)
-                screenshot = self._save_screenshot(page, "filtered-results")
-                return FilterRunResult(
-                    candidates=candidates,
-                    final_url=page.url,
-                    visible_filter_text=filter_text,
-                    screenshot_path=screenshot,
-                )
+                try:
+                    base_query = quote_plus(search_query) if search_query else ""
+                    search_url = (
+                        "https://www.linkedin.com/search/results/people/"
+                        f"?keywords={base_query}&origin=GLOBAL_SEARCH_HEADER"
+                    )
+                    if not self._safe_goto(page, search_url):
+                        raise RuntimeError(f"Could not load filtered LinkedIn people search: {search_url}")
+                    self._human_pause(page)
+                    self._apply_people_filters(
+                        page=page,
+                        company=company,
+                        school=school,
+                        connection_degree=connection_degree,
+                        use_us_location=use_us_location,
+                    )
+                    self._scroll_results(page)
+                    candidates = self._extract_visible_people(page, limit=limit)
+                    filter_text = self._read_visible_filter_text(page)
+                    screenshot = self._save_screenshot(page, "filtered-results")
+                    return FilterRunResult(
+                        candidates=candidates,
+                        final_url=page.url,
+                        visible_filter_text=filter_text,
+                        screenshot_path=screenshot,
+                    )
+                finally:
+                    self._close_page_safely(page)
             finally:
                 browser.close()
 
@@ -182,14 +200,16 @@ class LinkedInScraper:
     def check_session_via_cdp(self) -> LinkedInCheckResult:
         steps: list[str] = []
         screenshots: list[str] = []
-        endpoint = f"http://127.0.0.1:{self.settings.linkedin_debug_port}"
 
         try:
             with sync_playwright() as playwright:
-                steps.append(f"Connecting to running Chrome via CDP at {endpoint}")
-                browser = playwright.chromium.connect_over_cdp(endpoint)
+                steps.append(
+                    f"Connecting to running Chrome via CDP at http://127.0.0.1:{self.settings.linkedin_debug_port}"
+                )
+                browser = self._connect_over_cdp(playwright)
                 try:
                     context = browser.contexts[0]
+                    preflight = self._session_preflight(context)
                     page = context.pages[0] if context.pages else context.new_page()
                     page.set_default_timeout(15000)
                     steps.append(f"Connected to page at {page.url}")
@@ -198,14 +218,19 @@ class LinkedInScraper:
                     screenshots.append(self._save_screenshot(page, "cdp-linkedin-feed"))
                     logged_in = self._looks_logged_in(page)
                     steps.append(f"Login heuristic result: {logged_in}")
+                    steps.append(
+                        "Preflight: "
+                        f"ok={preflight['ok']} authwall_or_login={preflight['authwall_or_login']} "
+                        f"has_li_at_cookie={preflight['has_li_at_cookie']}"
+                    )
                     return LinkedInCheckResult(
-                        ok=logged_in,
+                        ok=logged_in and preflight["ok"],
                         current_url=page.url,
                         title=page.title(),
                         logged_in=logged_in,
                         details=(
                             "LinkedIn session looks active in running Chrome."
-                            if logged_in
+                            if logged_in and preflight["ok"]
                             else "Connected to Chrome, but LinkedIn does not appear logged in."
                         ),
                         steps=steps,
@@ -301,17 +326,25 @@ class LinkedInScraper:
         candidates: list[dict],
         execute: bool = False,
     ) -> list[InviteSendResult]:
-        endpoint = f"http://127.0.0.1:{self.settings.linkedin_debug_port}"
         with sync_playwright() as playwright:
-            browser = playwright.chromium.connect_over_cdp(endpoint)
+            browser = self._connect_over_cdp(playwright)
             try:
                 context = browser.contexts[0]
-                page = context.pages[0] if context.pages else context.new_page()
+                preflight = self._session_preflight(context)
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before invite send: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                page = context.new_page()
                 page.set_default_timeout(15000)
-                results: list[InviteSendResult] = []
-                for candidate in candidates:
-                    results.append(self._send_single_invite(page, candidate, execute=execute))
-                return results
+                try:
+                    results: list[InviteSendResult] = []
+                    for candidate in candidates:
+                        results.append(self._send_single_invite(page, candidate, execute=execute))
+                    return results
+                finally:
+                    self._close_page_safely(page)
             finally:
                 browser.close()
 
@@ -323,7 +356,8 @@ class LinkedInScraper:
 
     def _goto(self, page: Page, url: str, steps: list[str], label: str) -> None:
         steps.append(f"Navigating to {label}: {url}")
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        if not self._safe_goto(page, url, timeout_ms=20000):
+            raise PlaywrightTimeoutError(f"Could not load {label}: {url}")
         page.wait_for_timeout(2000)
         steps.append(f"Arrived at {label}: {page.url}")
 
@@ -419,16 +453,108 @@ class LinkedInScraper:
             )
 
     def _navigate_profile(self, page: Page, linkedin_url: str) -> bool:
-        for wait_until, timeout in [("domcontentloaded", 30000), ("commit", 15000)]:
+        return self._safe_goto(page, linkedin_url)
+
+    def _connect_over_cdp(self, playwright):
+        endpoint = f"http://127.0.0.1:{self.settings.linkedin_debug_port}"
+        last_error: Exception | None = None
+        for attempt in range(2):
             try:
-                page.goto(linkedin_url, wait_until=wait_until, timeout=timeout)
+                browser = playwright.chromium.connect_over_cdp(endpoint, timeout=30000)
+                if browser.contexts:
+                    return browser
+                last_error = RuntimeError("Connected to Chrome, but no browser contexts were available.")
+                browser.close()
+            except PlaywrightError as exc:
+                last_error = exc
+            if attempt == 0:
+                time.sleep(1.0)
+        detail = f" Underlying error: {last_error}" if last_error else ""
+        raise RuntimeError(
+            f"Could not attach to Chrome debug session at {endpoint}. "
+            "Launch your signed-in Chrome with the configured remote debugging port and keep it open."
+            f"{detail}"
+        )
+
+    def _session_preflight(self, context, target_url: str = "https://www.linkedin.com/feed/") -> dict:
+        page_count_before = len(context.pages)
+        page = context.new_page()
+        page.set_default_timeout(15000)
+        try:
+            self._safe_goto(page, target_url)
+            cookies = context.cookies(["https://www.linkedin.com"])
+            has_li_at = any(cookie.get("name") == "li_at" for cookie in cookies)
+            logged_in = self._looks_logged_in(page)
+            authwall = self._is_authwall_or_login(page)
+            return {
+                "ok": logged_in and not authwall,
+                "current_url": page.url,
+                "title": page.title(),
+                "logged_in_heuristic": logged_in,
+                "authwall_or_login": authwall,
+                "has_li_at_cookie": has_li_at,
+                "cookie_names": sorted(cookie.get("name", "") for cookie in cookies),
+                "body_preview": self._body_preview(page),
+                "context_pages_before": page_count_before,
+            }
+        finally:
+            self._close_page_safely(page)
+
+    def _safe_goto(self, page: Page, url: str, timeout_ms: int = 30000) -> bool:
+        def _looks_loaded() -> bool:
+            try:
+                current_url = page.url.lower()
+                if "linkedin.com/authwall" in current_url or "linkedin.com/login" in current_url:
+                    return False
+                page.wait_for_timeout(1200)
                 return True
-            except PlaywrightTimeoutError:
-                if linkedin_url.rstrip("/") in page.url.rstrip("/"):
+            except PlaywrightError:
+                return False
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            return _looks_loaded()
+        except PlaywrightTimeoutError:
+            try:
+                page.goto(url, wait_until="commit", timeout=min(timeout_ms, 12000))
+                if url.rstrip("/") in page.url.rstrip("/"):
                     return True
-            except Exception:
-                continue
-        return False
+                return _looks_loaded()
+            except PlaywrightError:
+                return False
+        except PlaywrightError:
+            return False
+
+    def _body_preview(self, page: Page) -> str:
+        try:
+            text = page.locator("body").inner_text(timeout=2000)
+        except PlaywrightError:
+            return ""
+        return " ".join(text.split())[:400]
+
+    def _is_authwall_or_login(self, page: Page) -> bool:
+        current_url = page.url.lower()
+        if "linkedin.com/authwall" in current_url or "linkedin.com/login" in current_url:
+            return True
+        preview = self._body_preview(page).lower()
+        return any(
+            token in preview
+            for token in (
+                "join linkedin",
+                "sign in",
+                "agree & join",
+                "new to linkedin",
+                "already on linkedin?",
+            )
+        )
+
+    def _close_page_safely(self, page: Page | None) -> None:
+        if page is None:
+            return
+        try:
+            page.close()
+        except PlaywrightError:
+            pass
 
     def _scroll_results(self, page: Page) -> None:
         # Nudge LinkedIn to hydrate the first batch of people cards.

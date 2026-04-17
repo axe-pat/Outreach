@@ -8,7 +8,7 @@ from typing import Iterable
 
 from outreach.tracking import OpportunityType, OrganizationType, SourceKind
 
-DEFAULT_INCLUDE_STATUSES = ("queued", "generated")
+DEFAULT_INCLUDE_STATUSES = ("queued", "generated", "applied")
 DEFAULT_TARGET_LISTS = "jobs;resume_generator;pre_apply"
 DEFAULT_COMPANY_OVERRIDES_FILENAME = "company_overrides.csv"
 
@@ -253,6 +253,7 @@ def opportunity_status_from_resume_status(status: str) -> str:
     mapping = {
         "queued": "outreach_ready",
         "generated": "assets_ready",
+        "applied": "applied_catchup",
     }
     return mapping.get(normalized, "imported")
 
@@ -261,10 +262,15 @@ def organization_status_from_resume_status(status: str) -> str:
     normalized = normalize_resume_status(status)
     if normalized in {"queued", "generated"}:
         return "Pre-apply outreach"
+    if normalized == "applied":
+        return "Applied outreach catch-up"
     return "Imported"
 
 
 def target_lists_from_resume_status(status: str) -> str:
+    normalized = normalize_resume_status(status)
+    if normalized == "applied":
+        return "jobs;resume_generator;post_apply_catchup"
     return DEFAULT_TARGET_LISTS
 
 
@@ -428,6 +434,8 @@ def compute_outreach_priority(
     if job.normalized_status == "generated":
         reasons.append("assets_ready")
         score += 0.4
+    if job.normalized_status == "applied":
+        reasons.append("applied_catchup")
     freshness_bonus = freshness_bonus_for_job(job)
     if freshness_bonus:
         reasons.append("fresh")

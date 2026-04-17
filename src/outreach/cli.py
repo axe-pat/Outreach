@@ -1066,6 +1066,119 @@ def execute_linkedin_company_run(
     typer.echo(f"Artifact: {artifact}")
     return artifact
 
+
+def persist_invite_send_results(
+    *,
+    workbook: OutreachWorkbook,
+    company: str,
+    source_artifact_path: Path,
+    processed_candidates: list[dict],
+    send_results: list,
+    send_artifact_path: Path,
+) -> tuple[int, int]:
+    organization, _ = workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id=workbook.make_organization_id(company),
+            name=company,
+            organization_type=OrganizationType.COMPANY,
+            target_lists="referrals;linkedin",
+            status="Outreach in progress",
+            source_kind=SourceKind.LINKEDIN,
+            source_url="https://www.linkedin.com/search/results/people/",
+            notes="LinkedIn outreach send results tracked from invite-send-batch artifact.",
+        )
+    )
+
+    contacts_added = 0
+    touchpoints_added = 0
+    for candidate, result in zip(processed_candidates, send_results, strict=False):
+        full_name = str(candidate.get("name") or result.name or "").strip()
+        if not full_name:
+            continue
+
+        linkedin_url = str(candidate.get("linkedin_url") or result.linkedin_url or "").strip()
+        contact, created = workbook.upsert_contact(
+            ContactRecord(
+                contact_id=workbook.make_contact_id(
+                    organization.organization_id,
+                    full_name,
+                    linkedin_url=linkedin_url,
+                ),
+                organization_id=organization.organization_id,
+                full_name=full_name,
+                title=str(candidate.get("title") or "").strip(),
+                contact_type=str(candidate.get("role_bucket") or "").strip(),
+                target_lists="referrals;linkedin",
+                preferred_channel=OutreachChannel.LINKEDIN,
+                status=contact_status_from_invite_result(result.status),
+                linkedin_url=linkedin_url,
+                source_kind=SourceKind.LINKEDIN,
+                source_url="https://www.linkedin.com/search/results/people/",
+                last_contacted_at=utc_now_iso() if result.status == "sent" else "",
+                notes=f"Imported from {source_artifact_path.name}",
+            )
+        )
+        if created:
+            contacts_added += 1
+
+        note_text = str(candidate.get("note") or result.note or "").strip()
+        if not note_text:
+            continue
+
+        touchpoint, created = workbook.append_touchpoint(
+            TouchpointRecord(
+                touchpoint_id=workbook.make_touchpoint_id(
+                    organization.organization_id,
+                    contact.contact_id,
+                    OutreachChannel.LINKEDIN.value,
+                    note_text,
+                    source_artifact=str(send_artifact_path),
+                ),
+                organization_id=organization.organization_id,
+                contact_id=contact.contact_id,
+                channel=OutreachChannel.LINKEDIN,
+                status=touchpoint_status_from_invite_result(result.status),
+                message_kind="linkedin_invite",
+                message_text=note_text,
+                sent_at=utc_now_iso() if result.status == "sent" else "",
+                source_artifact=str(send_artifact_path),
+                notes=(
+                    f"invite_result={result.status} | detail={result.detail} | "
+                    f"source_artifact={source_artifact_path.name}"
+                ),
+            )
+        )
+        if created:
+            touchpoints_added += 1
+
+    return contacts_added, touchpoints_added
+
+
+def contact_status_from_invite_result(status: str) -> str:
+    mapping = {
+        "sent": "Invited",
+        "dry_run_ready": "Invite ready",
+        "already_connected": "Connected",
+        "unavailable": "No connect path",
+        "navigation_error": "Navigation error",
+        "send_error": "Invite error",
+        "skipped": "Skipped",
+    }
+    return mapping.get(status, "Invite processed")
+
+
+def touchpoint_status_from_invite_result(status: str) -> str:
+    mapping = {
+        "sent": "Sent",
+        "dry_run_ready": "Prepared",
+        "already_connected": "Already connected",
+        "unavailable": "Unavailable",
+        "navigation_error": "Navigation error",
+        "send_error": "Error",
+        "skipped": "Skipped",
+    }
+    return mapping.get(status, "Processed")
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -2242,8 +2355,20 @@ def send_invites(
     status_counts: dict[str, int] = {}
     for result in results:
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
+
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    contacts_added, touchpoints_added = persist_invite_send_results(
+        workbook=workbook,
+        company=company,
+        source_artifact_path=artifact_path,
+        processed_candidates=batch,
+        send_results=results,
+        send_artifact_path=artifact,
+    )
     typer.echo(f"Status summary: {status_counts}")
     typer.echo(f"Artifact: {artifact}")
+    typer.echo(f"Tracked contacts_added: {contacts_added}")
+    typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
 
 
 if __name__ == "__main__":

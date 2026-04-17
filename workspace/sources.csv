@@ -5,3 +5,4 @@ src-linkedin-mount,LinkedIn people search for Mount,linkedin,https://www.linkedi
 builtin_sf_companies,Built In SF companies,startup_directory,https://www.builtinsf.com/companies,builtin_companies,outreach-engine,2026-04-09T16:46:43+00:00,target_lists=built_in;sf;companies
 yc_los_angeles,YC Los Angeles startups,yc_directory,https://www.ycombinator.com/companies/location/los-angeles,yc_company_directory,outreach-engine,2026-04-09T16:47:19+00:00,target_lists=yc;startup;la
 src-linkedin-clara,LinkedIn people search for Clara,linkedin,https://www.linkedin.com/search/results/people/,artifact_import,outreach-engine,2026-04-09T21:42:42+00:00,Imported from 20260409-214242-dry-run-pipeline.json
+src-resume-generator-jobs-xlsx,ResumeGenerator v1 jobs.xlsx import,other,../ResumeGenerator v1/discovery/jobs.xlsx,xlsx_import,outreach-engine,2026-04-16T22:35:44+00:00,sheet=Jobs | min_score=7.0 | max_age_days=10

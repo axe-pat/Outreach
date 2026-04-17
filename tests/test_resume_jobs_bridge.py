@@ -14,7 +14,7 @@ from outreach.resume_jobs_bridge import (
 from outreach.tracking import SourceKind
 
 
-def test_select_resume_jobs_filters_for_fresh_high_score_preapply_rows(tmp_path) -> None:
+def test_select_resume_jobs_includes_fresh_high_score_applied_rows_for_catchup(tmp_path) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Jobs"
@@ -58,10 +58,10 @@ def test_select_resume_jobs_filters_for_fresh_high_score_preapply_rows(tmp_path)
         today=date(2026, 4, 15),
     )
 
-    assert [job.company for job in selection.jobs] == ["OpenAI"]
+    assert [job.company for job in selection.jobs] == ["Figma", "OpenAI"]
     assert selection.skipped_age == 1
     assert selection.skipped_score == 1
-    assert selection.skipped_status == 1
+    assert selection.skipped_status == 0
     assert selection.duplicates_removed == 0
 
 
@@ -69,6 +69,7 @@ def test_resume_job_source_and_status_mapping() -> None:
     assert map_resume_source_kind("linkedin_live_jobs_v1") == SourceKind.LINKEDIN_JOB
     assert map_resume_source_kind("indeed") == SourceKind.JOB_BOARD
     assert opportunity_status_from_resume_status("generated") == "assets_ready"
+    assert opportunity_status_from_resume_status("applied") == "applied_catchup"
 
 
 def test_select_resume_jobs_prefers_fresher_duplicate_by_url_hash(tmp_path) -> None:

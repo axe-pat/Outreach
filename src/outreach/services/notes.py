@@ -170,7 +170,13 @@ class NoteGenerator:
         else:
             strengths.append("Clear personalization signal")
 
-        if not re.search(r"\b(connect|learn|stay in touch)\b", lower):
+        ask_is_clear = bool(
+            re.search(
+                r"\b(connect|learn|stay in touch|perspective|guidance|thoughts|hear about|hear more)\b",
+                lower,
+            )
+        )
+        if not ask_is_clear:
             flags.append("Ask is not clear")
             score -= 12
         else:
@@ -195,7 +201,8 @@ class NoteGenerator:
             strengths.append("Uses USC-native close naturally")
 
         score = max(0, min(100, score))
-        verdict = "send" if score >= 85 else "review" if score >= 70 else "revise"
+        hard_fail = generated.length > NOTE_CHAR_LIMIT or not ask_is_clear or not note.strip()
+        verdict = "blocked" if hard_fail else "send"
         return NoteQualityCheck(score=score, verdict=verdict, flags=flags, strengths=strengths)
 
     def _polish_one(

@@ -1040,11 +1040,12 @@ def execute_linkedin_company_run(
         reverse=True,
     )
     scored_candidates = scored_candidates[: settings.search.final_company_limit]
-    scored_candidates = note_generator.generate_batch(
-        scored_candidates,
+    noted_candidates = note_generator.generate_batch(
+        scored_candidates[: settings.search.note_generation_limit],
         company=company,
         company_mode=company_mode,
     )
+    scored_candidates = [*noted_candidates, *scored_candidates[settings.search.note_generation_limit :]]
 
     artifact = write_artifact(
         settings.artifacts_dir,
@@ -1056,13 +1057,17 @@ def execute_linkedin_company_run(
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
             "count": len(scored_candidates),
+            "notes_generated_count": len(noted_candidates),
             "results": scored_candidates,
         },
     )
     typer.echo(f"Starting outreach pipeline for {company}")
     typer.echo(f"Dry run: {dry_run}")
     typer.echo(f"Timezone: {settings.timezone}")
-    typer.echo(f"Captured and scored {len(scored_candidates)} candidates.")
+    typer.echo(
+        f"Captured and scored {len(scored_candidates)} candidates; "
+        f"generated notes for top {len(noted_candidates)}."
+    )
     typer.echo(f"Artifact: {artifact}")
     return artifact
 
@@ -1429,8 +1434,7 @@ def generate_notes(
     annotated = note_generator.generate_batch(candidates, company=company, company_mode=company_mode)
     summary = {
         "send": sum(1 for item in annotated if item["note_qc"]["verdict"] == "send"),
-        "review": sum(1 for item in annotated if item["note_qc"]["verdict"] == "review"),
-        "revise": sum(1 for item in annotated if item["note_qc"]["verdict"] == "revise"),
+        "blocked": sum(1 for item in annotated if item["note_qc"]["verdict"] == "blocked"),
     }
     polished_summary: dict[str, int] | None = None
 
@@ -1449,8 +1453,7 @@ def generate_notes(
         polished_candidates = [item for item in annotated if "polished_note_qc" in item]
         polished_summary = {
             "send": sum(1 for item in polished_candidates if item["polished_note_qc"]["verdict"] == "send"),
-            "review": sum(1 for item in polished_candidates if item["polished_note_qc"]["verdict"] == "review"),
-            "revise": sum(1 for item in polished_candidates if item["polished_note_qc"]["verdict"] == "revise"),
+            "blocked": sum(1 for item in polished_candidates if item["polished_note_qc"]["verdict"] == "blocked"),
         }
 
     artifact = write_artifact(
@@ -2292,7 +2295,7 @@ def import_linkedin_artifact(
 @app.command("send-invites")
 def send_invites(
     artifact_path: Annotated[Path, typer.Option(help="Path to a notes-batch artifact")],
-    limit: Annotated[int, typer.Option(help="Maximum number of candidates to process")] = 5,
+    limit: Annotated[int, typer.Option(help="Maximum number of candidates to process")] = 10,
     start_at: Annotated[int, typer.Option(help="Start offset into the eligible queue")] = 0,
     verdict: Annotated[str, typer.Option(help="Only include notes with this QC verdict")] = "send",
     execute: Annotated[

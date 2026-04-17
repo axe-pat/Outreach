@@ -80,7 +80,7 @@ def test_quality_check_marks_good_usc_note_sendable() -> None:
     note = generator.generate(candidate, company="Snowflake")
     qc = generator.quality_check(candidate, note)
 
-    assert qc.verdict in {"send", "review"}
+    assert qc.verdict == "send"
     assert qc.score >= 70
 
 
@@ -121,7 +121,7 @@ def test_batch_generation_adds_qc_payload() -> None:
     assert len(annotated) == 1
     assert "note" in annotated[0]
     assert "note_qc" in annotated[0]
-    assert annotated[0]["note_qc"]["verdict"] in {"send", "review", "revise"}
+    assert annotated[0]["note_qc"]["verdict"] in {"send", "blocked"}
 
 
 def test_batch_qc_penalizes_repeated_wording() -> None:
@@ -139,6 +139,26 @@ def test_batch_qc_penalizes_repeated_wording() -> None:
 
     assert "Repeated note wording in batch" in qc.flags
     assert qc.score < 100
+
+
+def test_quality_check_blocks_note_without_clear_ask() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Alex Doe",
+        "role_bucket": "Other",
+        "usc": False,
+        "usc_marshall": False,
+        "existing_connection": False,
+        "shared_history": False,
+    }
+
+    qc = generator.quality_check(
+        candidate,
+        generated=type("Generated", (), {"text": "Hi Alex, liked your background at Snowflake.", "length": 48, "family": "general"})(),
+    )
+
+    assert qc.verdict == "blocked"
+    assert "Ask is not clear" in qc.flags
 
 
 def test_note_signature_normalizes_name_and_company() -> None:

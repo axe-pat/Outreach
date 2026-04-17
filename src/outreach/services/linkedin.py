@@ -428,71 +428,71 @@ class LinkedInScraper:
         page.evaluate("window.scrollTo(0, 0)")
         self._human_pause(page)
 
+        connect_button = self._find_connect_button(page, candidate_name=name)
+        if connect_button is not None:
+            if not execute:
+                return InviteSendResult(
+                    name=name,
+                    linkedin_url=linkedin_url,
+                    status="dry_run_ready",
+                    detail="Connect flow looks available; dry run only.",
+                    note=note,
+                    screenshot_path=self._save_screenshot(page, "invite-dry-run"),
+                )
+
+            try:
+                href = None
+                try:
+                    href = connect_button.get_attribute("href")
+                except Exception:
+                    href = None
+                if href and "/preload/custom-invite/" in href:
+                    page.goto(urljoin("https://www.linkedin.com", href), wait_until="domcontentloaded", timeout=30000)
+                else:
+                    connect_button.click(force=True, timeout=5000)
+                self._human_pause(page)
+                self._open_add_note(page)
+                self._human_pause(page)
+                self._fill_invite_note(page, note)
+                self._human_pause(page)
+                self._click_send_invite(page)
+                self._human_pause(page)
+                return InviteSendResult(
+                    name=name,
+                    linkedin_url=linkedin_url,
+                    status="sent",
+                    detail="Invitation sent successfully.",
+                    note=note,
+                    screenshot_path=self._save_screenshot(page, "invite-sent"),
+                )
+            except PlaywrightError as exc:
+                return InviteSendResult(
+                    name=name,
+                    linkedin_url=linkedin_url,
+                    status="send_error",
+                    detail=f"Connect flow failed: {exc}",
+                    note=note,
+                    screenshot_path=self._save_screenshot(page, "invite-send-error"),
+                )
+
         if self._is_already_connected(page, candidate_name=name):
             return InviteSendResult(
                 name=name,
                 linkedin_url=linkedin_url,
                 status="already_connected",
-                detail="Profile already has a Message/connected state.",
+                detail="Profile has an explicit connected or pending state.",
                 note=note,
                 screenshot_path=self._save_screenshot(page, "invite-already-connected"),
             )
 
-        connect_button = self._find_connect_button(page, candidate_name=name)
-        if connect_button is None:
-            return InviteSendResult(
-                name=name,
-                linkedin_url=linkedin_url,
-                status="unavailable",
-                detail="Could not find a Connect action on profile.",
-                note=note,
-                screenshot_path=self._save_screenshot(page, "invite-no-connect"),
-            )
-
-        if not execute:
-            return InviteSendResult(
-                name=name,
-                linkedin_url=linkedin_url,
-                status="dry_run_ready",
-                detail="Connect flow looks available; dry run only.",
-                note=note,
-                screenshot_path=self._save_screenshot(page, "invite-dry-run"),
-            )
-
-        try:
-            href = None
-            try:
-                href = connect_button.get_attribute("href")
-            except Exception:
-                href = None
-            if href and "/preload/custom-invite/" in href:
-                page.goto(urljoin("https://www.linkedin.com", href), wait_until="domcontentloaded", timeout=30000)
-            else:
-                connect_button.click(force=True, timeout=5000)
-            self._human_pause(page)
-            self._open_add_note(page)
-            self._human_pause(page)
-            self._fill_invite_note(page, note)
-            self._human_pause(page)
-            self._click_send_invite(page)
-            self._human_pause(page)
-            return InviteSendResult(
-                name=name,
-                linkedin_url=linkedin_url,
-                status="sent",
-                detail="Invitation sent successfully.",
-                note=note,
-                screenshot_path=self._save_screenshot(page, "invite-sent"),
-            )
-        except PlaywrightError as exc:
-            return InviteSendResult(
-                name=name,
-                linkedin_url=linkedin_url,
-                status="send_error",
-                detail=f"Connect flow failed: {exc}",
-                note=note,
-                screenshot_path=self._save_screenshot(page, "invite-send-error"),
-            )
+        return InviteSendResult(
+            name=name,
+            linkedin_url=linkedin_url,
+            status="unavailable",
+            detail="Could not find a Connect action on profile.",
+            note=note,
+            screenshot_path=self._save_screenshot(page, "invite-no-connect"),
+        )
 
     def _navigate_profile(self, page: Page, linkedin_url: str) -> bool:
         return self._safe_goto(page, linkedin_url)
@@ -661,30 +661,16 @@ class LinkedInScraper:
         except Exception:
             pass
 
-        connect_available = False
-        try:
-            connect_available = self._find_connect_button(page, candidate_name=candidate_name) is not None
-        except Exception:
-            connect_available = False
-
-        if connect_available:
-            return False
-
-        message_visible = False
-        for locator in [page.get_by_role("button", name="Message"), page.get_by_text("Message", exact=True)]:
-            try:
-                if locator.count() > 0:
-                    message_visible = True
-                    break
-            except Exception:
-                continue
-        return message_visible
+        if self._has_primary_profile_connected_signal(page):
+            return True
+        return False
 
     def _find_connect_button(self, page: Page, candidate_name: str | None = None):
         normalized_name = re.sub(r"\s+", " ", (candidate_name or "")).strip()
 
         def _visible_actions(locator):
             ranked = []
+            viewport_width = self._viewport_width(page)
             try:
                 count = locator.count()
             except Exception:
@@ -694,6 +680,10 @@ class LinkedInScraper:
                 try:
                     box = button.bounding_box()
                     if not box:
+                        continue
+                    if box["y"] > 950:
+                        continue
+                    if box["x"] > viewport_width * 0.72:
                         continue
                     ranked.append((box["y"], box["x"], button))
                 except Exception:
@@ -758,7 +748,10 @@ class LinkedInScraper:
 
         more_buttons = [
             page.get_by_role("button", name=re.compile("More", re.I)),
+            page.get_by_role("button", name=re.compile("More actions", re.I)),
             page.locator("button", has_text="More"),
+            page.locator('button[aria-label*="More" i]'),
+            page.locator('button[aria-label*="actions" i]'),
         ]
         for more in more_buttons:
             try:
@@ -766,15 +759,61 @@ class LinkedInScraper:
                     continue
                 more.first.click(timeout=5000)
                 self._human_pause(page)
-                connect = page.get_by_role("button", name="Connect")
-                if connect.count() > 0:
-                    return connect.first
-                connect_menu = page.get_by_text("Connect", exact=True)
-                if connect_menu.count() > 0:
-                    return connect_menu.first
+                menu_candidates = [
+                    page.get_by_role("button", name="Connect"),
+                    page.get_by_role("menuitem", name="Connect"),
+                    page.get_by_role("link", name="Connect"),
+                    page.locator('[role="menu"] button', has_text="Connect"),
+                    page.locator('[role="menu"] [role="menuitem"]', has_text="Connect"),
+                    page.get_by_text("Connect", exact=True),
+                ]
+                for connect in menu_candidates:
+                    try:
+                        if connect.count() > 0:
+                            return connect.first
+                    except Exception:
+                        continue
             except Exception:
                 continue
         return None
+
+    def _has_primary_profile_connected_signal(self, page: Page) -> bool:
+        viewport_width = self._viewport_width(page)
+        locators = [
+            page.get_by_text("Pending", exact=True),
+            page.get_by_role("button", name=re.compile("Pending", re.I)),
+            page.locator('button[aria-label*="Pending" i]'),
+            page.get_by_role("button", name=re.compile("Remove invitation", re.I)),
+            page.get_by_role("button", name=re.compile("Remove connection", re.I)),
+            page.locator('button[aria-label*="Remove invitation" i]'),
+            page.locator('button[aria-label*="Remove connection" i]'),
+        ]
+        for locator in locators:
+            try:
+                count = locator.count()
+            except Exception:
+                continue
+            for idx in range(count):
+                item = locator.nth(idx)
+                try:
+                    box = item.bounding_box()
+                except Exception:
+                    box = None
+                if not box:
+                    continue
+                if box["y"] > 900:
+                    continue
+                if box["x"] > viewport_width * 0.72:
+                    continue
+                return True
+        return False
+
+    def _viewport_width(self, page: Page) -> float:
+        try:
+            width = page.evaluate("() => window.innerWidth")
+            return float(width or 1600)
+        except Exception:
+            return 1600.0
 
     def _open_add_note(self, page: Page) -> None:
         try:

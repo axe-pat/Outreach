@@ -28,7 +28,8 @@ class ScoringWeights(BaseModel):
 
 class SearchStrategy(BaseModel):
     default_limit: int = 10
-    final_company_limit: int = 30
+    final_company_limit: int = 25
+    note_generation_limit: int = 15
     hard_company_limit: int = 40
     broad_fallback_min_pool_size: int = 18
     max_pages_high_value: int = 2

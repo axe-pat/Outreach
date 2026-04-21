@@ -6,6 +6,7 @@ from outreach.cli import (
     build_organization_intel_items,
     build_target_action_queue_items,
     classify_opportunity_action,
+    contact_status_from_invite_result,
     extract_team_size_from_notes,
     extract_tags_from_notes,
     extract_description_from_notes,
@@ -21,9 +22,12 @@ from outreach.cli import (
     parse_batch_year,
     parse_team_size_headcount,
     pass_relevance,
+    recommend_auto_send_limit,
     resolve_pass_definitions,
     score_opportunity_relevance,
+    select_invite_candidates,
     text_contains_signal,
+    touchpoint_status_from_invite_result,
 )
 from outreach.config import OutreachSettings
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
@@ -128,6 +132,93 @@ def test_force_broad_fallback_removes_pool_gate() -> None:
 
     assert passes["broad_fallback"]["enabled"] is True
     assert "run_if_below_pool_size" not in passes["broad_fallback"]
+
+
+def test_startup_mode_uses_startup_pass_stack() -> None:
+    settings = OutreachSettings()
+
+    passes = resolve_pass_definitions(settings, company_mode="startup")
+
+    assert list(passes) == ["existing_connections"]
+
+
+def test_startup_founder_titles_are_kept_for_startup_mode() -> None:
+    assert pass_relevance(
+        "startup_founders",
+        "Founder",
+        "Founder & CEO at Icarus",
+        "Founder & CEO at Icarus",
+        company_mode="startup",
+    )
+
+
+def test_startup_operator_titles_are_kept_for_startup_mode() -> None:
+    assert pass_relevance(
+        "startup_operators",
+        "Adjacent",
+        "Chief of Staff",
+        "Chief of Staff",
+        company_mode="startup",
+    )
+
+
+def test_startup_broad_fallback_rejects_investors() -> None:
+    assert not pass_relevance(
+        "startup_company_coverage",
+        "Other",
+        "Software & AI Investments / Nexus Venture Partners",
+        "Software & AI Investments / Nexus Venture Partners",
+        company_mode="startup",
+    )
+
+
+def test_startup_company_coverage_keeps_generic_employee_titles() -> None:
+    assert pass_relevance(
+        "startup_preflight",
+        "Other",
+        "Member of Technical Staff",
+        "Member of Technical Staff",
+        company_mode="startup",
+    )
+
+
+def test_recommend_auto_send_limit_scales_with_pool_size() -> None:
+    assert recommend_auto_send_limit(3) == 0
+    assert recommend_auto_send_limit(5) == 5
+    assert recommend_auto_send_limit(12) == 10
+    assert recommend_auto_send_limit(20) == 12
+
+
+def test_sent_without_note_maps_to_sent_tracking_statuses() -> None:
+    assert contact_status_from_invite_result("sent_without_note") == "Invited"
+    assert touchpoint_status_from_invite_result("sent_without_note") == "Sent"
+
+
+def test_select_invite_candidates_filters_existing_connections_and_blocked_notes() -> None:
+    candidates = [
+        {
+            "name": "A",
+            "linkedin_url": "https://www.linkedin.com/in/a/",
+            "existing_connection": False,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "B",
+            "linkedin_url": "https://www.linkedin.com/in/b/",
+            "existing_connection": True,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "C",
+            "linkedin_url": "https://www.linkedin.com/in/c/",
+            "existing_connection": False,
+            "note_qc": {"verdict": "blocked"},
+        },
+    ]
+
+    selected = select_invite_candidates(candidates, limit=5)
+
+    assert [item["name"] for item in selected] == ["A"]
 
 
 def test_relative_linkedin_profile_is_treated_as_fallback() -> None:

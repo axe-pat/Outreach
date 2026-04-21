@@ -17,6 +17,7 @@ class ScoringWeights(BaseModel):
     second_degree: int = 30
     indian_background: int = 20
     university_recruiter: int = 18
+    founder_role: int = 16
     product_role: int = 18
     engineering_role: int = 12
     strong_mutuals: int = 10
@@ -34,6 +35,12 @@ class SearchStrategy(BaseModel):
     broad_fallback_min_pool_size: int = 18
     max_pages_high_value: int = 2
     max_pages_default: int = 1
+    startup_preflight_limit: int = 25
+    startup_preflight_max_pages: int = 3
+    startup_small_company_threshold: int = 12
+    startup_min_viable_candidates: int = 5
+    startup_coverage_limit: int = 25
+    startup_coverage_max_pages: int = 3
     action_delay_min_ms: int = 1200
     action_delay_max_ms: int = 2600
     ex_companies: list[str] = Field(

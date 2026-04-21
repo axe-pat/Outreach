@@ -6,7 +6,7 @@ from pathlib import Path
 import random
 import re
 import time
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import parse_qsl, quote_plus, urlencode, urljoin, urlparse, urlunparse
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -21,10 +21,16 @@ def normalize_typeahead_text(value: str) -> str:
     return " ".join((value or "").lower().split()).strip()
 
 
+def primary_typeahead_label(option_text: str) -> str:
+    lines = [normalize_typeahead_text(line) for line in (option_text or "").splitlines()]
+    lines = [line for line in lines if line]
+    return lines[0] if lines else ""
+
+
 def score_typeahead_option(trigger_text: str, requested_value: str, option_text: str) -> int:
     trigger = normalize_typeahead_text(trigger_text)
     requested = normalize_typeahead_text(requested_value)
-    option = normalize_typeahead_text(option_text)
+    option = primary_typeahead_label(option_text) if trigger == "add a company" else normalize_typeahead_text(option_text)
     if not requested or not option:
         return -10_000
 
@@ -48,6 +54,8 @@ def score_typeahead_option(trigger_text: str, requested_value: str, option_text:
             score -= 120
         if any(word in option for word in {"inc", "labs", "health", "ai", "technologies", "tech"}):
             score += 10
+        if option != requested and option.startswith(f"{requested} "):
+            score -= 80
     elif trigger == "add a school":
         if any(word in option for word in {"university", "college", "school"}):
             score += 40
@@ -99,7 +107,7 @@ class LinkedInScraper:
     def extract_company_people_live(self, company: str, limit: int = 10) -> list[RawSearchCandidate]:
         return self.extract_people_live(search_query=company, limit=limit)
 
-    def extract_people_live(self, search_query: str, limit: int = 10) -> list[RawSearchCandidate]:
+    def extract_people_live(self, search_query: str, limit: int = 10, max_pages: int = 1) -> list[RawSearchCandidate]:
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
             try:
@@ -121,8 +129,7 @@ class LinkedInScraper:
                     if not self._safe_goto(page, search_url):
                         raise RuntimeError(f"Could not load LinkedIn people search: {search_url}")
                     self._human_pause(page)
-                    self._scroll_results(page)
-                    return self._extract_visible_people(page, limit=limit)
+                    return self._collect_people_results(page, limit=limit, max_pages=max_pages)
                 finally:
                     self._close_page_safely(page)
             finally:
@@ -133,6 +140,7 @@ class LinkedInScraper:
         company: str,
         search_query: str,
         limit: int = 10,
+        max_pages: int = 1,
         school: str | None = None,
         connection_degree: str | None = None,
         use_us_location: bool = True,
@@ -165,8 +173,7 @@ class LinkedInScraper:
                         connection_degree=connection_degree,
                         use_us_location=use_us_location,
                     )
-                    self._scroll_results(page)
-                    candidates = self._extract_visible_people(page, limit=limit)
+                    candidates = self._collect_people_results(page, limit=limit, max_pages=max_pages)
                     filter_text = self._read_visible_filter_text(page)
                     screenshot = self._save_screenshot(page, "filtered-results")
                     return FilterRunResult(
@@ -339,15 +346,29 @@ class LinkedInScraper:
                         "LinkedIn preflight failed before invite send: "
                         f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
                     )
-                page = context.new_page()
-                page.set_default_timeout(15000)
                 try:
                     results: list[InviteSendResult] = []
                     for candidate in candidates:
-                        results.append(self._send_single_invite(page, candidate, execute=execute))
+                        page = context.new_page()
+                        page.set_default_timeout(15000)
+                        try:
+                            results.append(self._send_single_invite(page, candidate, execute=execute))
+                        except Exception as exc:
+                            results.append(
+                                InviteSendResult(
+                                    name=str(candidate.get("name") or "Unknown"),
+                                    linkedin_url=str(candidate.get("linkedin_url") or ""),
+                                    status="send_error",
+                                    detail=f"Invite processing crashed: {exc}",
+                                    note=str(candidate.get("note") or ""),
+                                    screenshot_path=self._save_screenshot(page, "invite-crash"),
+                                )
+                            )
+                        finally:
+                            self._close_page_safely(page)
                     return results
                 finally:
-                    self._close_page_safely(page)
+                    pass
             finally:
                 browser.close()
 
@@ -451,18 +472,47 @@ class LinkedInScraper:
                 else:
                     connect_button.click(force=True, timeout=5000)
                 self._human_pause(page)
-                self._open_add_note(page)
+                if not self._invite_flow_available(page, timeout_ms=4000):
+                    self._dismiss_transient_overlays(page)
+                if not self._invite_flow_available(page, timeout_ms=2000):
+                    if self._is_already_connected(page, candidate_name=name):
+                        return InviteSendResult(
+                            name=name,
+                            linkedin_url=linkedin_url,
+                            status="already_connected",
+                            detail="Profile has an explicit connected or pending state.",
+                            note=note,
+                            screenshot_path=self._save_screenshot(page, "invite-already-connected"),
+                        )
+                    if self._find_connect_button(page, candidate_name=name) is None:
+                        return InviteSendResult(
+                            name=name,
+                            linkedin_url=linkedin_url,
+                            status="unavailable",
+                            detail="Connect action did not open a usable invite flow.",
+                            note=note,
+                            screenshot_path=self._save_screenshot(page, "invite-no-connect"),
+                        )
+                note_supported = self._open_add_note(page)
                 self._human_pause(page)
-                self._fill_invite_note(page, note)
-                self._human_pause(page)
+                note_sent = note
+                if note_supported:
+                    self._fill_invite_note(page, note)
+                    self._human_pause(page)
+                else:
+                    note_sent = ""
                 self._click_send_invite(page)
                 self._human_pause(page)
                 return InviteSendResult(
                     name=name,
                     linkedin_url=linkedin_url,
-                    status="sent",
-                    detail="Invitation sent successfully.",
-                    note=note,
+                    status="sent" if note_supported else "sent_without_note",
+                    detail=(
+                        "Invitation sent successfully."
+                        if note_supported
+                        else "Invitation sent without a note because LinkedIn did not expose the note field."
+                    ),
+                    note=note_sent,
                     screenshot_path=self._save_screenshot(page, "invite-sent"),
                 )
             except PlaywrightError as exc:
@@ -604,6 +654,34 @@ class LinkedInScraper:
             page.mouse.wheel(0, 1800)
             self._human_pause(page)
 
+    def _set_people_search_page(self, url: str, page_number: int) -> str:
+        parsed = urlparse(url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if page_number <= 1:
+            query.pop("page", None)
+        else:
+            query["page"] = str(page_number)
+        return urlunparse(parsed._replace(query=urlencode(query)))
+
+    def _collect_people_results(self, page: Page, limit: int, max_pages: int) -> list[RawSearchCandidate]:
+        base_url = page.url
+        deduped: dict[str, RawSearchCandidate] = {}
+
+        for page_number in range(1, max_pages + 1):
+            if page_number > 1:
+                target_url = self._set_people_search_page(base_url, page_number)
+                if not self._safe_goto(page, target_url):
+                    break
+                self._human_pause(page)
+            self._scroll_results(page)
+            for candidate in self._extract_visible_people(page, limit=limit):
+                key = candidate.linkedin_url or f"{candidate.name}:{candidate.title or ''}"
+                if key not in deduped:
+                    deduped[key] = candidate
+                if len(deduped) >= limit:
+                    return list(deduped.values())[:limit]
+        return list(deduped.values())[:limit]
+
     def _apply_people_filters(
         self,
         page: Page,
@@ -616,7 +694,7 @@ class LinkedInScraper:
         self._human_pause(page)
 
         if connection_degree in {"1st", "2nd", "3rd+"}:
-            page.get_by_text(connection_degree, exact=True).last.click()
+            self._select_connection_degree(page, connection_degree)
             self._human_pause(page)
 
         if use_us_location:
@@ -629,6 +707,49 @@ class LinkedInScraper:
 
         page.get_by_text("Show results", exact=True).click()
         self._human_pause(page)
+
+    def _select_connection_degree(self, page: Page, connection_degree: str) -> None:
+        label_pattern = re.compile(rf"^\s*{re.escape(connection_degree)}\s*$", re.IGNORECASE)
+        candidates = [
+            page.get_by_role("checkbox", name=label_pattern),
+            page.get_by_role("radio", name=label_pattern),
+            page.get_by_role("button", name=label_pattern),
+            page.get_by_role("option", name=label_pattern),
+            page.get_by_label(label_pattern),
+            page.locator("label").filter(has_text=label_pattern),
+            page.locator('[for]').filter(has_text=label_pattern),
+            page.locator("span").filter(has_text=label_pattern),
+            page.locator("p").filter(has_text=label_pattern),
+        ]
+        for locator in candidates:
+            try:
+                count = locator.count()
+            except Exception:
+                continue
+            for idx in range(count):
+                target = locator.nth(idx)
+                try:
+                    box = target.bounding_box()
+                except Exception:
+                    box = None
+                if not box:
+                    continue
+                if box["width"] <= 0 or box["height"] <= 0:
+                    continue
+                try:
+                    target.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
+                try:
+                    target.click(timeout=3000)
+                    return
+                except Exception:
+                    try:
+                        target.click(timeout=3000, force=True)
+                        return
+                    except Exception:
+                        continue
+        raise PlaywrightTimeoutError(f"Could not select connection degree filter: {connection_degree}")
 
     def _read_visible_filter_text(self, page: Page) -> list[str]:
         selectors = [
@@ -668,38 +789,12 @@ class LinkedInScraper:
     def _find_connect_button(self, page: Page, candidate_name: str | None = None):
         normalized_name = re.sub(r"\s+", " ", (candidate_name or "")).strip()
 
-        def _visible_actions(locator):
-            ranked = []
-            viewport_width = self._viewport_width(page)
-            try:
-                count = locator.count()
-            except Exception:
-                return ranked
-            for idx in range(count):
-                button = locator.nth(idx)
-                try:
-                    box = button.bounding_box()
-                    if not box:
-                        continue
-                    if box["y"] > 950:
-                        continue
-                    if box["x"] > viewport_width * 0.72:
-                        continue
-                    ranked.append((box["y"], box["x"], button))
-                except Exception:
-                    continue
-            ranked.sort(key=lambda item: (item[0], item[1]))
-            return [button for _, _, button in ranked]
-
         toolbar_candidates = []
         if normalized_name:
-            escaped_name = re.escape(normalized_name)
             toolbar_candidates.extend(
                 [
                     page.locator(f'[role="toolbar"] a[aria-label*="{normalized_name}"][aria-label*="connect" i]'),
                     page.locator(f'[role="toolbar"] button[aria-label*="{normalized_name}"][aria-label*="connect" i]'),
-                    page.get_by_role("toolbar").get_by_role("link", name=re.compile(escaped_name, re.I)),
-                    page.get_by_role("toolbar").get_by_role("button", name=re.compile(escaped_name, re.I)),
                 ]
             )
         toolbar_candidates.extend(
@@ -711,7 +806,7 @@ class LinkedInScraper:
             ]
         )
         for locator in toolbar_candidates:
-            visible = _visible_actions(locator)
+            visible = self._visible_action_targets(page, locator, max_y=620, max_x_ratio=0.66)
             if visible:
                 return visible[0]
 
@@ -728,7 +823,7 @@ class LinkedInScraper:
             candidates.insert(1, page.locator(f'button[aria-label*="{normalized_name}"][aria-label*="connect" i]'))
         preferred = []
         for locator in candidates:
-            for button in _visible_actions(locator):
+            for button in self._visible_action_targets(page, locator, max_y=780, max_x_ratio=0.66):
                 try:
                     box = button.bounding_box()
                     if not box:
@@ -742,7 +837,7 @@ class LinkedInScraper:
             preferred.sort(key=lambda item: (item[0], item[1]))
             return preferred[0][2]
         for locator in candidates:
-            visible = _visible_actions(locator)
+            visible = self._visible_action_targets(page, locator, max_y=780, max_x_ratio=0.66)
             if visible:
                 return visible[0]
 
@@ -753,28 +848,38 @@ class LinkedInScraper:
             page.locator('button[aria-label*="More" i]'),
             page.locator('button[aria-label*="actions" i]'),
         ]
-        for more in more_buttons:
+        ranked_more: list = []
+        for locator in more_buttons:
+            ranked_more.extend(self._visible_action_targets(page, locator, max_y=620, max_x_ratio=0.66))
+        for more in ranked_more:
             try:
-                if more.count() == 0:
-                    continue
-                more.first.click(timeout=5000)
-                self._human_pause(page)
-                menu_candidates = [
-                    page.get_by_role("button", name="Connect"),
-                    page.get_by_role("menuitem", name="Connect"),
-                    page.get_by_role("link", name="Connect"),
-                    page.locator('[role="menu"] button', has_text="Connect"),
-                    page.locator('[role="menu"] [role="menuitem"]', has_text="Connect"),
-                    page.get_by_text("Connect", exact=True),
-                ]
-                for connect in menu_candidates:
-                    try:
-                        if connect.count() > 0:
-                            return connect.first
-                    except Exception:
-                        continue
+                more.scroll_into_view_if_needed(timeout=2000)
             except Exception:
+                pass
+            clicked = False
+            for force in (False, True):
+                try:
+                    more.click(timeout=5000, force=force)
+                    clicked = True
+                    break
+                except Exception:
+                    continue
+            if not clicked:
                 continue
+            self._human_pause(page)
+            menu_candidates = [
+                page.locator('[role="menu"] button', has_text="Connect"),
+                page.locator('[role="menu"] [role="menuitem"]', has_text="Connect"),
+                page.locator('[role="menu"] a', has_text="Connect"),
+                page.get_by_role("menuitem", name="Connect"),
+                page.get_by_role("button", name="Connect"),
+                page.get_by_role("link", name="Connect"),
+            ]
+            for connect in menu_candidates:
+                visible = self._visible_action_targets(page, connect, max_y=900, max_x_ratio=0.9)
+                if visible:
+                    return visible[0]
+            self._dismiss_transient_overlays(page)
         return None
 
     def _has_primary_profile_connected_signal(self, page: Page) -> bool:
@@ -815,29 +920,84 @@ class LinkedInScraper:
         except Exception:
             return 1600.0
 
-    def _open_add_note(self, page: Page) -> None:
+    def _visible_action_targets(
+        self,
+        page: Page,
+        locator,
+        *,
+        max_y: float,
+        max_x_ratio: float,
+    ) -> list:
+        ranked = []
+        viewport_width = self._viewport_width(page)
+        try:
+            count = locator.count()
+        except Exception:
+            return ranked
+        for idx in range(count):
+            target = locator.nth(idx)
+            try:
+                box = target.bounding_box()
+            except Exception:
+                box = None
+            if not box:
+                continue
+            if box["width"] <= 0 or box["height"] <= 0:
+                continue
+            if box["y"] > max_y:
+                continue
+            if box["x"] > viewport_width * max_x_ratio:
+                continue
+            ranked.append((box["y"], box["x"], target))
+        ranked.sort(key=lambda item: (item[0], item[1]))
+        return [target for _, _, target in ranked]
+
+    def _dismiss_transient_overlays(self, page: Page) -> None:
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        try:
+            page.mouse.click(20, 20)
+        except Exception:
+            pass
+        self._human_pause(page)
+
+    def _invite_flow_available(self, page: Page, timeout_ms: int = 5000) -> bool:
         try:
             page.wait_for_function(
                 """
                 () => {
-                  return !!Array.from(document.querySelectorAll('textarea')).find(
+                  const textarea = Array.from(document.querySelectorAll('textarea')).find(
                     (el) => el.name !== 'g-recaptcha-response' && el.offsetParent !== null
-                  )
-                    || !!Array.from(document.querySelectorAll('[role="dialog"], div')).find(
-                      (el) => /Add a note to your invitation\\?/i.test((el.textContent || '').replace(/\\s+/g, ' ').trim())
-                    )
-                    || !!Array.from(document.querySelectorAll('button')).find(
+                  );
+                  if (textarea) return true;
+                  const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(
+                    (el) => el.offsetParent !== null
+                  );
+                  return dialogs.some((dialog) => {
+                    const text = (dialog.textContent || '').replace(/\\s+/g, ' ').trim();
+                    if (/Add a note to your invitation/i.test(text)) return true;
+                    const hasAddNote = Array.from(dialog.querySelectorAll('button')).some(
                       (el) => /Add a note/i.test((el.textContent || '').replace(/\\s+/g, ' ').trim())
                     );
+                    if (hasAddNote) return true;
+                    return Array.from(dialog.querySelectorAll('button')).some(
+                      (el) => /^Send$/i.test((el.textContent || '').replace(/\\s+/g, ' ').trim())
+                    );
+                  });
                 }
                 """,
-                timeout=5000,
+                timeout=timeout_ms,
             )
+            return True
         except PlaywrightTimeoutError:
-            pass
+            return False
 
+    def _open_add_note(self, page: Page) -> bool:
+        self._invite_flow_available(page, timeout_ms=5000)
         if self._invite_note_textarea(page).count() > 0:
-            return
+            return True
 
         add_note = [
             page.get_by_role("button", name="Add a note"),
@@ -850,15 +1010,8 @@ class LinkedInScraper:
                 if locator.count() == 0:
                     continue
                 locator.first.click(timeout=5000, force=True)
-                page.wait_for_function(
-                    """
-                    () => !!Array.from(document.querySelectorAll('textarea')).find(
-                      (el) => el.name !== 'g-recaptcha-response' && el.offsetParent !== null
-                    )
-                    """,
-                    timeout=5000,
-                )
-                return
+                if self._invite_flow_available(page, timeout_ms=5000) and self._invite_note_textarea(page).count() > 0:
+                    return True
             except Exception:
                 continue
         try:
@@ -879,20 +1032,19 @@ class LinkedInScraper:
                 """
             )
             if clicked:
-                page.wait_for_function(
-                    """
-                    () => !!Array.from(document.querySelectorAll('textarea')).find(
-                      (el) => el.name !== 'g-recaptcha-response' && el.offsetParent !== null
-                    )
-                    """,
-                    timeout=5000,
-                )
-                return
+                if self._invite_flow_available(page, timeout_ms=5000) and self._invite_note_textarea(page).count() > 0:
+                    return True
         except Exception:
             pass
         # Some variants open the note box directly after Connect.
         if self._invite_note_textarea(page).count() > 0:
-            return
+            return True
+        send_button = page.locator('[role="dialog"] button', has_text=re.compile(r"^Send$", re.I))
+        try:
+            if send_button.count() > 0:
+                return False
+        except Exception:
+            pass
         raise PlaywrightTimeoutError("Could not find 'Add a note' in invite modal.")
 
     def _fill_invite_note(self, page: Page, note: str) -> None:
@@ -946,10 +1098,12 @@ class LinkedInScraper:
         self._human_pause(page)
 
         options = page.get_by_role("option")
+        requested = normalize_typeahead_text(value)
+        exact_option = None
         best_option = None
         best_score = -10_000
         try:
-            option_count = min(options.count(), 12)
+            option_count = min(options.count(), 20)
         except Exception:
             option_count = 0
         for index in range(option_count):
@@ -958,17 +1112,27 @@ class LinkedInScraper:
                 text = option.inner_text().strip()
             except Exception:
                 continue
+            normalized = (
+                primary_typeahead_label(text)
+                if normalize_typeahead_text(trigger_text) == "add a company"
+                else normalize_typeahead_text(text)
+            )
+            if normalized == requested:
+                exact_option = option
+                break
             score = score_typeahead_option(trigger_text, value, text)
             if score > best_score:
                 best_score = score
                 best_option = option
 
-        if best_option is not None and best_score > 0:
-            best_option.click()
-        elif trigger_text == "Add a company":
+        if exact_option is not None:
+            exact_option.click()
+        elif normalize_typeahead_text(trigger_text) == "add a company":
             raise PlaywrightTimeoutError(
-                f"Could not confidently match a company suggestion for '{value}'."
+                f"Could not find an exact company suggestion for '{value}'."
             )
+        elif best_option is not None and best_score > 0:
+            best_option.click()
         else:
             page.keyboard.press("Enter")
         self._human_pause(page)

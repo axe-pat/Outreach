@@ -53,6 +53,7 @@ from outreach.tracking import (
 
 def resolve_pass_definitions(
     settings: OutreachSettings,
+    company_mode: str = "default",
     include_passes: tuple[str, ...] = (),
     exclude_passes: tuple[str, ...] = (),
     enable_marshall: bool = False,
@@ -60,9 +61,14 @@ def resolve_pass_definitions(
 ) -> dict[str, dict[str, str | int | bool]]:
     include_set = {item.strip() for item in include_passes if item.strip()}
     exclude_set = {item.strip() for item in exclude_passes if item.strip()}
-    pass_definitions = {
-        name: dict(config) for name, config in settings.search.pass_definitions.items()
-    }
+    if company_mode == "startup":
+        pass_definitions = {
+            "existing_connections": {"query": "", "limit": 20, "priority": 1, "use_us_location": False, "connection_degree": "1st", "enabled": True},
+        }
+    else:
+        pass_definitions = {
+            name: dict(config) for name, config in settings.search.pass_definitions.items()
+        }
 
     if enable_marshall:
         for name in ("product_usc_marshall", "engineering_usc_marshall"):
@@ -91,11 +97,28 @@ def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> 
     recruiter_keywords = ["recruiter", "sourcer", "talent", "campus recruiting", "university recruiting"]
     university_keywords = ["usc", "university", "campus", "marshall school of business", "career center"]
     adjacent_override_keywords = ["solution engineer", "solutions engineer", "solutions architect", "solution architect"]
+    founder_keywords = ["founder", "co-founder", "cofounder", "chief executive officer", " ceo", "ceo ", "founding member"]
+    startup_operator_keywords = [
+        "chief of staff",
+        "business operations",
+        "bizops",
+        "operations",
+        "strategy",
+        "general manager",
+        "founder's office",
+        "founders office",
+        "founding operations",
+        "founding team",
+        "operator",
+    ]
 
     if any(keyword in title_lower for keyword in recruiter_keywords):
         if any(keyword in raw_text_lower for keyword in university_keywords):
             return "University Recruiting"
         return "Recruiting"
+
+    if any(keyword in title_lower for keyword in founder_keywords):
+        return "Founder"
 
     if any(keyword in title_lower for keyword in adjacent_override_keywords):
         return "Adjacent"
@@ -106,6 +129,9 @@ def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> 
 
     if any(keyword.lower() in title_lower for keyword in settings.search.role_keywords_engineering):
         return "Engineering"
+
+    if any(keyword in title_lower for keyword in startup_operator_keywords):
+        return "Adjacent"
 
     if any(keyword.lower() in title_lower for keyword in settings.search.adjacent_titles):
         return "Adjacent"
@@ -130,7 +156,71 @@ def detect_shared_history(raw_text: str, settings: OutreachSettings) -> bool:
     return any(company.lower() in text for company in settings.search.ex_companies)
 
 
-def pass_relevance(pass_name: str, role_bucket: str, title: str, raw_text: str) -> bool:
+def _is_startup_founder_title(title_lower: str) -> bool:
+    return any(
+        signal in title_lower
+        for signal in [
+            "founder",
+            "co-founder",
+            "cofounder",
+            "ceo",
+            "chief executive",
+            "founding member",
+            "president",
+        ]
+    )
+
+
+def _is_startup_operator_title(title_lower: str) -> bool:
+    return any(
+        signal in title_lower
+        for signal in [
+            "chief of staff",
+            "operations",
+            "business operations",
+            "bizops",
+            "strategy",
+            "founder's office",
+            "founders office",
+            "general manager",
+            "founding team",
+            "operator",
+            "growth",
+            "gtm",
+            "revenue operations",
+            "revops",
+            "partnerships",
+        ]
+    )
+
+
+def _is_explicitly_bad_startup_coverage_title(title_lower: str) -> bool:
+    return any(
+        signal in title_lower
+        for signal in [
+            "investor",
+            "investments",
+            "venture capital",
+            "venture partner",
+            "advisor",
+            "board member",
+            "recruiter",
+            "sourcer",
+            "talent",
+            "agency",
+            "consultant",
+            "fractional",
+        ]
+    )
+
+
+def pass_relevance(
+    pass_name: str,
+    role_bucket: str,
+    title: str,
+    raw_text: str,
+    company_mode: str = "default",
+) -> bool:
     title_lower = title.lower()
 
     product_text_signals = [
@@ -161,6 +251,11 @@ def pass_relevance(pass_name: str, role_bucket: str, title: str, raw_text: str) 
 
     if pass_name == "existing_connections":
         return True
+    if company_mode == "startup":
+        if pass_name in {"startup_preflight", "startup_company_coverage"}:
+            if _is_explicitly_bad_startup_coverage_title(title_lower):
+                return False
+            return bool(title_lower.strip())
     if pass_name.startswith("product_"):
         if role_bucket == "Product":
             return True
@@ -170,6 +265,93 @@ def pass_relevance(pass_name: str, role_bucket: str, title: str, raw_text: str) 
             return True
         return any(signal in title_lower for signal in engineering_text_signals)
     return role_bucket != "Other"
+
+
+def apply_raw_candidate(
+    *,
+    deduped: dict[str, dict],
+    raw,
+    company: str,
+    pass_name: str,
+    pass_config: dict[str, str | int | bool],
+    settings: OutreachSettings,
+    company_mode: str,
+) -> bool:
+    title = raw.title or ""
+    raw_text = raw.raw_text or ""
+    role_bucket = infer_role_bucket(title, raw_text, settings)
+    if not pass_relevance(pass_name, role_bucket, title, raw_text, company_mode=company_mode):
+        return False
+
+    connection_degree = raw.connection_degree or "3rd"
+    pass_school = str(pass_config.get("school") or "")
+    pass_implies_usc = "southern california" in pass_school.lower()
+    pass_implies_marshall = "marshall" in pass_school.lower()
+    pass_implies_existing_connection = pass_name == "existing_connections"
+    profile = CandidateProfile(
+        name=raw.name,
+        title=raw.title or "",
+        company=company,
+        linkedin_url=raw.linkedin_url or "https://www.linkedin.com/",
+        connection_degree=connection_degree,
+        mutual_connections=1 if raw.snippet and "mutual connection" in raw.snippet else 0,
+        existing_connection=pass_implies_existing_connection or connection_degree == "1st",
+        usc_marshall=pass_implies_marshall or detect_usc_marshall(raw_text),
+        usc_alumni=pass_implies_usc or detect_usc(raw_text),
+        shared_history=detect_shared_history(raw_text, settings),
+        indian_background=False,
+        university_recruiter=role_bucket == "University Recruiting",
+        role_bucket=role_bucket,
+    )
+    scored = score_candidate(profile, settings.scoring)
+    key = raw.linkedin_url or f"{raw.name}:{title}"
+    entry = deduped.get(
+        key,
+        {
+            "name": raw.name,
+            "title": raw.title,
+            "location": raw.location,
+            "linkedin_url": raw.linkedin_url,
+            "subtitle": raw.subtitle,
+            "connection_degree": raw.connection_degree,
+            "snippet": raw.snippet,
+            "role_bucket": role_bucket,
+            "score": scored.score,
+            "tier": scored.tier.value,
+            "triggers": scored.triggers,
+            "passes": [],
+            "existing_connection": profile.existing_connection,
+            "usc_marshall": profile.usc_marshall,
+            "usc": profile.usc_alumni,
+            "shared_history": profile.shared_history,
+        },
+    )
+    entry["passes"] = sorted(set([*entry["passes"], pass_name]))
+    if scored.score > entry["score"]:
+        entry.update(
+            {
+                "role_bucket": role_bucket,
+                "score": scored.score,
+                "tier": scored.tier.value,
+                "triggers": scored.triggers,
+                "existing_connection": profile.existing_connection,
+                "usc_marshall": profile.usc_marshall,
+                "usc": profile.usc_alumni,
+                "shared_history": profile.shared_history,
+            }
+        )
+    deduped[key] = entry
+    return True
+
+
+def recommend_auto_send_limit(candidate_count: int) -> int:
+    if candidate_count >= 15:
+        return 12
+    if candidate_count >= 10:
+        return 10
+    if candidate_count >= 5:
+        return 5
+    return 0
 
 
 def build_source_adapter(source_id: str) -> SourceAdapter:
@@ -889,8 +1071,74 @@ def execute_linkedin_company_run(
     note_generator = NoteGenerator()
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
+    if company_mode == "startup":
+        preflight_limit = settings.search.startup_preflight_limit
+        preflight_pages = settings.search.startup_preflight_max_pages
+        preflight_run = scraper.extract_people_with_filters_live(
+            company=company,
+            search_query="",
+            limit=preflight_limit,
+            max_pages=preflight_pages,
+            school=None,
+            connection_degree=None,
+            use_us_location=False,
+        )
+        preflight_artifact = write_artifact(
+            settings.artifacts_dir,
+            "startup-preflight",
+            {
+                "company": company,
+                "company_mode": company_mode,
+                "limit": preflight_limit,
+                "max_pages": preflight_pages,
+                "final_url": preflight_run.final_url,
+                "visible_filter_text": preflight_run.visible_filter_text,
+                "screenshot": preflight_run.screenshot_path,
+                "raw_count": len(preflight_run.candidates),
+                "results": [item.model_dump() for item in preflight_run.candidates],
+            },
+        )
+        preflight_kept_count = 0
+        preflight_pass_config: dict[str, str | int | bool] = {
+            "school": "",
+            "connection_degree": None,
+            "use_us_location": False,
+        }
+        for raw in preflight_run.candidates:
+            if apply_raw_candidate(
+                deduped=deduped,
+                raw=raw,
+                company=company,
+                pass_name="startup_preflight",
+                pass_config=preflight_pass_config,
+                settings=settings,
+                company_mode=company_mode,
+            ):
+                preflight_kept_count += 1
+        pass_summaries.append(
+            {
+                "pass_name": "startup_preflight",
+                "query": "",
+                "school": None,
+                "connection_degree": None,
+                "use_us_location": False,
+                "final_url": preflight_run.final_url,
+                "screenshot": preflight_run.screenshot_path,
+                "limit": preflight_limit,
+                "max_pages": preflight_pages,
+                "raw_count": len(preflight_run.candidates),
+                "kept_count": preflight_kept_count,
+                "artifact": str(preflight_artifact),
+                "coverage_only": len(preflight_run.candidates) <= settings.search.startup_small_company_threshold,
+            }
+        )
+        typer.echo(
+            f"- Startup preflight: {len(preflight_run.candidates)} raw results across up to {preflight_pages} pages"
+        )
+        typer.echo(f"  kept {preflight_kept_count} after startup coverage filtering")
     pass_definitions = resolve_pass_definitions(
         settings,
+        company_mode=company_mode,
         include_passes=tuple(include_pass or []),
         exclude_passes=tuple(exclude_pass or []),
         enable_marshall=enable_marshall,
@@ -910,15 +1158,38 @@ def execute_linkedin_company_run(
             continue
         pass_query = str(pass_config.get("query", "")).strip()
         limit = int(pass_config.get("limit", settings.search.default_limit))
+        max_pages = int(pass_config.get("max_pages", settings.search.max_pages_default))
         query = pass_query
-        filter_run = scraper.extract_people_with_filters_live(
-            company=company,
-            search_query=query,
-            limit=limit,
-            school=str(pass_config.get("school")) if pass_config.get("school") else None,
-            connection_degree=str(pass_config.get("connection_degree")) if pass_config.get("connection_degree") else None,
-            use_us_location=bool(pass_config.get("use_us_location", True)),
-        )
+        try:
+            filter_run = scraper.extract_people_with_filters_live(
+                company=company,
+                search_query=query,
+                limit=limit,
+                max_pages=max_pages,
+                school=str(pass_config.get("school")) if pass_config.get("school") else None,
+                connection_degree=str(pass_config.get("connection_degree")) if pass_config.get("connection_degree") else None,
+                use_us_location=bool(pass_config.get("use_us_location", True)),
+            )
+        except Exception as exc:
+            pass_summaries.append(
+                {
+                    "pass_name": pass_name,
+                    "query": query,
+                    "school": pass_config.get("school"),
+                    "connection_degree": pass_config.get("connection_degree"),
+                    "use_us_location": pass_config.get("use_us_location", True),
+                    "final_url": "",
+                    "screenshot": "",
+                    "limit": limit,
+                    "max_pages": max_pages,
+                    "raw_count": 0,
+                    "kept_count": 0,
+                    "artifact": "",
+                    "error": str(exc),
+                }
+            )
+            typer.echo(f"- Pass {pass_name}: failed ({exc})")
+            continue
         raw_candidates = filter_run.candidates
         kept_count = 0
         pass_artifact = write_artifact(
@@ -936,6 +1207,7 @@ def execute_linkedin_company_run(
                 "screenshot": filter_run.screenshot_path,
                 "raw_count": len(raw_candidates),
                 "limit": limit,
+                "max_pages": max_pages,
                 "results": [item.model_dump() for item in raw_candidates],
             },
         )
@@ -949,6 +1221,7 @@ def execute_linkedin_company_run(
                 "final_url": filter_run.final_url,
                 "screenshot": filter_run.screenshot_path,
                 "limit": limit,
+                "max_pages": max_pages,
                 "raw_count": len(raw_candidates),
                 "kept_count": 0,
                 "artifact": str(pass_artifact),
@@ -956,70 +1229,16 @@ def execute_linkedin_company_run(
         )
         typer.echo(f"- Pass {pass_name}: {len(raw_candidates)} raw results")
         for raw in raw_candidates:
-            title = raw.title or ""
-            raw_text = raw.raw_text or ""
-            role_bucket = infer_role_bucket(title, raw_text, settings)
-            if not pass_relevance(pass_name, role_bucket, title, raw_text):
-                continue
-            kept_count += 1
-            connection_degree = raw.connection_degree or "3rd"
-            pass_school = str(pass_config.get("school") or "")
-            pass_implies_usc = "southern california" in pass_school.lower()
-            pass_implies_marshall = "marshall" in pass_school.lower()
-            pass_implies_existing_connection = pass_name == "existing_connections"
-            profile = CandidateProfile(
-                name=raw.name,
-                title=raw.title or "",
+            if apply_raw_candidate(
+                deduped=deduped,
+                raw=raw,
                 company=company,
-                linkedin_url=raw.linkedin_url or "https://www.linkedin.com/",
-                connection_degree=connection_degree,
-                mutual_connections=1 if raw.snippet and "mutual connection" in raw.snippet else 0,
-                existing_connection=pass_implies_existing_connection or connection_degree == "1st",
-                usc_marshall=pass_implies_marshall or detect_usc_marshall(raw_text),
-                usc_alumni=pass_implies_usc or detect_usc(raw_text),
-                shared_history=detect_shared_history(raw_text, settings),
-                indian_background=False,
-                university_recruiter=role_bucket == "University Recruiting",
-                role_bucket=role_bucket,
-            )
-            scored = score_candidate(profile, settings.scoring)
-            key = raw.linkedin_url or f"{raw.name}:{title}"
-            entry = deduped.get(
-                key,
-                {
-                    "name": raw.name,
-                    "title": raw.title,
-                    "location": raw.location,
-                    "linkedin_url": raw.linkedin_url,
-                    "subtitle": raw.subtitle,
-                    "connection_degree": raw.connection_degree,
-                    "snippet": raw.snippet,
-                    "role_bucket": role_bucket,
-                    "score": scored.score,
-                    "tier": scored.tier.value,
-                    "triggers": scored.triggers,
-                    "passes": [],
-                    "existing_connection": profile.existing_connection,
-                    "usc_marshall": profile.usc_marshall,
-                    "usc": profile.usc_alumni,
-                    "shared_history": profile.shared_history,
-                },
-            )
-            entry["passes"] = sorted(set([*entry["passes"], pass_name]))
-            if scored.score > entry["score"]:
-                entry.update(
-                    {
-                        "role_bucket": role_bucket,
-                        "score": scored.score,
-                        "tier": scored.tier.value,
-                        "triggers": scored.triggers,
-                        "existing_connection": profile.existing_connection,
-                        "usc_marshall": profile.usc_marshall,
-                        "usc": profile.usc_alumni,
-                        "shared_history": profile.shared_history,
-                    }
-                )
-            deduped[key] = entry
+                pass_name=pass_name,
+                pass_config=pass_config,
+                settings=settings,
+                company_mode=company_mode,
+            ):
+                kept_count += 1
 
         pass_summaries[-1]["kept_count"] = kept_count
         typer.echo(f"  kept {kept_count} after pass relevance filtering")
@@ -1070,6 +1289,30 @@ def execute_linkedin_company_run(
     )
     typer.echo(f"Artifact: {artifact}")
     return artifact
+
+
+def select_invite_candidates(
+    candidates: list[dict],
+    *,
+    verdict: str = "send",
+    limit: int = 10,
+    start_at: int = 0,
+) -> list[dict]:
+    eligible: list[dict] = []
+    for item in candidates:
+        qc = item.get("polished_note_qc") or item.get("note_qc") or {}
+        item_verdict = qc.get("verdict")
+        if verdict and item_verdict != verdict:
+            continue
+        if item.get("existing_connection"):
+            continue
+        if not item.get("linkedin_url"):
+            continue
+        item = dict(item)
+        if "polished_note" in item:
+            item["note"] = item["polished_note"]
+        eligible.append(item)
+    return eligible[start_at : start_at + limit]
 
 
 def persist_invite_send_results(
@@ -1162,6 +1405,7 @@ def persist_invite_send_results(
 def contact_status_from_invite_result(status: str) -> str:
     mapping = {
         "sent": "Invited",
+        "sent_without_note": "Invited",
         "dry_run_ready": "Invite ready",
         "already_connected": "Connected",
         "unavailable": "No connect path",
@@ -1175,6 +1419,7 @@ def contact_status_from_invite_result(status: str) -> str:
 def touchpoint_status_from_invite_result(status: str) -> str:
     mapping = {
         "sent": "Sent",
+        "sent_without_note": "Sent",
         "dry_run_ready": "Prepared",
         "already_connected": "Already connected",
         "unavailable": "Unavailable",
@@ -1375,6 +1620,14 @@ def run(
         bool,
         typer.Option(help="Force the broad fallback pass even if the pool is already healthy"),
     ] = False,
+    auto_send: Annotated[
+        bool,
+        typer.Option(help="After generating the outreach artifact, immediately send invites"),
+    ] = False,
+    send_limit: Annotated[
+        int,
+        typer.Option(help="How many invite candidates to send automatically when --auto-send is enabled; use 0 for dynamic sizing"),
+    ] = 0,
 ) -> None:
     try:
         settings = OutreachSettings()
@@ -1384,7 +1637,7 @@ def run(
             field = ".".join(str(part) for part in error["loc"])
             typer.echo(f"- {field}: {error['msg']}")
         raise typer.Exit(code=1)
-    execute_linkedin_company_run(
+    artifact = execute_linkedin_company_run(
         settings=settings,
         company=company,
         dry_run=dry_run,
@@ -1394,6 +1647,53 @@ def run(
         enable_marshall=enable_marshall,
         force_broad_fallback=force_broad_fallback,
     )
+    if not auto_send:
+        return
+
+    with artifact.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    batch = select_invite_candidates(
+        payload["results"],
+        verdict="send",
+        limit=send_limit or recommend_auto_send_limit(len(payload["results"])),
+    )
+    if not batch:
+        typer.echo("Auto-send skipped: no eligible candidates with send verdict.")
+        return
+
+    scraper = LinkedInScraper(settings)
+    typer.echo(f"Auto-sending {len(batch)} invite candidates for {company}")
+    results = scraper.send_connection_requests(batch, execute=True)
+    send_artifact = write_artifact(
+        settings.artifacts_dir,
+        "invite-send-batch",
+        {
+            "source_artifact": str(artifact),
+            "company": company,
+            "execute": True,
+            "limit": send_limit,
+            "start_at": 0,
+            "verdict": "send",
+            "count": len(results),
+            "results": [result.__dict__ for result in results],
+        },
+    )
+    status_counts: dict[str, int] = {}
+    for result in results:
+        status_counts[result.status] = status_counts.get(result.status, 0) + 1
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    contacts_added, touchpoints_added = persist_invite_send_results(
+        workbook=workbook,
+        company=company,
+        source_artifact_path=artifact,
+        processed_candidates=batch,
+        send_results=results,
+        send_artifact_path=send_artifact,
+    )
+    typer.echo(f"Auto-send status summary: {status_counts}")
+    typer.echo(f"Auto-send artifact: {send_artifact}")
+    typer.echo(f"Tracked contacts_added: {contacts_added}")
+    typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
 
 
 @app.command("generate-notes")
@@ -2317,22 +2617,12 @@ def send_invites(
 
     company = payload["company"]
     all_candidates = payload["results"]
-    eligible: list[dict] = []
-    for item in all_candidates:
-        qc = item.get("polished_note_qc") or item.get("note_qc") or {}
-        item_verdict = qc.get("verdict")
-        if verdict and item_verdict != verdict:
-            continue
-        if item.get("existing_connection"):
-            continue
-        if not item.get("linkedin_url"):
-            continue
-        item = dict(item)
-        if "polished_note" in item:
-            item["note"] = item["polished_note"]
-        eligible.append(item)
-
-    batch = eligible[start_at : start_at + limit]
+    batch = select_invite_candidates(
+        all_candidates,
+        verdict=verdict,
+        limit=limit,
+        start_at=start_at,
+    )
     if not batch:
         typer.echo("No eligible candidates matched the current filters.")
         raise typer.Exit(code=1)

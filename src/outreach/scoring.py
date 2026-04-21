@@ -37,6 +37,9 @@ def score_candidate(profile: CandidateProfile, weights: ScoringWeights) -> Score
     if profile.university_recruiter or profile.role_bucket == "University Recruiting":
         score += weights.university_recruiter
         triggers.append("University Recruiting")
+    elif profile.role_bucket == "Founder":
+        score += weights.founder_role
+        triggers.append("Founder")
     elif profile.role_bucket == "Product":
         score += weights.product_role
         triggers.append("Role Match")

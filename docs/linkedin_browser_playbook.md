@@ -91,6 +91,16 @@ Then proceed with:
 - `python main.py run ...`
 - `python main.py send-invites ...`
 
+Invite sending has two gates by default:
+
+- note QC verdict must be `send`
+- candidate relevance score must be at least `35`
+
+Use `--min-score` to tighten or loosen that candidate gate. A dry-run
+`send-invites` checks the LinkedIn flow and writes artifacts, but does not add
+contacts or touchpoints to the workspace; tracking is written only with
+`--execute`.
+
 ### ResumeGenerator v1 discovery
 
 ```bash

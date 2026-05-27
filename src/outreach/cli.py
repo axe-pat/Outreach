@@ -1296,6 +1296,7 @@ def select_invite_candidates(
     candidates: list[dict],
     *,
     verdict: str = "send",
+    min_score: int = 35,
     limit: int = 10,
     start_at: int = 0,
 ) -> list[dict]:
@@ -1308,6 +1309,12 @@ def select_invite_candidates(
         if item.get("existing_connection"):
             continue
         if not item.get("linkedin_url"):
+            continue
+        try:
+            candidate_score = int(item.get("score"))
+        except (TypeError, ValueError):
+            candidate_score = None
+        if min_score > 0 and (candidate_score is None or candidate_score < min_score):
             continue
         item = dict(item)
         if "polished_note" in item:
@@ -1441,6 +1448,7 @@ def execute_invite_batch(
     limit: int,
     start_at: int,
     verdict: str,
+    min_score: int,
 ) -> tuple[Path, Path, dict[str, int], int, int]:
     scraper = LinkedInScraper(settings)
     workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
@@ -1458,6 +1466,7 @@ def execute_invite_batch(
             "limit": limit,
             "start_at": start_at,
             "verdict": verdict,
+            "min_score": min_score,
             "count": len(results),
             "results": [result.__dict__ for result in results],
         }
@@ -1466,16 +1475,17 @@ def execute_invite_batch(
     def _on_result(candidate: dict, result, results: list) -> None:
         nonlocal contacts_added, touchpoints_added
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
-        added_contacts, added_touchpoints = persist_invite_send_results(
-            workbook=workbook,
-            company=company,
-            source_artifact_path=source_artifact_path,
-            processed_candidates=[candidate],
-            send_results=[result],
-            send_artifact_path=progress_artifact,
-        )
-        contacts_added += added_contacts
-        touchpoints_added += added_touchpoints
+        if execute:
+            added_contacts, added_touchpoints = persist_invite_send_results(
+                workbook=workbook,
+                company=company,
+                source_artifact_path=source_artifact_path,
+                processed_candidates=[candidate],
+                send_results=[result],
+                send_artifact_path=progress_artifact,
+            )
+            contacts_added += added_contacts
+            touchpoints_added += added_touchpoints
         _write_progress(results)
 
     results = scraper.send_connection_requests(batch, execute=execute, on_result=_on_result)
@@ -1490,6 +1500,7 @@ def execute_invite_batch(
             "limit": limit,
             "start_at": start_at,
             "verdict": verdict,
+            "min_score": min_score,
             "count": len(results),
             "results": [result.__dict__ for result in results],
         },
@@ -1716,6 +1727,10 @@ def run(
         int,
         typer.Option(help="How many invite candidates to send automatically when --auto-send is enabled; use 0 for dynamic sizing"),
     ] = 0,
+    send_min_score: Annotated[
+        int,
+        typer.Option(help="Minimum candidate relevance score required for auto-send"),
+    ] = 35,
 ) -> None:
     try:
         settings = OutreachSettings()
@@ -1743,14 +1758,15 @@ def run(
     batch = select_invite_candidates(
         payload["results"],
         verdict="send",
+        min_score=send_min_score,
         limit=send_limit or recommend_auto_send_limit(len(payload["results"])),
     )
     batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
-        typer.echo("Auto-send skipped: no eligible candidates with send verdict.")
+        typer.echo(f"Auto-send skipped: no eligible candidates with send verdict and score >= {send_min_score}.")
         return
 
-    typer.echo(f"Auto-sending {len(batch)} invite candidates for {company}")
+    typer.echo(f"Auto-sending {len(batch)} invite candidates for {company} with score >= {send_min_score}")
     send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
         settings=settings,
         company=company,
@@ -1760,6 +1776,7 @@ def run(
         limit=send_limit,
         start_at=0,
         verdict="send",
+        min_score=send_min_score,
     )
     typer.echo(f"Auto-send status summary: {status_counts}")
     typer.echo(f"Auto-send artifact: {send_artifact}")
@@ -2683,6 +2700,7 @@ def send_invites(
     limit: Annotated[int, typer.Option(help="Maximum number of candidates to process")] = 10,
     start_at: Annotated[int, typer.Option(help="Start offset into the eligible queue")] = 0,
     verdict: Annotated[str, typer.Option(help="Only include notes with this QC verdict")] = "send",
+    min_score: Annotated[int, typer.Option(help="Minimum candidate relevance score required to send")] = 35,
     execute: Annotated[
         bool,
         typer.Option(help="Actually send invites instead of doing a dry run"),
@@ -2705,6 +2723,7 @@ def send_invites(
     batch = select_invite_candidates(
         all_candidates,
         verdict=verdict,
+        min_score=min_score,
         limit=limit,
         start_at=start_at,
     )
@@ -2714,6 +2733,7 @@ def send_invites(
         raise typer.Exit(code=1)
 
     typer.echo(f"Processing {len(batch)} invite candidates for {company}")
+    typer.echo(f"Candidate score gate: >= {min_score}")
     typer.echo(f"Mode: {'execute' if execute else 'dry run'}")
     artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
         settings=settings,
@@ -2724,6 +2744,7 @@ def send_invites(
         limit=limit,
         start_at=start_at,
         verdict=verdict,
+        min_score=min_score,
     )
     typer.echo(f"Status summary: {status_counts}")
     typer.echo(f"Artifact: {artifact}")

@@ -204,19 +204,29 @@ def test_select_invite_candidates_filters_existing_connections_and_blocked_notes
             "name": "A",
             "linkedin_url": "https://www.linkedin.com/in/a/",
             "existing_connection": False,
+            "score": 50,
             "note_qc": {"verdict": "send"},
         },
         {
             "name": "B",
             "linkedin_url": "https://www.linkedin.com/in/b/",
             "existing_connection": True,
+            "score": 80,
             "note_qc": {"verdict": "send"},
         },
         {
             "name": "C",
             "linkedin_url": "https://www.linkedin.com/in/c/",
             "existing_connection": False,
+            "score": 80,
             "note_qc": {"verdict": "blocked"},
+        },
+        {
+            "name": "D",
+            "linkedin_url": "https://www.linkedin.com/in/d/",
+            "existing_connection": False,
+            "score": 12,
+            "note_qc": {"verdict": "send"},
         },
     ]
 
@@ -300,6 +310,7 @@ def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path
         limit=2,
         start_at=0,
         verdict="send",
+        min_score=35,
     )
 
     assert artifact == final_artifact
@@ -311,6 +322,68 @@ def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path
     assert status_counts == {"sent": 2}
     assert contacts_added == 2
     assert touchpoints_added == 2
+
+
+def test_execute_invite_batch_dry_run_does_not_persist(monkeypatch, tmp_path: Path) -> None:
+    settings = OutreachSettings(tracking_workspace_dir=tmp_path / "workspace")
+    artifact_dir = tmp_path / "artifacts"
+    source_artifact = tmp_path / "notes-batch.json"
+    source_artifact.write_text("{}")
+    persist_calls = []
+
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+    monkeypatch.setattr("outreach.cli.OutreachWorkbook", lambda _path: object())
+
+    def _fake_persist(**kwargs):
+        persist_calls.append(kwargs)
+        return (1, 1)
+
+    monkeypatch.setattr("outreach.cli.persist_invite_send_results", _fake_persist)
+
+    final_artifact = artifact_dir / "final.json"
+
+    def _fake_write_artifact(_artifacts_dir, _label, payload):
+        final_artifact.parent.mkdir(parents=True, exist_ok=True)
+        final_artifact.write_text(json.dumps(payload, indent=2))
+        return final_artifact
+
+    monkeypatch.setattr("outreach.cli.write_artifact", _fake_write_artifact)
+
+    def _fake_send(self, batch, execute=False, on_result=None):
+        results = []
+        for candidate in batch:
+            result = SimpleNamespace(
+                name=candidate["name"],
+                linkedin_url=candidate["linkedin_url"],
+                status="dry_run_ready",
+                detail="ok",
+                note=candidate.get("note", ""),
+                screenshot_path="",
+            )
+            results.append(result)
+            if on_result is not None:
+                on_result(candidate, result, list(results))
+        return results
+
+    monkeypatch.setattr("outreach.cli.LinkedInScraper.send_connection_requests", _fake_send)
+
+    _, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
+        settings=settings,
+        company="Tasklet",
+        source_artifact_path=source_artifact,
+        batch=[{"name": "Alice", "linkedin_url": "https://www.linkedin.com/in/alice/", "note": "hi"}],
+        execute=False,
+        limit=1,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+
+    assert progress_artifact.exists()
+    assert persist_calls == []
+    assert status_counts == {"dry_run_ready": 1}
+    assert contacts_added == 0
+    assert touchpoints_added == 0
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

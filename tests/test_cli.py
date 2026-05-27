@@ -1,12 +1,16 @@
 from datetime import date
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from outreach.cli import (
+    attach_search_urls_to_candidates,
     build_linkedin_company_queue_items,
     build_organization_intel_items,
     build_target_action_queue_items,
     classify_opportunity_action,
     contact_status_from_invite_result,
+    execute_invite_batch,
     extract_team_size_from_notes,
     extract_tags_from_notes,
     extract_description_from_notes,
@@ -232,6 +236,99 @@ def test_absolute_linkedin_profile_is_explicit_even_if_it_points_to_outreach_pro
 
     assert settings.using_fallback_linkedin_profile() is False
     settings.validate_explicit_linkedin_profile()
+
+
+def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path: Path) -> None:
+    settings = OutreachSettings(tracking_workspace_dir=tmp_path / "workspace")
+    artifact_dir = tmp_path / "artifacts"
+    source_artifact = tmp_path / "notes-batch.json"
+    source_artifact.write_text("{}")
+    persist_calls = []
+
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+
+    class _FakeWorkbook:
+        def __init__(self, _path: Path) -> None:
+            self.path = _path
+
+    monkeypatch.setattr("outreach.cli.OutreachWorkbook", _FakeWorkbook)
+
+    def _fake_persist(**kwargs):
+        persist_calls.append(kwargs["processed_candidates"][0]["name"])
+        return (1, 1)
+
+    monkeypatch.setattr("outreach.cli.persist_invite_send_results", _fake_persist)
+
+    final_artifact = artifact_dir / "final.json"
+
+    def _fake_write_artifact(_artifacts_dir, _label, payload):
+        final_artifact.parent.mkdir(parents=True, exist_ok=True)
+        final_artifact.write_text(json.dumps(payload, indent=2))
+        return final_artifact
+
+    monkeypatch.setattr("outreach.cli.write_artifact", _fake_write_artifact)
+
+    def _fake_send(self, batch, execute=False, on_result=None):
+        results = []
+        for candidate in batch:
+            result = SimpleNamespace(
+                name=candidate["name"],
+                linkedin_url=candidate["linkedin_url"],
+                status="sent",
+                detail="ok",
+                note=candidate.get("note", ""),
+                screenshot_path="",
+            )
+            results.append(result)
+            if on_result is not None:
+                on_result(candidate, result, list(results))
+        return results
+
+    monkeypatch.setattr("outreach.cli.LinkedInScraper.send_connection_requests", _fake_send)
+
+    batch = [
+        {"name": "Alice", "linkedin_url": "https://www.linkedin.com/in/alice/", "note": "hi"},
+        {"name": "Bob", "linkedin_url": "https://www.linkedin.com/in/bob/", "note": "hello"},
+    ]
+
+    artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
+        settings=settings,
+        company="Scale AI",
+        source_artifact_path=source_artifact,
+        batch=batch,
+        execute=True,
+        limit=2,
+        start_at=0,
+        verdict="send",
+    )
+
+    assert artifact == final_artifact
+    assert progress_artifact.exists()
+    progress_payload = json.loads(progress_artifact.read_text())
+    assert progress_payload["count"] == 2
+    assert [item["name"] for item in progress_payload["results"]] == ["Alice", "Bob"]
+    assert persist_calls == ["Alice", "Bob"]
+    assert status_counts == {"sent": 2}
+    assert contacts_added == 2
+    assert touchpoints_added == 2
+
+
+def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:
+    payload = {
+        "pass_summaries": [
+            {"pass_name": "product_network", "final_url": "https://www.linkedin.com/search/results/people/?foo=1"},
+            {"pass_name": "engineering_usc", "final_url": "https://www.linkedin.com/search/results/people/?bar=2"},
+        ]
+    }
+    candidates = [
+        {"name": "Alice", "passes": ["product_network", "engineering_usc"]},
+        {"name": "Bob", "passes": ["missing_pass"]},
+    ]
+
+    enriched = attach_search_urls_to_candidates(payload, candidates)
+
+    assert enriched[0]["_search_url"] == "https://www.linkedin.com/search/results/people/?foo=1"
+    assert "_search_url" not in enriched[1]
 
 
 def test_parse_team_size_headcount_handles_commas() -> None:

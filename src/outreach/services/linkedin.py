@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+import signal
 import subprocess
 from pathlib import Path
 import random
@@ -93,6 +95,10 @@ class InviteSendResult:
     detail: str
     note: str
     screenshot_path: str | None = None
+
+
+class InviteCandidateTimeoutError(RuntimeError):
+    """Raised when a single invite candidate takes too long to process."""
 
 
 class LinkedInScraper:
@@ -335,6 +341,7 @@ class LinkedInScraper:
         self,
         candidates: list[dict],
         execute: bool = False,
+        on_result=None,
     ) -> list[InviteSendResult]:
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
@@ -346,26 +353,42 @@ class LinkedInScraper:
                         "LinkedIn preflight failed before invite send: "
                         f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
                     )
+                baseline_pages = list(context.pages)
                 try:
                     results: list[InviteSendResult] = []
                     for candidate in candidates:
+                        self._close_run_spawned_pages(context, keep_pages=baseline_pages)
                         page = context.new_page()
                         page.set_default_timeout(15000)
                         try:
-                            results.append(self._send_single_invite(page, candidate, execute=execute))
-                        except Exception as exc:
-                            results.append(
-                                InviteSendResult(
-                                    name=str(candidate.get("name") or "Unknown"),
-                                    linkedin_url=str(candidate.get("linkedin_url") or ""),
-                                    status="send_error",
-                                    detail=f"Invite processing crashed: {exc}",
-                                    note=str(candidate.get("note") or ""),
-                                    screenshot_path=self._save_screenshot(page, "invite-crash"),
-                                )
+                            with self._candidate_timeout(self.settings.search.invite_candidate_timeout_seconds):
+                                result = self._send_single_invite(page, candidate, execute=execute)
+                            results.append(result)
+                        except InviteCandidateTimeoutError as exc:
+                            result = InviteSendResult(
+                                name=str(candidate.get("name") or "Unknown"),
+                                linkedin_url=str(candidate.get("linkedin_url") or ""),
+                                status="send_error",
+                                detail=str(exc),
+                                note=str(candidate.get("note") or ""),
+                                screenshot_path=self._save_screenshot(page, "invite-timeout"),
                             )
+                            results.append(result)
+                        except Exception as exc:
+                            result = InviteSendResult(
+                                name=str(candidate.get("name") or "Unknown"),
+                                linkedin_url=str(candidate.get("linkedin_url") or ""),
+                                status="send_error",
+                                detail=f"Invite processing crashed: {exc}",
+                                note=str(candidate.get("note") or ""),
+                                screenshot_path=self._save_screenshot(page, "invite-crash"),
+                            )
+                            results.append(result)
                         finally:
+                            if on_result is not None:
+                                on_result(candidate, results[-1], list(results))
                             self._close_page_safely(page)
+                            self._close_run_spawned_pages(context, keep_pages=baseline_pages)
                     return results
                 finally:
                     pass
@@ -428,6 +451,7 @@ class LinkedInScraper:
         name = str(candidate.get("name") or "Unknown")
         linkedin_url = str(candidate.get("linkedin_url") or "")
         note = str(candidate.get("note") or "")
+        search_url = str(candidate.get("_search_url") or "")
         if not linkedin_url:
             return InviteSendResult(
                 name=name,
@@ -436,6 +460,16 @@ class LinkedInScraper:
                 detail="Missing LinkedIn URL",
                 note=note,
             )
+
+        if search_url:
+            search_result = self._send_single_invite_from_search_results(
+                page,
+                candidate=candidate,
+                search_url=search_url,
+                execute=execute,
+            )
+            if search_result is not None:
+                return search_result
 
         if not self._navigate_profile(page, linkedin_url):
             return InviteSendResult(
@@ -462,16 +496,22 @@ class LinkedInScraper:
                 )
 
             try:
-                href = None
-                try:
-                    href = connect_button.get_attribute("href")
-                except Exception:
-                    href = None
-                if href and "/preload/custom-invite/" in href:
-                    page.goto(urljoin("https://www.linkedin.com", href), wait_until="domcontentloaded", timeout=30000)
-                else:
-                    connect_button.click(force=True, timeout=5000)
-                self._human_pause(page)
+                invite_flow_ready = False
+                for attempt in range(2):
+                    active_connect = connect_button if attempt == 0 else self._find_connect_button(page, candidate_name=name)
+                    if active_connect is None:
+                        break
+                    self._activate_connect(page, active_connect)
+                    self._human_pause(page)
+                    if self._is_wrong_invite_branch(page):
+                        if not self._recover_profile_page(page, linkedin_url):
+                            break
+                        self._human_pause(page)
+                        continue
+                    invite_flow_ready = True
+                    break
+                if not invite_flow_ready and self._is_wrong_invite_branch(page):
+                    raise PlaywrightTimeoutError("Connect flow opened a mutual-connections/search page instead of the invite flow.")
                 if not self._invite_flow_available(page, timeout_ms=4000):
                     self._dismiss_transient_overlays(page)
                 if not self._invite_flow_available(page, timeout_ms=2000):
@@ -543,6 +583,91 @@ class LinkedInScraper:
             note=note,
             screenshot_path=self._save_screenshot(page, "invite-no-connect"),
         )
+
+    def _send_single_invite_from_search_results(
+        self,
+        page: Page,
+        *,
+        candidate: dict,
+        search_url: str,
+        execute: bool,
+    ) -> InviteSendResult | None:
+        name = str(candidate.get("name") or "Unknown")
+        linkedin_url = str(candidate.get("linkedin_url") or "")
+        note = str(candidate.get("note") or "")
+        candidate_name = str(candidate.get("name") or "")
+
+        if not search_url or not self._safe_goto(page, search_url):
+            return None
+        self._human_pause(page)
+        self._dismiss_transient_overlays(page)
+
+        if not self._open_search_result_connect(page, linkedin_url=linkedin_url, candidate_name=candidate_name):
+            return None
+
+        if not execute:
+            return InviteSendResult(
+                name=name,
+                linkedin_url=linkedin_url,
+                status="dry_run_ready",
+                detail="Search-result connect flow looks available; dry run only.",
+                note=note,
+                screenshot_path=self._save_screenshot(page, "invite-dry-run"),
+            )
+
+        try:
+            self._human_pause(page)
+            if self._is_mutuals_branch_url(page):
+                return InviteSendResult(
+                    name=name,
+                    linkedin_url=linkedin_url,
+                    status="send_error",
+                    detail="Search-result connect fell into a mutual-connections branch.",
+                    note=note,
+                    screenshot_path=self._save_screenshot(page, "invite-send-error"),
+                )
+            if not self._invite_flow_available(page, timeout_ms=4000):
+                self._dismiss_transient_overlays(page)
+            if not self._invite_flow_available(page, timeout_ms=2000):
+                return InviteSendResult(
+                    name=name,
+                    linkedin_url=linkedin_url,
+                    status="unavailable",
+                    detail="Search-result connect did not open a usable invite flow.",
+                    note=note,
+                    screenshot_path=self._save_screenshot(page, "invite-no-connect"),
+                )
+            note_supported = self._open_add_note(page)
+            self._human_pause(page)
+            note_sent = note
+            if note_supported:
+                self._fill_invite_note(page, note)
+                self._human_pause(page)
+            else:
+                note_sent = ""
+            self._click_send_invite(page)
+            self._human_pause(page)
+            return InviteSendResult(
+                name=name,
+                linkedin_url=linkedin_url,
+                status="sent" if note_supported else "sent_without_note",
+                detail=(
+                    "Invitation sent successfully from search results."
+                    if note_supported
+                    else "Invitation sent from search results without a note because LinkedIn did not expose the note field."
+                ),
+                note=note_sent,
+                screenshot_path=self._save_screenshot(page, "invite-sent"),
+            )
+        except PlaywrightError as exc:
+            return InviteSendResult(
+                name=name,
+                linkedin_url=linkedin_url,
+                status="send_error",
+                detail=f"Search-result connect flow failed: {exc}",
+                note=note,
+                screenshot_path=self._save_screenshot(page, "invite-send-error"),
+            )
 
     def _navigate_profile(self, page: Page, linkedin_url: str) -> bool:
         return self._safe_goto(page, linkedin_url)
@@ -647,6 +772,141 @@ class LinkedInScraper:
             page.close()
         except PlaywrightError:
             pass
+
+    def _close_run_spawned_pages(self, context, keep_pages: list[Page] | tuple[Page, ...]) -> None:
+        keep_ids = {id(page) for page in keep_pages if page is not None}
+        for page in list(context.pages):
+            if id(page) in keep_ids:
+                continue
+            self._close_page_safely(page)
+
+    def _open_search_result_connect(self, page: Page, *, linkedin_url: str, candidate_name: str) -> bool:
+        normalized_target = self._normalize_linkedin_profile_url(linkedin_url)
+        if not normalized_target:
+            return False
+        target_name = normalize_typeahead_text(candidate_name)
+        for page_number in range(1, 4):
+            if page_number > 1:
+                target_url = self._set_people_search_page(page.url, page_number)
+                if not self._safe_goto(page, target_url):
+                    break
+                self._human_pause(page)
+            self._scroll_results(page)
+            try:
+                clicked = page.evaluate(
+                    """
+                    ({ targetUrl, targetName }) => {
+                      const normalizeUrl = (value) => {
+                        try {
+                          const url = new URL(value, window.location.origin);
+                          return `${url.origin}${url.pathname}`.replace(/\\/$/, '').toLowerCase();
+                        } catch (_err) {
+                          return (value || '').replace(/\\/$/, '').toLowerCase();
+                        }
+                      };
+                      const normalizeText = (value) => (value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                      const target = normalizeUrl(targetUrl);
+                      const nameTarget = normalizeText(targetName);
+                      const anchors = Array.from(document.querySelectorAll('a[href*="/in/"]'));
+                      for (const anchor of anchors) {
+                        const anchorUrl = normalizeUrl(anchor.href);
+                        const anchorText = normalizeText(anchor.textContent || '');
+                        if (anchorUrl !== target && (!nameTarget || anchorText !== nameTarget)) continue;
+                        const container = anchor.closest('li, article, div.entity-result, div[data-view-name], div.reusable-search__result-container') || anchor.parentElement;
+                        if (!container) continue;
+                        const buttons = Array.from(container.querySelectorAll('button, a'));
+                        for (const button of buttons) {
+                          const text = normalizeText(button.textContent || '');
+                          const aria = normalizeText(button.getAttribute('aria-label') || '');
+                          if (text === 'connect' || aria.includes('connect')) {
+                            button.click();
+                            return true;
+                          }
+                        }
+                      }
+                      return false;
+                    }
+                    """,
+                    {"targetUrl": normalized_target, "targetName": target_name},
+                )
+                if clicked:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _activate_connect(self, page: Page, connect_button) -> None:
+        href = None
+        try:
+            href = connect_button.get_attribute("href")
+        except Exception:
+            href = None
+        if href and "/preload/custom-invite/" in href:
+            page.goto(urljoin("https://www.linkedin.com", href), wait_until="domcontentloaded", timeout=30000)
+            return
+
+        for force in (False, True):
+            try:
+                connect_button.click(timeout=5000, force=force)
+                return
+            except Exception:
+                continue
+
+        try:
+            connect_button.evaluate("(el) => el.click()")
+            return
+        except Exception as exc:
+            raise PlaywrightTimeoutError(f"Could not activate Connect action: {exc}") from exc
+
+    @contextmanager
+    def _candidate_timeout(self, seconds: int):
+        if seconds <= 0 or not hasattr(signal, "setitimer"):
+            yield
+            return
+
+        def _raise_timeout(_signum, _frame):
+            raise InviteCandidateTimeoutError(
+                f"Invite candidate exceeded {seconds}s and was skipped."
+            )
+
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+    def _is_wrong_invite_branch(self, page: Page) -> bool:
+        current_url = (page.url or "").lower()
+        return (
+            "linkedin.com/search/results/people" in current_url
+            or self._is_mutuals_branch_url(page)
+        )
+
+    def _is_mutuals_branch_url(self, page: Page) -> bool:
+        current_url = (page.url or "").lower()
+        return "member_profile_canned_search" in current_url or "connectionof=" in current_url
+
+    def _normalize_linkedin_profile_url(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return url.rstrip("/").lower()
+        if not parsed.scheme or not parsed.netloc:
+            return url.rstrip("/").lower()
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/").lower()
+
+    def _recover_profile_page(self, page: Page, linkedin_url: str) -> bool:
+        self._dismiss_transient_overlays(page)
+        if not self._safe_goto(page, linkedin_url, timeout_ms=20000):
+            return False
+        try:
+            page.evaluate("window.scrollTo(0, 0)")
+        except Exception:
+            pass
+        return True
 
     def _scroll_results(self, page: Page) -> None:
         # Nudge LinkedIn to hydrate the first batch of people cards.

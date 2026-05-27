@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
-from outreach.artifacts import write_artifact
+from outreach.artifacts import artifact_timestamp, write_artifact
 from outreach.config import OutreachSettings
 from outreach.discovery.adapters import BuiltInCompaniesAdapter, SourceAdapter, YCombinatorCompanyDirectoryAdapter
 from outreach.discovery.http import HttpTextDownloader
@@ -1429,6 +1429,93 @@ def touchpoint_status_from_invite_result(status: str) -> str:
     }
     return mapping.get(status, "Processed")
 
+
+def execute_invite_batch(
+    *,
+    settings: OutreachSettings,
+    company: str,
+    source_artifact_path: Path,
+    batch: list[dict],
+    execute: bool,
+    limit: int,
+    start_at: int,
+    verdict: str,
+) -> tuple[Path, Path, dict[str, int], int, int]:
+    scraper = LinkedInScraper(settings)
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    progress_artifact = settings.artifacts_dir / f"{source_artifact_path.stem}-{artifact_timestamp()}-invite-progress.json"
+    progress_artifact.parent.mkdir(parents=True, exist_ok=True)
+    status_counts: dict[str, int] = {}
+    contacts_added = 0
+    touchpoints_added = 0
+
+    def _write_progress(results: list) -> None:
+        payload = {
+            "source_artifact": str(source_artifact_path),
+            "company": company,
+            "execute": execute,
+            "limit": limit,
+            "start_at": start_at,
+            "verdict": verdict,
+            "count": len(results),
+            "results": [result.__dict__ for result in results],
+        }
+        progress_artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _on_result(candidate: dict, result, results: list) -> None:
+        nonlocal contacts_added, touchpoints_added
+        status_counts[result.status] = status_counts.get(result.status, 0) + 1
+        added_contacts, added_touchpoints = persist_invite_send_results(
+            workbook=workbook,
+            company=company,
+            source_artifact_path=source_artifact_path,
+            processed_candidates=[candidate],
+            send_results=[result],
+            send_artifact_path=progress_artifact,
+        )
+        contacts_added += added_contacts
+        touchpoints_added += added_touchpoints
+        _write_progress(results)
+
+    results = scraper.send_connection_requests(batch, execute=execute, on_result=_on_result)
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "invite-send-batch",
+        {
+            "source_artifact": str(source_artifact_path),
+            "progress_artifact": str(progress_artifact),
+            "company": company,
+            "execute": execute,
+            "limit": limit,
+            "start_at": start_at,
+            "verdict": verdict,
+            "count": len(results),
+            "results": [result.__dict__ for result in results],
+        },
+    )
+    return artifact, progress_artifact, status_counts, contacts_added, touchpoints_added
+
+
+def attach_search_urls_to_candidates(payload: dict, candidates: list[dict]) -> list[dict]:
+    summaries = payload.get("pass_summaries") or []
+    pass_url_map = {
+        str(item.get("pass_name") or ""): str(item.get("final_url") or "")
+        for item in summaries
+        if item.get("pass_name") and item.get("final_url")
+    }
+    enriched: list[dict] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        search_url = ""
+        for pass_name in item.get("passes") or []:
+            search_url = pass_url_map.get(str(pass_name), "")
+            if search_url:
+                break
+        if search_url:
+            item["_search_url"] = search_url
+        enriched.append(item)
+    return enriched
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -1657,41 +1744,25 @@ def run(
         verdict="send",
         limit=send_limit or recommend_auto_send_limit(len(payload["results"])),
     )
+    batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
         typer.echo("Auto-send skipped: no eligible candidates with send verdict.")
         return
 
-    scraper = LinkedInScraper(settings)
     typer.echo(f"Auto-sending {len(batch)} invite candidates for {company}")
-    results = scraper.send_connection_requests(batch, execute=True)
-    send_artifact = write_artifact(
-        settings.artifacts_dir,
-        "invite-send-batch",
-        {
-            "source_artifact": str(artifact),
-            "company": company,
-            "execute": True,
-            "limit": send_limit,
-            "start_at": 0,
-            "verdict": "send",
-            "count": len(results),
-            "results": [result.__dict__ for result in results],
-        },
-    )
-    status_counts: dict[str, int] = {}
-    for result in results:
-        status_counts[result.status] = status_counts.get(result.status, 0) + 1
-    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
-    contacts_added, touchpoints_added = persist_invite_send_results(
-        workbook=workbook,
+    send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
+        settings=settings,
         company=company,
         source_artifact_path=artifact,
-        processed_candidates=batch,
-        send_results=results,
-        send_artifact_path=send_artifact,
+        batch=batch,
+        execute=True,
+        limit=send_limit,
+        start_at=0,
+        verdict="send",
     )
     typer.echo(f"Auto-send status summary: {status_counts}")
     typer.echo(f"Auto-send artifact: {send_artifact}")
+    typer.echo(f"Auto-send progress artifact: {progress_artifact}")
     typer.echo(f"Tracked contacts_added: {contacts_added}")
     typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
 
@@ -2623,43 +2694,26 @@ def send_invites(
         limit=limit,
         start_at=start_at,
     )
+    batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
         typer.echo("No eligible candidates matched the current filters.")
         raise typer.Exit(code=1)
 
-    scraper = LinkedInScraper(settings)
     typer.echo(f"Processing {len(batch)} invite candidates for {company}")
     typer.echo(f"Mode: {'execute' if execute else 'dry run'}")
-    results = scraper.send_connection_requests(batch, execute=execute)
-    artifact = write_artifact(
-        settings.artifacts_dir,
-        "invite-send-batch",
-        {
-            "source_artifact": str(artifact_path),
-            "company": company,
-            "execute": execute,
-            "limit": limit,
-            "start_at": start_at,
-            "verdict": verdict,
-            "count": len(results),
-            "results": [result.__dict__ for result in results],
-        },
-    )
-    status_counts: dict[str, int] = {}
-    for result in results:
-        status_counts[result.status] = status_counts.get(result.status, 0) + 1
-
-    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
-    contacts_added, touchpoints_added = persist_invite_send_results(
-        workbook=workbook,
+    artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
+        settings=settings,
         company=company,
         source_artifact_path=artifact_path,
-        processed_candidates=batch,
-        send_results=results,
-        send_artifact_path=artifact,
+        batch=batch,
+        execute=execute,
+        limit=limit,
+        start_at=start_at,
+        verdict=verdict,
     )
     typer.echo(f"Status summary: {status_counts}")
     typer.echo(f"Artifact: {artifact}")
+    typer.echo(f"Progress artifact: {progress_artifact}")
     typer.echo(f"Tracked contacts_added: {contacts_added}")
     typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
 

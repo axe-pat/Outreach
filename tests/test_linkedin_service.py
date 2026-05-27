@@ -1,5 +1,10 @@
 from outreach.config import OutreachSettings
+from contextlib import contextmanager
+
+import outreach.services.linkedin as linkedin_module
 from outreach.services.linkedin import (
+    InviteCandidateTimeoutError,
+    InviteSendResult,
     LinkedInScraper,
     normalize_typeahead_text,
     primary_typeahead_label,
@@ -66,6 +71,9 @@ class _StubLocator:
 
 
 class _StubPage:
+    def __init__(self) -> None:
+        self.url = "https://www.linkedin.com/in/test-user/"
+
     def evaluate(self, _script: str):
         return None
 
@@ -90,6 +98,9 @@ class _StubPage:
         return None
 
     def click(self, _x: int, _y: int):
+        return None
+
+    def close(self):
         return None
 
 
@@ -214,3 +225,268 @@ def test_send_single_invite_marks_unavailable_when_connect_never_opens_invite_fl
 
     assert result.status == "unavailable"
     assert "usable invite flow" in result.detail
+
+
+def test_close_run_spawned_pages_keeps_only_baseline_pages() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    class _ClosablePage(_StubPage):
+        def __init__(self, label: str) -> None:
+            self.label = label
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Context:
+        def __init__(self, pages):
+            self.pages = pages
+
+    feed = _ClosablePage("feed")
+    helper = _ClosablePage("helper")
+    stray = _ClosablePage("stray")
+    context = _Context([feed, helper, stray])
+
+    scraper._close_run_spawned_pages(context, keep_pages=[feed, helper])
+
+    assert feed.closed is False
+    assert helper.closed is False
+    assert stray.closed is True
+
+
+def test_is_wrong_invite_branch_detects_mutual_connection_search_url() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _StubPage()
+    page.url = "https://www.linkedin.com/search/results/people/?origin=MEMBER_PROFILE_CANNED_SEARCH&connectionOf=abc"
+
+    assert scraper._is_wrong_invite_branch(page) is True
+
+
+def test_send_single_invite_recovers_from_wrong_branch_and_retries(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _StubPage()
+
+    class _ConnectButton:
+        def get_attribute(self, _name: str):
+            return None
+
+        def click(self, force: bool = False, timeout: int = 0):
+            if calls["recover"] == 0:
+                page.url = "https://www.linkedin.com/search/results/people/?origin=MEMBER_PROFILE_CANNED_SEARCH&connectionOf=abc"
+            else:
+                page.url = "https://www.linkedin.com/preload/custom-invite/?vanityName=test-user"
+            return None
+
+    calls = {"recover": 0}
+
+    monkeypatch.setattr(scraper, "_navigate_profile", lambda _page, _url: True)
+    monkeypatch.setattr(scraper, "_human_pause", lambda _page: None)
+    monkeypatch.setattr(scraper, "_save_screenshot", lambda _page, _label: "shot.png")
+    monkeypatch.setattr(scraper, "_find_connect_button", lambda _page, candidate_name=None: _ConnectButton())
+    monkeypatch.setattr(scraper, "_invite_flow_available", lambda _page, timeout_ms=0: calls["recover"] > 0)
+
+    def _recover(_page, _url):
+        calls["recover"] += 1
+        page.url = "https://www.linkedin.com/in/test-user/"
+        return True
+
+    monkeypatch.setattr(scraper, "_recover_profile_page", _recover)
+    monkeypatch.setattr(scraper, "_open_add_note", lambda _page: False)
+    monkeypatch.setattr(scraper, "_click_send_invite", lambda _page: None)
+
+    result = scraper._send_single_invite(
+        page,
+        {"name": "Test User", "linkedin_url": "https://www.linkedin.com/in/test-user/", "note": "hello"},
+        execute=True,
+    )
+
+    assert calls["recover"] == 1
+    assert result.status == "sent_without_note"
+
+
+class _BatchPage(_StubPage):
+    def set_default_timeout(self, _timeout: int) -> None:
+        return None
+
+
+class _BatchContext:
+    def __init__(self) -> None:
+        self.feed = _BatchPage()
+        self.pages = [self.feed]
+
+    def new_page(self):
+        page = _BatchPage()
+        self.pages.append(page)
+        return page
+
+
+class _BatchBrowser:
+    def __init__(self) -> None:
+        self.contexts = [_BatchContext()]
+
+    def close(self) -> None:
+        return None
+
+
+class _PlaywrightContextManager:
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_send_connection_requests_calls_on_result(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    browser = _BatchBrowser()
+    seen = []
+
+    monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _PlaywrightContextManager())
+    monkeypatch.setattr(scraper, "_connect_over_cdp", lambda _pw: browser)
+    monkeypatch.setattr(scraper, "_session_preflight", lambda _ctx: {"ok": True, "current_url": "", "authwall_or_login": False})
+    monkeypatch.setattr(scraper, "_close_run_spawned_pages", lambda _ctx, keep_pages=(): None)
+    monkeypatch.setattr(scraper, "_close_page_safely", lambda _page: None)
+
+    @contextmanager
+    def _no_timeout(_seconds: int):
+        yield
+
+    monkeypatch.setattr(scraper, "_candidate_timeout", _no_timeout)
+    monkeypatch.setattr(
+        scraper,
+        "_send_single_invite",
+        lambda _page, candidate, execute=False: InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="sent",
+            detail="ok",
+            note=candidate.get("note", ""),
+        ),
+    )
+
+    results = scraper.send_connection_requests(
+        [{"name": "Test User", "linkedin_url": "https://www.linkedin.com/in/test-user/", "note": "hello"}],
+        execute=True,
+        on_result=lambda candidate, result, results: seen.append((candidate["name"], result.status, len(results))),
+    )
+
+    assert [result.status for result in results] == ["sent"]
+    assert seen == [("Test User", "sent", 1)]
+
+
+def test_send_connection_requests_marks_timeout_as_send_error(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    browser = _BatchBrowser()
+
+    monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _PlaywrightContextManager())
+    monkeypatch.setattr(scraper, "_connect_over_cdp", lambda _pw: browser)
+    monkeypatch.setattr(scraper, "_session_preflight", lambda _ctx: {"ok": True, "current_url": "", "authwall_or_login": False})
+    monkeypatch.setattr(scraper, "_close_run_spawned_pages", lambda _ctx, keep_pages=(): None)
+    monkeypatch.setattr(scraper, "_close_page_safely", lambda _page: None)
+    monkeypatch.setattr(scraper, "_save_screenshot", lambda _page, _label: "shot.png")
+
+    @contextmanager
+    def _no_timeout(_seconds: int):
+        yield
+
+    monkeypatch.setattr(scraper, "_candidate_timeout", _no_timeout)
+
+    def _raise_timeout(_page, _candidate, execute=False):
+        raise InviteCandidateTimeoutError("Invite candidate exceeded 45s and was skipped.")
+
+    monkeypatch.setattr(scraper, "_send_single_invite", _raise_timeout)
+
+    results = scraper.send_connection_requests(
+        [{"name": "Slow User", "linkedin_url": "https://www.linkedin.com/in/slow-user/", "note": "hello"}],
+        execute=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].status == "send_error"
+    assert "exceeded 45s" in results[0].detail
+
+
+def test_activate_connect_prefers_normal_click_before_force(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    class _ConnectButton:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_attribute(self, _name: str):
+            return None
+
+        def click(self, timeout: int = 0, force: bool = False):
+            self.calls.append(force)
+            if force:
+                raise AssertionError("Force click should not be needed when normal click works.")
+            return None
+
+        def evaluate(self, _script: str):
+            raise AssertionError("JS click should not be needed when normal click works.")
+
+    button = _ConnectButton()
+    scraper._activate_connect(_StubPage(), button)
+
+    assert button.calls == [False]
+
+
+def test_send_single_invite_prefers_search_result_path_when_available(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _StubPage()
+
+    monkeypatch.setattr(
+        scraper,
+        "_send_single_invite_from_search_results",
+        lambda _page, candidate, search_url, execute=False: InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="sent",
+            detail="ok",
+            note=candidate.get("note", ""),
+        ),
+    )
+    monkeypatch.setattr(scraper, "_navigate_profile", lambda _page, _url: (_ for _ in ()).throw(AssertionError("Profile path should not run first.")))
+
+    result = scraper._send_single_invite(
+        page,
+        {
+            "name": "Test User",
+            "linkedin_url": "https://www.linkedin.com/in/test-user/",
+            "note": "hello",
+            "_search_url": "https://www.linkedin.com/search/results/people/?foo=1",
+        },
+        execute=True,
+    )
+
+    assert result.status == "sent"
+
+
+def test_open_search_result_connect_checks_multiple_pages(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    class _SearchPage(_StubPage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.url = "https://www.linkedin.com/search/results/people/?foo=1"
+            self.calls = 0
+
+        def evaluate(self, _script: str, payload=None):
+            self.calls += 1
+            return self.calls == 2
+
+    page = _SearchPage()
+    visited = []
+
+    monkeypatch.setattr(scraper, "_safe_goto", lambda _page, url, timeout_ms=30000: visited.append(url) or True)
+    monkeypatch.setattr(scraper, "_human_pause", lambda _page: None)
+    monkeypatch.setattr(scraper, "_scroll_results", lambda _page: None)
+
+    opened = scraper._open_search_result_connect(
+        page,
+        linkedin_url="https://www.linkedin.com/in/test-user/",
+        candidate_name="Test User",
+    )
+
+    assert opened is True
+    assert any("page=2" in url for url in visited)

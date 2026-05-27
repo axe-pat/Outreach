@@ -32,6 +32,7 @@ class SearchStrategy(BaseModel):
     final_company_limit: int = 25
     note_generation_limit: int = 15
     hard_company_limit: int = 40
+    invite_candidate_timeout_seconds: int = 45
     broad_fallback_min_pool_size: int = 18
     max_pages_high_value: int = 2
     max_pages_default: int = 1

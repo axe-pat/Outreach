@@ -157,6 +157,138 @@ def detect_shared_history(raw_text: str, settings: OutreachSettings) -> bool:
     return any(company.lower() in text for company in settings.search.ex_companies)
 
 
+def company_search_aliases(company: str) -> list[str]:
+    cleaned = " ".join(company.split()).strip()
+    if not cleaned:
+        return []
+    aliases = [cleaned]
+    suffix_patterns = [
+        r"\s+inc\.?$",
+        r"\s+incorporated$",
+        r"\s+llc$",
+        r"\s+ltd\.?$",
+        r"\s+corp\.?$",
+        r"\s+corporation$",
+    ]
+    for pattern in suffix_patterns:
+        alias = re.sub(pattern, "", cleaned, flags=re.I).strip()
+        if alias and alias.lower() != cleaned.lower():
+            aliases.append(alias)
+    phrase_suffixes = [
+        "Defense Systems",
+        "Systems",
+        "Technologies",
+        "Technology",
+        "Labs",
+        "AI",
+    ]
+    for suffix in phrase_suffixes:
+        pattern = rf"\s+{re.escape(suffix)}$"
+        alias = re.sub(pattern, "", cleaned, flags=re.I).strip()
+        if alias and alias.lower() != cleaned.lower():
+            aliases.append(alias)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        key = alias.lower()
+        if key not in seen:
+            deduped.append(alias)
+            seen.add(key)
+    return deduped
+
+
+def startup_pool_mode(raw_count: int | None) -> str:
+    if raw_count is None:
+        return "unknown"
+    if raw_count <= 0:
+        return "empty"
+    if raw_count <= 4:
+        return "micro"
+    if raw_count <= 12:
+        return "small"
+    if raw_count <= 25:
+        return "normal"
+    return "selective"
+
+
+def startup_pool_send_min_score(pool_mode: str) -> int:
+    thresholds = {
+        "micro": -5,
+        "small": 10,
+        "normal": 20,
+        "selective": 35,
+        "empty": 20,
+        "unknown": 20,
+    }
+    return thresholds.get(pool_mode, 20)
+
+
+def recommend_auto_send_limit(candidate_count: int, pool_mode: str | None = None) -> int:
+    if pool_mode == "micro":
+        return min(candidate_count, 4)
+    if pool_mode == "small":
+        return min(candidate_count, 6)
+    if pool_mode == "normal":
+        return min(candidate_count, 10)
+    if pool_mode == "selective":
+        return min(candidate_count, 12)
+    if candidate_count >= 15:
+        return 12
+    if candidate_count >= 10:
+        return 10
+    if candidate_count >= 5:
+        return 5
+    return 0
+
+
+def startup_pool_metadata(payload: dict) -> dict[str, int | str | bool | None]:
+    startup_summary = next(
+        (
+            item
+            for item in payload.get("pass_summaries") or []
+            if item.get("pass_name") == "startup_preflight"
+        ),
+        None,
+    )
+    if not startup_summary:
+        return {
+            "raw_count": None,
+            "kept_count": None,
+            "pool_mode": "unknown",
+            "adaptive_send_min_score": 20,
+            "coverage_only": False,
+        }
+    try:
+        raw_count = int(startup_summary.get("raw_count"))
+    except (TypeError, ValueError):
+        raw_count = None
+    try:
+        kept_count = int(startup_summary.get("kept_count"))
+    except (TypeError, ValueError):
+        kept_count = None
+    mode = startup_pool_mode(raw_count)
+    return {
+        "raw_count": raw_count,
+        "kept_count": kept_count,
+        "pool_mode": mode,
+        "adaptive_send_min_score": startup_pool_send_min_score(mode),
+        "coverage_only": bool(startup_summary.get("coverage_only")),
+    }
+
+
+def effective_send_min_score(payload: dict, requested_min_score: int, adaptive: bool = True) -> int:
+    if not adaptive:
+        return requested_min_score
+    if payload.get("company_mode") != "startup":
+        return requested_min_score
+    metadata = payload.get("startup_pool") or startup_pool_metadata(payload)
+    try:
+        adaptive_min_score = int(metadata.get("adaptive_send_min_score"))
+    except (AttributeError, TypeError, ValueError):
+        adaptive_min_score = requested_min_score
+    return min(requested_min_score, adaptive_min_score)
+
+
 def _is_startup_founder_title(title_lower: str) -> bool:
     return any(
         signal in title_lower
@@ -183,6 +315,7 @@ def _is_startup_operator_title(title_lower: str) -> bool:
             "strategy",
             "founder's office",
             "founders office",
+            "founding",
             "general manager",
             "founding team",
             "operator",
@@ -193,6 +326,29 @@ def _is_startup_operator_title(title_lower: str) -> bool:
             "partnerships",
         ]
     )
+
+
+def startup_relationship_score_boost(role_bucket: str, title: str, company_mode: str, pass_name: str) -> tuple[int, list[str]]:
+    if company_mode != "startup" or pass_name not in {"startup_preflight", "startup_company_coverage"}:
+        return 0, []
+    title_lower = title.lower()
+    if _is_explicitly_bad_startup_coverage_title(title_lower):
+        return 0, []
+    boost = 5
+    triggers = ["Exact company preflight"]
+    if role_bucket == "Founder" or _is_startup_founder_title(title_lower):
+        boost += 25
+        triggers.append("Startup founder")
+    elif _is_startup_operator_title(title_lower):
+        boost += 12
+        triggers.append("Startup operator")
+    elif "founding" in title_lower:
+        boost += 10
+        triggers.append("Founding team")
+    elif role_bucket in {"Product", "Engineering", "Adjacent"}:
+        boost += 8
+        triggers.append("Startup builder")
+    return boost, triggers
 
 
 def _is_explicitly_bad_startup_coverage_title(title_lower: str) -> bool:
@@ -305,6 +461,14 @@ def apply_raw_candidate(
         role_bucket=role_bucket,
     )
     scored = score_candidate(profile, settings.scoring)
+    relationship_boost, relationship_triggers = startup_relationship_score_boost(
+        role_bucket=role_bucket,
+        title=title,
+        company_mode=company_mode,
+        pass_name=pass_name,
+    )
+    candidate_score = scored.score + relationship_boost
+    candidate_triggers = [*scored.triggers, *relationship_triggers]
     key = raw.linkedin_url or f"{raw.name}:{title}"
     entry = deduped.get(
         key,
@@ -317,9 +481,9 @@ def apply_raw_candidate(
             "connection_degree": raw.connection_degree,
             "snippet": raw.snippet,
             "role_bucket": role_bucket,
-            "score": scored.score,
+            "score": candidate_score,
             "tier": scored.tier.value,
-            "triggers": scored.triggers,
+            "triggers": candidate_triggers,
             "passes": [],
             "existing_connection": profile.existing_connection,
             "usc_marshall": profile.usc_marshall,
@@ -328,13 +492,13 @@ def apply_raw_candidate(
         },
     )
     entry["passes"] = sorted(set([*entry["passes"], pass_name]))
-    if scored.score > entry["score"]:
+    if candidate_score > entry["score"]:
         entry.update(
             {
                 "role_bucket": role_bucket,
-                "score": scored.score,
+                "score": candidate_score,
                 "tier": scored.tier.value,
-                "triggers": scored.triggers,
+                "triggers": candidate_triggers,
                 "existing_connection": profile.existing_connection,
                 "usc_marshall": profile.usc_marshall,
                 "usc": profile.usc_alumni,
@@ -343,16 +507,6 @@ def apply_raw_candidate(
         )
     deduped[key] = entry
     return True
-
-
-def recommend_auto_send_limit(candidate_count: int) -> int:
-    if candidate_count >= 15:
-        return 12
-    if candidate_count >= 10:
-        return 10
-    if candidate_count >= 5:
-        return 5
-    return 0
 
 
 def build_source_adapter(source_id: str) -> SourceAdapter:
@@ -1072,23 +1226,46 @@ def execute_linkedin_company_run(
     note_generator = NoteGenerator()
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
+    startup_pool: dict[str, int | str | bool | None] = {
+        "raw_count": None,
+        "kept_count": None,
+        "pool_mode": "unknown",
+        "adaptive_send_min_score": 20,
+        "coverage_only": False,
+        "search_company": company,
+    }
+    search_company = company
     if company_mode == "startup":
         preflight_limit = settings.search.startup_preflight_limit
         preflight_pages = settings.search.startup_preflight_max_pages
-        preflight_run = scraper.extract_people_with_filters_live(
-            company=company,
-            search_query="",
-            limit=preflight_limit,
-            max_pages=preflight_pages,
-            school=None,
-            connection_degree=None,
-            use_us_location=False,
-        )
+        preflight_errors: list[str] = []
+        preflight_run = None
+        for alias in company_search_aliases(company):
+            try:
+                preflight_run = scraper.extract_people_with_filters_live(
+                    company=alias,
+                    search_query="",
+                    limit=preflight_limit,
+                    max_pages=preflight_pages,
+                    school=None,
+                    connection_degree=None,
+                    use_us_location=False,
+                )
+                search_company = alias
+                break
+            except Exception as exc:
+                preflight_errors.append(f"{alias}: {exc}")
+        if preflight_run is None:
+            raise RuntimeError(
+                "Could not run startup preflight with any company alias: "
+                + " | ".join(preflight_errors)
+            )
         preflight_artifact = write_artifact(
             settings.artifacts_dir,
             "startup-preflight",
             {
                 "company": company,
+                "search_company": search_company,
                 "company_mode": company_mode,
                 "limit": preflight_limit,
                 "max_pages": preflight_pages,
@@ -1116,10 +1293,21 @@ def execute_linkedin_company_run(
                 company_mode=company_mode,
             ):
                 preflight_kept_count += 1
+        startup_pool = {
+            "raw_count": len(preflight_run.candidates),
+            "kept_count": preflight_kept_count,
+            "pool_mode": startup_pool_mode(len(preflight_run.candidates)),
+            "adaptive_send_min_score": startup_pool_send_min_score(startup_pool_mode(len(preflight_run.candidates))),
+            "coverage_only": len(preflight_run.candidates) <= settings.search.startup_small_company_threshold,
+            "search_company": search_company,
+        }
         pass_summaries.append(
             {
                 "pass_name": "startup_preflight",
                 "query": "",
+                "search_company": search_company,
+                "alias_used": search_company != company,
+                "alias_errors": preflight_errors,
                 "school": None,
                 "connection_degree": None,
                 "use_us_location": False,
@@ -1130,13 +1318,20 @@ def execute_linkedin_company_run(
                 "raw_count": len(preflight_run.candidates),
                 "kept_count": preflight_kept_count,
                 "artifact": str(preflight_artifact),
-                "coverage_only": len(preflight_run.candidates) <= settings.search.startup_small_company_threshold,
+                "coverage_only": startup_pool["coverage_only"],
+                "pool_mode": startup_pool["pool_mode"],
+                "adaptive_send_min_score": startup_pool["adaptive_send_min_score"],
             }
         )
         typer.echo(
             f"- Startup preflight: {len(preflight_run.candidates)} raw results across up to {preflight_pages} pages"
         )
         typer.echo(f"  kept {preflight_kept_count} after startup coverage filtering")
+        typer.echo(
+            f"  pool mode: {startup_pool['pool_mode']} | adaptive send threshold >= {startup_pool['adaptive_send_min_score']}"
+        )
+        if search_company != company:
+            typer.echo(f"  LinkedIn company alias used: {search_company}")
     pass_definitions = resolve_pass_definitions(
         settings,
         company_mode=company_mode,
@@ -1163,7 +1358,7 @@ def execute_linkedin_company_run(
         query = pass_query
         try:
             filter_run = scraper.extract_people_with_filters_live(
-                company=company,
+                company=search_company,
                 search_query=query,
                 limit=limit,
                 max_pages=max_pages,
@@ -1198,6 +1393,7 @@ def execute_linkedin_company_run(
             f"pass-{pass_name}",
             {
                 "company": company,
+                "search_company": search_company,
                 "pass_name": pass_name,
                 "query": query,
                 "school": pass_config.get("school"),
@@ -1276,6 +1472,7 @@ def execute_linkedin_company_run(
             "dry_run": dry_run,
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
+            "startup_pool": startup_pool,
             "count": len(scored_candidates),
             "notes_generated_count": len(noted_candidates),
             "results": scored_candidates,
@@ -1314,7 +1511,7 @@ def select_invite_candidates(
             candidate_score = int(item.get("score"))
         except (TypeError, ValueError):
             candidate_score = None
-        if min_score > 0 and (candidate_score is None or candidate_score < min_score):
+        if min_score > -999 and (candidate_score is None or candidate_score < min_score):
             continue
         item = dict(item)
         if "polished_note" in item:
@@ -1740,6 +1937,10 @@ def run(
         int,
         typer.Option(help="Minimum candidate relevance score required for auto-send"),
     ] = 35,
+    adaptive_send: Annotated[
+        bool,
+        typer.Option(help="Use startup preflight pool size to loosen/tighten auto-send threshold and cap"),
+    ] = True,
 ) -> None:
     try:
         settings = OutreachSettings()
@@ -1764,28 +1965,44 @@ def run(
 
     with artifact.open(encoding="utf-8") as handle:
         payload = json.load(handle)
+    pool_metadata = payload.get("startup_pool") or startup_pool_metadata(payload)
+    effective_min_score = effective_send_min_score(
+        payload,
+        requested_min_score=send_min_score,
+        adaptive=adaptive_send,
+    )
+    auto_limit = send_limit or recommend_auto_send_limit(
+        len(payload["results"]),
+        str(pool_metadata.get("pool_mode") or "unknown"),
+    )
     batch = select_invite_candidates(
         payload["results"],
         verdict="send",
-        min_score=send_min_score,
-        limit=send_limit or recommend_auto_send_limit(len(payload["results"])),
+        min_score=effective_min_score,
+        limit=auto_limit,
     )
     batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
-        typer.echo(f"Auto-send skipped: no eligible candidates with send verdict and score >= {send_min_score}.")
+        typer.echo(f"Auto-send skipped: no eligible candidates with send verdict and score >= {effective_min_score}.")
         return
 
-    typer.echo(f"Auto-sending {len(batch)} invite candidates for {company} with score >= {send_min_score}")
+    if adaptive_send and payload.get("company_mode") == "startup":
+        typer.echo(
+            "Adaptive send gate: "
+            f"pool_mode={pool_metadata.get('pool_mode')} raw_count={pool_metadata.get('raw_count')} "
+            f"requested>={send_min_score} effective>={effective_min_score} limit={auto_limit}"
+        )
+    typer.echo(f"Auto-sending {len(batch)} invite candidates for {company} with score >= {effective_min_score}")
     send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
         settings=settings,
         company=company,
         source_artifact_path=artifact,
         batch=batch,
         execute=True,
-        limit=send_limit,
+        limit=auto_limit,
         start_at=0,
         verdict="send",
-        min_score=send_min_score,
+        min_score=effective_min_score,
     )
     typer.echo(f"Auto-send status summary: {status_counts}")
     typer.echo(f"Auto-send artifact: {send_artifact}")
@@ -2710,6 +2927,10 @@ def send_invites(
     start_at: Annotated[int, typer.Option(help="Start offset into the eligible queue")] = 0,
     verdict: Annotated[str, typer.Option(help="Only include notes with this QC verdict")] = "send",
     min_score: Annotated[int, typer.Option(help="Minimum candidate relevance score required to send")] = 35,
+    adaptive_min_score: Annotated[
+        bool,
+        typer.Option(help="Use startup preflight pool size from the artifact to lower/tighten the score gate"),
+    ] = True,
     execute: Annotated[
         bool,
         typer.Option(help="Actually send invites instead of doing a dry run"),
@@ -2729,10 +2950,16 @@ def send_invites(
 
     company = payload["company"]
     all_candidates = payload["results"]
+    pool_metadata = payload.get("startup_pool") or startup_pool_metadata(payload)
+    effective_min_score = effective_send_min_score(
+        payload,
+        requested_min_score=min_score,
+        adaptive=adaptive_min_score,
+    )
     batch = select_invite_candidates(
         all_candidates,
         verdict=verdict,
-        min_score=min_score,
+        min_score=effective_min_score,
         limit=limit,
         start_at=start_at,
     )
@@ -2742,7 +2969,13 @@ def send_invites(
         raise typer.Exit(code=1)
 
     typer.echo(f"Processing {len(batch)} invite candidates for {company}")
-    typer.echo(f"Candidate score gate: >= {min_score}")
+    if adaptive_min_score and payload.get("company_mode") == "startup":
+        typer.echo(
+            "Adaptive score gate: "
+            f"pool_mode={pool_metadata.get('pool_mode')} raw_count={pool_metadata.get('raw_count')} "
+            f"requested>={min_score} effective>={effective_min_score}"
+        )
+    typer.echo(f"Candidate score gate: >= {effective_min_score}")
     typer.echo(f"Mode: {'execute' if execute else 'dry run'}")
     artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
         settings=settings,
@@ -2753,7 +2986,7 @@ def send_invites(
         limit=limit,
         start_at=start_at,
         verdict=verdict,
-        min_score=min_score,
+        min_score=effective_min_score,
     )
     typer.echo(f"Status summary: {status_counts}")
     typer.echo(f"Artifact: {artifact}")

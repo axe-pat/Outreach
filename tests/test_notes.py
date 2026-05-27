@@ -66,6 +66,24 @@ def test_generates_product_note_under_limit() -> None:
     assert note.length <= NOTE_CHAR_LIMIT
 
 
+def test_company_name_trailing_period_does_not_double_punctuate() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Diana W.",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="Splash Inc.",
+        company_mode="startup",
+    )
+
+    assert "Splash Inc.." not in note.text
+
+
 def test_quality_check_marks_good_usc_note_sendable() -> None:
     generator = NoteGenerator()
     candidate = {

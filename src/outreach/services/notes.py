@@ -33,35 +33,36 @@ class NoteGenerator:
 
     def generate(self, candidate: dict, company: str, company_mode: str = "default") -> GeneratedNote:
         first_name = self._first_name(candidate.get("name") or "there")
+        company_for_note = " ".join(company.split()).rstrip(".")
         role_bucket = candidate.get("role_bucket") or "Other"
         ask_style = self._determine_ask_style(candidate, role_bucket, company_mode)
 
         if candidate.get("existing_connection"):
             family = "existing_connection"
-            variants = self._existing_connection_variants(first_name, company, ask_style)
+            variants = self._existing_connection_variants(first_name, company_for_note, ask_style)
         elif candidate.get("usc_marshall"):
             family = "usc_marshall"
-            variants = self._usc_marshall_variants(first_name, company, ask_style)
+            variants = self._usc_marshall_variants(first_name, company_for_note, ask_style)
         elif candidate.get("usc"):
             family = "usc"
-            variants = self._usc_variants(first_name, company, ask_style)
+            variants = self._usc_variants(first_name, company_for_note, ask_style)
         elif candidate.get("shared_history"):
             family = "shared_history"
-            variants = self._shared_history_variants(first_name, company, ask_style)
+            variants = self._shared_history_variants(first_name, company_for_note, ask_style)
         elif role_bucket == "Product":
             family = "product"
-            variants = self._product_variants(first_name, company, ask_style)
+            variants = self._product_variants(first_name, company_for_note, ask_style)
         elif role_bucket == "Engineering":
             family = "engineering"
-            variants = self._engineering_variants(first_name, company, ask_style)
+            variants = self._engineering_variants(first_name, company_for_note, ask_style)
         elif role_bucket == "University Recruiting":
             family = "university_recruiting"
-            variants = self._university_recruiting_variants(first_name, company, ask_style)
+            variants = self._university_recruiting_variants(first_name, company_for_note, ask_style)
         else:
             family = "general"
-            variants = self._general_variants(first_name, company, ask_style)
+            variants = self._general_variants(first_name, company_for_note, ask_style)
 
-        note = self._pick_variant(variants, candidate, company)
+        note = self._pick_variant(variants, candidate, company_for_note)
         note = self._tighten_to_limit(note)
         return GeneratedNote(
             text=note,

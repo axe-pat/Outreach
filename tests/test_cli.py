@@ -5,10 +5,12 @@ from types import SimpleNamespace
 
 from outreach.cli import (
     attach_search_urls_to_candidates,
+    apply_raw_candidate,
     build_linkedin_company_queue_items,
     build_organization_intel_items,
     build_target_action_queue_items,
     classify_opportunity_action,
+    company_search_aliases,
     contact_status_from_invite_result,
     execute_invite_batch,
     extract_team_size_from_notes,
@@ -30,6 +32,10 @@ from outreach.cli import (
     resolve_pass_definitions,
     score_opportunity_relevance,
     select_invite_candidates,
+    startup_pool_metadata,
+    startup_pool_mode,
+    startup_pool_send_min_score,
+    effective_send_min_score,
     text_contains_signal,
     touchpoint_status_from_invite_result,
 )
@@ -72,6 +78,23 @@ def test_solution_engineer_buckets_as_adjacent() -> None:
     )
 
     assert bucket == "Adjacent"
+
+
+def test_founding_mechatronics_engineer_buckets_as_engineering() -> None:
+    settings = OutreachSettings()
+
+    bucket = infer_role_bucket(
+        "Founding Mechatronics Engineer @ Eden",
+        "Founding Mechatronics Engineer @ Eden",
+        settings,
+    )
+
+    assert bucket == "Engineering"
+
+
+def test_company_search_aliases_strip_common_startup_suffixes() -> None:
+    assert company_search_aliases("Splash Inc.")[:2] == ["Splash Inc.", "Splash"]
+    assert "Surtr" in company_search_aliases("Surtr Defense Systems")
 
 
 def test_product_pass_rejects_non_product_noise() -> None:
@@ -186,11 +209,84 @@ def test_startup_company_coverage_keeps_generic_employee_titles() -> None:
     )
 
 
+def test_startup_preflight_boosts_exact_company_founder_candidates() -> None:
+    settings = OutreachSettings()
+    deduped: dict[str, dict] = {}
+
+    kept = apply_raw_candidate(
+        deduped=deduped,
+        raw=SimpleNamespace(
+            name="Charles Yong",
+            title="Founder @ Vassar Robotics (YC X25)",
+            raw_text="Founder @ Vassar Robotics (YC X25)",
+            connection_degree="3rd",
+            snippet="",
+            linkedin_url="https://www.linkedin.com/in/charles/",
+            location="",
+            subtitle="",
+        ),
+        company="Vassar Robotics",
+        pass_name="startup_preflight",
+        pass_config={},
+        settings=settings,
+        company_mode="startup",
+    )
+
+    candidate = deduped["https://www.linkedin.com/in/charles/"]
+    assert kept is True
+    assert candidate["score"] >= 35
+    assert "Startup founder" in candidate["triggers"]
+
+
 def test_recommend_auto_send_limit_scales_with_pool_size() -> None:
     assert recommend_auto_send_limit(3) == 0
     assert recommend_auto_send_limit(5) == 5
     assert recommend_auto_send_limit(12) == 10
     assert recommend_auto_send_limit(20) == 12
+
+
+def test_startup_pool_mode_drives_adaptive_threshold_and_send_cap() -> None:
+    assert startup_pool_mode(1) == "micro"
+    assert startup_pool_send_min_score("micro") == -5
+    assert recommend_auto_send_limit(3, "micro") == 3
+    assert startup_pool_mode(8) == "small"
+    assert startup_pool_send_min_score("small") == 10
+    assert recommend_auto_send_limit(8, "small") == 6
+
+
+def test_effective_send_min_score_uses_startup_pool_metadata() -> None:
+    payload = {
+        "company_mode": "startup",
+        "startup_pool": {
+            "raw_count": 1,
+            "kept_count": 1,
+            "pool_mode": "micro",
+            "adaptive_send_min_score": -5,
+        },
+        "pass_summaries": [],
+    }
+
+    assert effective_send_min_score(payload, requested_min_score=35, adaptive=True) == -5
+    assert effective_send_min_score(payload, requested_min_score=35, adaptive=False) == 35
+
+
+def test_startup_pool_metadata_can_be_recovered_from_older_artifacts() -> None:
+    payload = {
+        "company_mode": "startup",
+        "pass_summaries": [
+            {
+                "pass_name": "startup_preflight",
+                "raw_count": 2,
+                "kept_count": 2,
+                "coverage_only": True,
+            }
+        ],
+    }
+
+    metadata = startup_pool_metadata(payload)
+
+    assert metadata["pool_mode"] == "micro"
+    assert metadata["adaptive_send_min_score"] == -5
 
 
 def test_sent_without_note_maps_to_sent_tracking_statuses() -> None:

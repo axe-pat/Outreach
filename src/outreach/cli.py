@@ -1353,6 +1353,7 @@ def persist_invite_send_results(
             continue
 
         linkedin_url = str(candidate.get("linkedin_url") or result.linkedin_url or "").strip()
+        sent_at = utc_now_iso() if result.status in {"sent", "sent_without_note"} else ""
         contact, created = workbook.upsert_contact(
             ContactRecord(
                 contact_id=workbook.make_contact_id(
@@ -1370,12 +1371,20 @@ def persist_invite_send_results(
                 linkedin_url=linkedin_url,
                 source_kind=SourceKind.LINKEDIN,
                 source_url="https://www.linkedin.com/search/results/people/",
-                last_contacted_at=utc_now_iso() if result.status == "sent" else "",
+                last_contacted_at=sent_at,
                 notes=f"Imported from {source_artifact_path.name}",
             )
         )
         if created:
             contacts_added += 1
+        elif sent_at:
+            updated_contact = workbook.update_contact(
+                contact.contact_id,
+                status=contact_status_from_invite_result(result.status),
+                last_contacted_at=sent_at,
+            )
+            if updated_contact is not None:
+                contact = updated_contact
 
         note_text = str(candidate.get("note") or result.note or "").strip()
         if not note_text:
@@ -1396,7 +1405,7 @@ def persist_invite_send_results(
                 status=touchpoint_status_from_invite_result(result.status),
                 message_kind="linkedin_invite",
                 message_text=note_text,
-                sent_at=utc_now_iso() if result.status == "sent" else "",
+                sent_at=sent_at,
                 source_artifact=str(send_artifact_path),
                 notes=(
                     f"invite_result={result.status} | detail={result.detail} | "

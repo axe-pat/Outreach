@@ -70,6 +70,53 @@ class _StubLocator:
         return None
 
 
+class _ElementLocator:
+    def __init__(
+        self,
+        *,
+        aria_label: str = "",
+        href: str = "",
+        text: str = "Connect",
+        x: int = 100,
+        y: int = 100,
+    ) -> None:
+        self.aria_label = aria_label
+        self.href = href
+        self.text = text
+        self.x = x
+        self.y = y
+
+    def bounding_box(self):
+        return {"x": self.x, "y": self.y, "width": 120, "height": 40}
+
+    def get_attribute(self, name: str):
+        if name == "aria-label":
+            return self.aria_label
+        if name == "href":
+            return self.href
+        return None
+
+    def inner_text(self, timeout: int = 0):
+        return self.text
+
+    def text_content(self, timeout: int = 0):
+        return self.text
+
+
+class _LocatorList:
+    def __init__(self, items) -> None:
+        self.items = items
+
+    def count(self) -> int:
+        return len(self.items)
+
+    def nth(self, index: int):
+        return self.items[index]
+
+    def filter(self, **_kwargs):
+        return self
+
+
 class _StubPage:
     def __init__(self) -> None:
         self.url = "https://www.linkedin.com/in/test-user/"
@@ -125,6 +172,90 @@ def test_send_single_invite_prefers_connect_over_messageish_connected_signal(mon
     )
 
     assert result.status == "dry_run_ready"
+
+
+def test_send_single_invite_skips_search_result_shortcut_for_execute(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _StubPage()
+
+    class _ConnectButton:
+        def get_attribute(self, _name: str):
+            return None
+
+        def click(self, force: bool = False, timeout: int = 0):
+            return None
+
+    monkeypatch.setattr(
+        scraper,
+        "_send_single_invite_from_search_results",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search shortcut should not execute")),
+    )
+    monkeypatch.setattr(scraper, "_navigate_profile", lambda _page, _url: True)
+    monkeypatch.setattr(scraper, "_human_pause", lambda _page: None)
+    monkeypatch.setattr(scraper, "_save_screenshot", lambda _page, _label: "shot.png")
+    monkeypatch.setattr(scraper, "_find_connect_button", lambda _page, candidate_name=None: _ConnectButton())
+    monkeypatch.setattr(scraper, "_invite_flow_available", lambda _page, timeout_ms=0: True)
+    monkeypatch.setattr(scraper, "_open_add_note", lambda _page: False)
+    monkeypatch.setattr(scraper, "_click_send_invite", lambda _page: None)
+
+    result = scraper._send_single_invite(
+        page,
+        {
+            "name": "Test User",
+            "linkedin_url": "https://www.linkedin.com/in/test-user/",
+            "_search_url": "https://www.linkedin.com/search/results/people/",
+            "note": "hello",
+        },
+        execute=True,
+    )
+
+    assert result.status == "sent_without_note"
+
+
+def test_find_connect_button_prefers_named_preload_invite_link() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    exact = _ElementLocator(
+        aria_label="Invite Abhilasha Juneja to connect",
+        href="/preload/custom-invite/?vanityName=abhilashajuneja",
+        y=260,
+    )
+    wrong = _ElementLocator(
+        aria_label="Invite Anand Jagannathan to connect",
+        href="/preload/custom-invite/?vanityName=anand",
+        y=220,
+    )
+
+    class _InvitePage(_StubPage):
+        def locator(self, selector, *_args, **_kwargs):
+            if selector == 'a[href*="/preload/custom-invite/"]':
+                return _LocatorList([wrong, exact])
+            return _LocatorList([])
+
+    assert scraper._find_connect_button(_InvitePage(), candidate_name="Abhilasha Juneja") is exact
+
+
+def test_activate_connect_clicks_preload_invite_link_before_navigation() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    clicked = {"value": False}
+
+    class _ConnectLink:
+        def get_attribute(self, name: str):
+            if name == "href":
+                return "/preload/custom-invite/?vanityName=test"
+            return None
+
+        def click(self, timeout: int = 0, force: bool = False):
+            clicked["value"] = True
+
+    class _Page(_StubPage):
+        def goto(self, *_args, **_kwargs):
+            raise AssertionError("goto should not be used when the invite link can be clicked")
+
+    scraper._human_pause = lambda _page: None
+    scraper._invite_flow_available = lambda _page, timeout_ms=0: True
+    scraper._activate_connect(_Page(), _ConnectLink())
+
+    assert clicked["value"] is True
 
 
 def test_is_already_connected_requires_explicit_connected_signal(monkeypatch) -> None:
@@ -431,7 +562,7 @@ def test_activate_connect_prefers_normal_click_before_force(monkeypatch) -> None
     assert button.calls == [False]
 
 
-def test_send_single_invite_prefers_search_result_path_when_available(monkeypatch) -> None:
+def test_send_single_invite_prefers_search_result_path_for_dry_run(monkeypatch) -> None:
     scraper = LinkedInScraper(OutreachSettings())
     page = _StubPage()
 
@@ -441,7 +572,7 @@ def test_send_single_invite_prefers_search_result_path_when_available(monkeypatc
         lambda _page, candidate, search_url, execute=False: InviteSendResult(
             name=candidate["name"],
             linkedin_url=candidate["linkedin_url"],
-            status="sent",
+            status="dry_run_ready",
             detail="ok",
             note=candidate.get("note", ""),
         ),
@@ -456,10 +587,10 @@ def test_send_single_invite_prefers_search_result_path_when_available(monkeypatc
             "note": "hello",
             "_search_url": "https://www.linkedin.com/search/results/people/?foo=1",
         },
-        execute=True,
+        execute=False,
     )
 
-    assert result.status == "sent"
+    assert result.status == "dry_run_ready"
 
 
 def test_open_search_result_connect_checks_multiple_pages(monkeypatch) -> None:

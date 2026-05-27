@@ -261,6 +261,19 @@ class OutreachWorkbook:
             lambda row: self._same_contact(row, record),
         )
 
+    def update_contact(self, contact_id: str, **updates: str) -> ContactRecord | None:
+        self.initialize()
+        rows = self._read_rows("contacts")
+        for row in rows:
+            if row.get("contact_id") != contact_id:
+                continue
+            for key, value in updates.items():
+                if key in self._fieldnames("contacts") and value is not None:
+                    row[key] = str(value)
+            self._write_rows("contacts", rows)
+            return ContactRecord(**row)
+        return None
+
     def append_touchpoint(self, record: TouchpointRecord) -> tuple[TouchpointRecord, bool]:
         return self._create_or_get(
             "touchpoints",

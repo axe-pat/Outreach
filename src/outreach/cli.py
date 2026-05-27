@@ -28,6 +28,7 @@ from outreach.resume_jobs_bridge import (
     infer_company_type_for_job,
     load_resume_jobs,
     load_company_overrides,
+    load_company_blocklist,
     map_resume_source_kind,
     normalize_dedupe_text,
     opportunity_status_from_resume_status,
@@ -2194,6 +2195,10 @@ def import_resume_jobs(
         int,
         typer.Option(help="Only import jobs found within this many days"),
     ] = 10,
+    resume_blocklist: Annotated[
+        Path | None,
+        typer.Option(help="Optional ResumeGenerator blocklist.txt to exclude blocked companies"),
+    ] = Path("../ResumeGenerator v1/discovery/blocklist.txt"),
     limit: Annotated[int | None, typer.Option(help="Optional max jobs to import")] = None,
     dry_run: Annotated[bool, typer.Option(help="Preview matches without writing workbook")] = False,
 ) -> None:
@@ -2203,12 +2208,14 @@ def import_resume_jobs(
         settings.resolved_tracking_workspace_dir / DEFAULT_COMPANY_OVERRIDES_FILENAME
     )
     company_overrides = load_company_overrides(company_overrides_path)
+    blocklist_patterns = load_company_blocklist(resume_blocklist)
     rows = load_resume_jobs(jobs_xlsx, sheet_name=sheet_name)
     selection = select_resume_jobs(
         rows,
         include_statuses=tuple(include_status or DEFAULT_INCLUDE_STATUSES),
         min_score=min_score,
         max_age_days=max_age_days,
+        blocklist_patterns=blocklist_patterns,
     )
     selected_jobs = selection.jobs[:limit] if limit else selection.jobs
 
@@ -2219,6 +2226,7 @@ def import_resume_jobs(
         f" | skipped_status={selection.skipped_status}"
         f" | skipped_score={selection.skipped_score}"
         f" | skipped_age={selection.skipped_age}"
+        f" | skipped_blocklist={selection.skipped_blocklist}"
         f" | duplicates_removed={selection.duplicates_removed}"
     )
     for job in selected_jobs[:10]:
@@ -2309,6 +2317,10 @@ def build_resume_outreach_queue_command(
     sheet_name: Annotated[str, typer.Option(help="Worksheet name inside the xlsx")] = "Jobs",
     min_score: Annotated[float, typer.Option(help="Minimum fit score to include")] = 7.0,
     max_age_days: Annotated[int, typer.Option(help="Maximum age in days")] = 10,
+    resume_blocklist: Annotated[
+        Path | None,
+        typer.Option(help="Optional ResumeGenerator blocklist.txt to exclude blocked companies"),
+    ] = Path("../ResumeGenerator v1/discovery/blocklist.txt"),
     max_per_company: Annotated[int, typer.Option(help="Cap entries per company")] = 2,
     limit: Annotated[int, typer.Option(help="Maximum queue entries to return")] = 15,
 ) -> None:
@@ -2317,12 +2329,14 @@ def build_resume_outreach_queue_command(
         settings.resolved_tracking_workspace_dir / DEFAULT_COMPANY_OVERRIDES_FILENAME
     )
     company_overrides = load_company_overrides(company_overrides_path)
+    blocklist_patterns = load_company_blocklist(resume_blocklist)
     rows = load_resume_jobs(jobs_xlsx, sheet_name=sheet_name)
     selection = select_resume_jobs(
         rows,
         include_statuses=DEFAULT_INCLUDE_STATUSES,
         min_score=min_score,
         max_age_days=max_age_days,
+        blocklist_patterns=blocklist_patterns,
     )
     queue_items = build_resume_outreach_queue(
         selection.jobs,

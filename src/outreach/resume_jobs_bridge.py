@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import fnmatch
 from pathlib import Path
 import re
 from typing import Iterable
@@ -57,6 +58,7 @@ class ResumeImportSelection:
     skipped_status: int
     skipped_score: int
     skipped_age: int
+    skipped_blocklist: int
     duplicates_removed: int
 
 
@@ -142,6 +144,7 @@ def select_resume_jobs(
     include_statuses: Iterable[str] = DEFAULT_INCLUDE_STATUSES,
     min_score: float = 7.0,
     max_age_days: int | None = 10,
+    blocklist_patterns: Iterable[str] = (),
     today: date | None = None,
 ) -> ResumeImportSelection:
     filtered: list[ResumeJob] = []
@@ -149,6 +152,7 @@ def select_resume_jobs(
     skipped_status = 0
     skipped_score = 0
     skipped_age = 0
+    skipped_blocklist = 0
     duplicates_removed = 0
     normalized_requested = tuple(include_statuses)
     allowed_statuses = {
@@ -159,6 +163,9 @@ def select_resume_jobs(
     for job in jobs:
         if not job.company or not job.role_title:
             skipped_missing_identity += 1
+            continue
+        if is_blocklisted_company(job.company, blocklist_patterns):
+            skipped_blocklist += 1
             continue
         if job.normalized_status not in allowed_statuses:
             skipped_status += 1
@@ -182,8 +189,37 @@ def select_resume_jobs(
         skipped_status=skipped_status,
         skipped_score=skipped_score,
         skipped_age=skipped_age,
+        skipped_blocklist=skipped_blocklist,
         duplicates_removed=duplicates_removed,
     )
+
+
+def load_company_blocklist(path: Path | None) -> list[str]:
+    if path is None or not path.exists():
+        return []
+    patterns: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line.lower())
+    return patterns
+
+
+def is_blocklisted_company(company: str, patterns: Iterable[str]) -> bool:
+    normalized = company.strip().lower()
+    if not normalized:
+        return False
+    for pattern in patterns:
+        clean = pattern.strip().lower()
+        if not clean:
+            continue
+        if any(char in clean for char in "*?["):
+            if fnmatch.fnmatch(normalized, clean):
+                return True
+        elif normalized == clean or clean in normalized:
+            return True
+    return False
 
 
 def normalize_resume_status(value: str) -> str:

@@ -4,6 +4,11 @@
 
 - Evaluate a shared discovery layer that ingests both ResumeGenerator job pulls and Outreach startup/company sources into one canonical store before downstream actioning.
 - Design reverse cross-pollination from Outreach startup discovery back into application intake, ideally as a lightweight export/review step before any direct write into `jobs.xlsx`.
+- Add a high-affinity LinkedIn expansion pass for `application_plus_outreach` companies before sends:
+  - exact-company people search remains the base pass
+  - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`, `USC`, `Marshall`, plus `Product`, `hiring`, and product leadership terms
+  - raise daily send caps for companies with strong job fit plus strong affinity signals
+  - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
 - Add a merged daily queue that combines:
   - apply-backed outreach from `ResumeGenerator v1/discovery/jobs.xlsx`
   - hiring startups from YC / Built In discovery

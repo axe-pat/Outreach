@@ -12,6 +12,7 @@ from outreach.cli import (
     classify_opportunity_action,
     company_search_aliases,
     contact_status_from_invite_result,
+    detect_shared_history_signals,
     execute_invite_batch,
     extract_team_size_from_notes,
     extract_tags_from_notes,
@@ -236,6 +237,36 @@ def test_startup_preflight_boosts_exact_company_founder_candidates() -> None:
     assert kept is True
     assert candidate["score"] >= 35
     assert "Startup founder" in candidate["triggers"]
+
+
+def test_apply_raw_candidate_preserves_shared_history_signals() -> None:
+    settings = OutreachSettings()
+    deduped: dict[str, dict] = {}
+
+    kept = apply_raw_candidate(
+        deduped=deduped,
+        raw=SimpleNamespace(
+            name="Suman Sundaresh",
+            title="Lead Product Manager @ Pebl | Ex-Intuit, Rappi, PayPal",
+            raw_text="Lead Product Manager @ Pebl | Ex-Intuit, Rappi, PayPal",
+            connection_degree="2nd",
+            snippet="Mutual connection",
+            linkedin_url="https://www.linkedin.com/in/suman/",
+            location="",
+            subtitle="",
+        ),
+        company="Pebl",
+        pass_name="startup_preflight",
+        pass_config={},
+        settings=settings,
+        company_mode="startup",
+    )
+
+    candidate = deduped["https://www.linkedin.com/in/suman/"]
+    assert kept is True
+    assert detect_shared_history_signals(candidate["title"], settings) == ["Intuit"]
+    assert candidate["shared_history"] is True
+    assert candidate["shared_history_signals"] == ["Intuit"]
 
 
 def test_recommend_auto_send_limit_scales_with_pool_size() -> None:

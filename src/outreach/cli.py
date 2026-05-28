@@ -151,10 +151,19 @@ def detect_usc(raw_text: str) -> bool:
 
 
 def detect_shared_history(raw_text: str, settings: OutreachSettings) -> bool:
+    return bool(detect_shared_history_signals(raw_text, settings))
+
+
+def detect_shared_history_signals(raw_text: str, settings: OutreachSettings) -> list[str]:
     text = raw_text.lower()
-    if any(keyword in text for keyword in settings.search.shared_history_keywords):
-        return True
-    return any(company.lower() in text for company in settings.search.ex_companies)
+    signals: list[str] = []
+    for keyword in settings.search.shared_history_keywords:
+        if keyword in text:
+            signals.append(keyword.title())
+    for company in settings.search.ex_companies:
+        if company.lower() in text:
+            signals.append(company)
+    return list(dict.fromkeys(signals))
 
 
 def company_search_aliases(company: str) -> list[str]:
@@ -445,6 +454,7 @@ def apply_raw_candidate(
     pass_implies_usc = "southern california" in pass_school.lower()
     pass_implies_marshall = "marshall" in pass_school.lower()
     pass_implies_existing_connection = pass_name == "existing_connections"
+    shared_history_signals = detect_shared_history_signals(raw_text, settings)
     profile = CandidateProfile(
         name=raw.name,
         title=raw.title or "",
@@ -455,7 +465,7 @@ def apply_raw_candidate(
         existing_connection=pass_implies_existing_connection or connection_degree == "1st",
         usc_marshall=pass_implies_marshall or detect_usc_marshall(raw_text),
         usc_alumni=pass_implies_usc or detect_usc(raw_text),
-        shared_history=detect_shared_history(raw_text, settings),
+        shared_history=bool(shared_history_signals),
         indian_background=False,
         university_recruiter=role_bucket == "University Recruiting",
         role_bucket=role_bucket,
@@ -489,6 +499,7 @@ def apply_raw_candidate(
             "usc_marshall": profile.usc_marshall,
             "usc": profile.usc_alumni,
             "shared_history": profile.shared_history,
+            "shared_history_signals": shared_history_signals,
         },
     )
     entry["passes"] = sorted(set([*entry["passes"], pass_name]))
@@ -503,6 +514,7 @@ def apply_raw_candidate(
                 "usc_marshall": profile.usc_marshall,
                 "usc": profile.usc_alumni,
                 "shared_history": profile.shared_history,
+                "shared_history_signals": shared_history_signals,
             }
         )
     deduped[key] = entry

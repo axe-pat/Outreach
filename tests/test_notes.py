@@ -120,6 +120,29 @@ def test_big_company_mode_pushes_guidance_style() -> None:
     assert note.ask_style == "guidance"
 
 
+def test_shared_history_note_names_matched_company() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Suman Sundaresh",
+            "role_bucket": "Product",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": True,
+            "shared_history_signals": ["Intuit"],
+            "title": "Lead Product Manager @ Pebl | Ex-Intuit, Rappi, PayPal",
+        },
+        company="Pebl",
+        company_mode="startup",
+    )
+
+    assert note.family == "shared_history"
+    assert "Intuit" in note.text
+    assert "shared background" not in note.text
+    assert note.within_limit is True
+
+
 def test_batch_generation_adds_qc_payload() -> None:
     generator = NoteGenerator()
     annotated = generator.generate_batch(

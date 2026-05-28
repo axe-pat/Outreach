@@ -48,7 +48,7 @@ class NoteGenerator:
             variants = self._usc_variants(first_name, company_for_note, ask_style)
         elif candidate.get("shared_history"):
             family = "shared_history"
-            variants = self._shared_history_variants(first_name, company_for_note, ask_style)
+            variants = self._shared_history_variants(first_name, company_for_note, ask_style, candidate)
         elif role_bucket == "Product":
             family = "product"
             variants = self._product_variants(first_name, company_for_note, ask_style)
@@ -321,7 +321,26 @@ class NoteGenerator:
             f"Hi {first_name}, fellow Trojan here. I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
         ]
 
-    def _shared_history_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
+    def _shared_history_variants(
+        self,
+        first_name: str,
+        company: str,
+        ask_style: str,
+        candidate: dict | None = None,
+    ) -> list[str]:
+        signal = self._shared_history_signal(candidate or {})
+        if signal:
+            if ask_style == "guidance":
+                return [
+                    f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. Would value your perspective.",
+                    f"Hi {first_name}, noticed the {signal} overlap. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; I'd value your quick guidance.",
+                    f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. Would value your thoughts.",
+                ]
+            return [
+                f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. Would love to connect.",
+                f"Hi {first_name}, noticed the {signal} overlap. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; would love to connect and learn from your path.",
+                f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. Would love to connect.",
+            ]
         if ask_style == "guidance":
             return [
                 f"Hi {first_name}, I'm a Marshall MBA and former engineer at Intuit/Gojek, now exploring PM roles at {company}. Given the overlap in our backgrounds, I'd value your perspective on how to approach the process.",
@@ -333,6 +352,23 @@ class NoteGenerator:
             f"Hi {first_name}, I'm at USC Marshall after engineering stints at Intuit and Gojek, and I'm now exploring PM opportunities at {company}. Given the overlap in our backgrounds, I'd love to connect and hear about your path.",
             f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience across Intuit and Gojek, currently exploring PM roles at {company}. We seem to have some shared background, and I'd love to connect and learn from your experience.",
         ]
+
+    def _shared_history_signal(self, candidate: dict) -> str:
+        signals = [
+            str(item).strip()
+            for item in candidate.get("shared_history_signals", [])
+            if str(item).strip()
+        ]
+        if signals:
+            return signals[0]
+        text = " ".join(
+            str(candidate.get(field) or "")
+            for field in ["title", "subtitle", "snippet", "raw_text"]
+        ).lower()
+        for company in ["Intuit", "Gojek", "Hevo", "Hevo Data", "Optum"]:
+            if company.lower() in text:
+                return company
+        return ""
 
     def _product_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "conversation":

@@ -114,6 +114,7 @@ class LinkedInScraper:
         return self.extract_people_live(search_query=company, limit=limit)
 
     def extract_people_live(self, search_query: str, limit: int = 10, max_pages: int = 1) -> list[RawSearchCandidate]:
+        self.require_live_cdp_session()
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
             try:
@@ -151,6 +152,7 @@ class LinkedInScraper:
         connection_degree: str | None = None,
         use_us_location: bool = True,
     ) -> FilterRunResult:
+        self.require_live_cdp_session()
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
             try:
@@ -266,6 +268,9 @@ class LinkedInScraper:
                 screenshot_paths=screenshots,
             )
 
+    def require_live_cdp_session(self) -> None:
+        self._validate_cdp_owner()
+
     def check_session(self, headless: bool = False) -> LinkedInCheckResult:
         user_data_dir = self.settings.resolved_linkedin_user_data_dir
         self._validate_user_data_dir(user_data_dir)
@@ -343,6 +348,7 @@ class LinkedInScraper:
         execute: bool = False,
         on_result=None,
     ) -> list[InviteSendResult]:
+        self.require_live_cdp_session()
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
             try:
@@ -438,6 +444,12 @@ class LinkedInScraper:
             raise RuntimeError(
                 f"Chrome is listening on port {debug_port}, but the owning process does not look like a "
                 "remote-debuggable Chrome launch."
+            )
+        expected_user_data_dir = str(self.settings.resolved_linkedin_user_data_dir)
+        if f"--user-data-dir={expected_user_data_dir}" not in command and f'--user-data-dir="{expected_user_data_dir}"' not in command:
+            raise RuntimeError(
+                f"Chrome on port {debug_port} is not using the configured LinkedIn profile. "
+                f"Expected --user-data-dir={expected_user_data_dir}."
             )
 
     def _goto(self, page: Page, url: str, steps: list[str], label: str) -> None:

@@ -473,6 +473,7 @@ def test_send_connection_requests_calls_on_result(monkeypatch) -> None:
     seen = []
 
     monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _PlaywrightContextManager())
+    monkeypatch.setattr(scraper, "require_live_cdp_session", lambda: None)
     monkeypatch.setattr(scraper, "_connect_over_cdp", lambda _pw: browser)
     monkeypatch.setattr(scraper, "_session_preflight", lambda _ctx: {"ok": True, "current_url": "", "authwall_or_login": False})
     monkeypatch.setattr(scraper, "_close_run_spawned_pages", lambda _ctx, keep_pages=(): None)
@@ -510,6 +511,7 @@ def test_send_connection_requests_marks_timeout_as_send_error(monkeypatch) -> No
     browser = _BatchBrowser()
 
     monkeypatch.setattr(linkedin_module, "sync_playwright", lambda: _PlaywrightContextManager())
+    monkeypatch.setattr(scraper, "require_live_cdp_session", lambda: None)
     monkeypatch.setattr(scraper, "_connect_over_cdp", lambda _pw: browser)
     monkeypatch.setattr(scraper, "_session_preflight", lambda _ctx: {"ok": True, "current_url": "", "authwall_or_login": False})
     monkeypatch.setattr(scraper, "_close_run_spawned_pages", lambda _ctx, keep_pages=(): None)

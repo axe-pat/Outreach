@@ -9,6 +9,7 @@ from outreach.cli import (
     build_linkedin_company_queue_items,
     build_organization_intel_items,
     build_target_action_queue_items,
+    candidate_mentions_company,
     classify_opportunity_action,
     company_search_aliases,
     contact_status_from_invite_result,
@@ -96,6 +97,25 @@ def test_founding_mechatronics_engineer_buckets_as_engineering() -> None:
 def test_company_search_aliases_strip_common_startup_suffixes() -> None:
     assert company_search_aliases("Splash Inc.")[:2] == ["Splash Inc.", "Splash"]
     assert "Surtr" in company_search_aliases("Surtr Defense Systems")
+
+
+def test_candidate_mentions_company_requires_structured_single_word_match() -> None:
+    assert candidate_mentions_company(
+        SimpleNamespace(title="Founder of bloom | wearebloom.io", snippet="", raw_text=""),
+        ["Bloom"],
+    )
+    assert not candidate_mentions_company(
+        SimpleNamespace(title="Engineering Team Lead at Bloomberg", snippet="", raw_text=""),
+        ["Bloom"],
+    )
+    assert not candidate_mentions_company(
+        SimpleNamespace(title="Project Manager", snippet="Current: Project Manager at Bloom Energy", raw_text=""),
+        ["Bloom"],
+    )
+    assert not candidate_mentions_company(
+        SimpleNamespace(title="Founding Partner at HedgeLegal", snippet="", raw_text=""),
+        ["Hedge"],
+    )
 
 
 def test_product_pass_rejects_non_product_noise() -> None:

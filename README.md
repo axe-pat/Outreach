@@ -54,6 +54,7 @@ tests/
 - `docs/architecture.md`: earlier design notes and original component split
 - `docs/discovery_strategy.md`: how the multi-source discovery model maps into the workbook
 - `docs/linkedin_browser_playbook.md`: canonical Chrome / LinkedIn session rules shared with ResumeGenerator v1
+- `../ResumeGenerator v1/docs/RECRUITING_ENGINE.md`: combined Recruiting Engine operating guide
 
 ## Getting Started
 
@@ -117,6 +118,11 @@ Outreach-specific prioritization lives downstream. Use
 `workspace/company_overrides.csv` to manually bias certain companies toward
 startup outreach or deprioritize big-company outreach without changing
 `jobs.xlsx`.
+
+In the combined **Recruiting Engine**, this repo is the **Outreach Lane**:
+relationship targets come from application-plus-outreach jobs, startup org
+discovery, and the relationship buffer; Outreach handles people search, note
+generation, invite sends, and touchpoint logging.
 
 ## Current Status
 

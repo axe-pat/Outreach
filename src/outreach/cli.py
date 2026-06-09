@@ -14,7 +14,7 @@ from outreach.discovery.adapters import BuiltInCompaniesAdapter, SourceAdapter, 
 from outreach.discovery.http import HttpTextDownloader
 from outreach.discovery.registry import get_source_definition, list_source_definitions
 from outreach.scoring import score_candidate
-from outreach.services.linkedin import LinkedInScraper
+from outreach.services.linkedin import FilterRunResult, LinkedInScraper
 from outreach.services.notes import NoteGenerator
 from outreach.models import CandidateProfile, LinkedInCompanyQueueItem
 from outreach.resume_jobs_bridge import (
@@ -206,6 +206,33 @@ def company_search_aliases(company: str) -> list[str]:
     return deduped
 
 
+def candidate_mentions_company(raw, aliases: list[str]) -> bool:
+    title = str(getattr(raw, "title", "") or "")
+    snippet = str(getattr(raw, "snippet", "") or "")
+    raw_text = str(getattr(raw, "raw_text", "") or "")
+    text = re.sub(r"\s+", " ", " ".join([title, snippet, raw_text]).lower()).strip()
+    if not text:
+        return False
+    for alias in aliases:
+        normalized = " ".join(alias.lower().split()).strip()
+        if len(normalized) < 4:
+            continue
+        alias_tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
+        if len(alias_tokens) == 1:
+            single_word_boundary = rf"(?![a-z0-9]|\s+[a-z0-9])"
+            structured_patterns = [
+                rf"(?:@|at\s+|current:\s*|past:\s*){re.escape(normalized)}{single_word_boundary}",
+                rf"(?:founder|co-founder|ceo|cto|cpo|head of product|product)\s+(?:of\s+|at\s+|@\s*|[-—]\s*){re.escape(normalized)}{single_word_boundary}",
+                rf"(?<![a-z0-9]){re.escape(normalized)}\s*(?:\||·|-|—|$)",
+            ]
+            if any(re.search(pattern, text, flags=re.I) for pattern in structured_patterns):
+                return True
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", text):
+            return True
+    return False
+
+
 def startup_pool_mode(raw_count: int | None) -> str:
     if raw_count is None:
         return "unknown"
@@ -344,7 +371,7 @@ def startup_relationship_score_boost(role_bucket: str, title: str, company_mode:
     if _is_explicitly_bad_startup_coverage_title(title_lower):
         return 0, []
     boost = 5
-    triggers = ["Exact company preflight"]
+    triggers = ["Keyword company coverage" if pass_name == "startup_company_coverage" else "Exact company preflight"]
     if role_bucket == "Founder" or _is_startup_founder_title(title_lower):
         boost += 25
         triggers.append("Startup founder")
@@ -1235,6 +1262,7 @@ def execute_linkedin_company_run(
     force_broad_fallback: bool = False,
 ) -> Path:
     scraper = LinkedInScraper(settings)
+    scraper.require_live_cdp_session()
     note_generator = NoteGenerator()
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
@@ -1252,7 +1280,8 @@ def execute_linkedin_company_run(
         preflight_pages = settings.search.startup_preflight_max_pages
         preflight_errors: list[str] = []
         preflight_run = None
-        for alias in company_search_aliases(company):
+        aliases = company_search_aliases(company)
+        for alias in aliases:
             try:
                 preflight_run = scraper.extract_people_with_filters_live(
                     company=alias,
@@ -1267,10 +1296,42 @@ def execute_linkedin_company_run(
                 break
             except Exception as exc:
                 preflight_errors.append(f"{alias}: {exc}")
+        preflight_fallback_used = False
         if preflight_run is None:
-            raise RuntimeError(
-                "Could not run startup preflight with any company alias: "
-                + " | ".join(preflight_errors)
+            fallback_candidates: list = []
+            fallback_query = ""
+            fallback_error = ""
+            try:
+                for alias in aliases:
+                    query = alias
+                    raw_candidates = scraper.extract_people_live(
+                        search_query=query,
+                        limit=preflight_limit,
+                        max_pages=preflight_pages,
+                    )
+                    for raw in raw_candidates:
+                        if candidate_mentions_company(raw, aliases):
+                            fallback_candidates.append(raw)
+                    if fallback_candidates:
+                        search_company = alias
+                        fallback_query = query
+                        break
+            except Exception as exc:
+                fallback_error = str(exc)
+            if not fallback_candidates:
+                detail = " | ".join(preflight_errors)
+                if fallback_error:
+                    detail = f"{detail} | keyword fallback: {fallback_error}"
+                raise RuntimeError(
+                    "Could not run startup preflight with any company alias: "
+                    + detail
+                )
+            preflight_fallback_used = True
+            preflight_run = FilterRunResult(
+                candidates=fallback_candidates[:preflight_limit],
+                final_url="",
+                visible_filter_text=[f"keyword fallback: {fallback_query or company}"],
+                screenshot_path=None,
             )
         preflight_artifact = write_artifact(
             settings.artifacts_dir,
@@ -1279,6 +1340,7 @@ def execute_linkedin_company_run(
                 "company": company,
                 "search_company": search_company,
                 "company_mode": company_mode,
+                "fallback_used": preflight_fallback_used,
                 "limit": preflight_limit,
                 "max_pages": preflight_pages,
                 "final_url": preflight_run.final_url,
@@ -1294,12 +1356,13 @@ def execute_linkedin_company_run(
             "connection_degree": None,
             "use_us_location": False,
         }
+        preflight_pass_name = "startup_company_coverage" if preflight_fallback_used else "startup_preflight"
         for raw in preflight_run.candidates:
             if apply_raw_candidate(
                 deduped=deduped,
                 raw=raw,
                 company=company,
-                pass_name="startup_preflight",
+                pass_name=preflight_pass_name,
                 pass_config=preflight_pass_config,
                 settings=settings,
                 company_mode=company_mode,
@@ -1315,11 +1378,12 @@ def execute_linkedin_company_run(
         }
         pass_summaries.append(
             {
-                "pass_name": "startup_preflight",
+                "pass_name": preflight_pass_name,
                 "query": "",
                 "search_company": search_company,
                 "alias_used": search_company != company,
                 "alias_errors": preflight_errors,
+                "fallback_used": preflight_fallback_used,
                 "school": None,
                 "connection_degree": None,
                 "use_us_location": False,
@@ -1338,6 +1402,8 @@ def execute_linkedin_company_run(
         typer.echo(
             f"- Startup preflight: {len(preflight_run.candidates)} raw results across up to {preflight_pages} pages"
         )
+        if preflight_fallback_used:
+            typer.echo("  exact company filter failed; used keyword company coverage fallback")
         typer.echo(f"  kept {preflight_kept_count} after startup coverage filtering")
         typer.echo(
             f"  pool mode: {startup_pool['pool_mode']} | adaptive send threshold >= {startup_pool['adaptive_send_min_score']}"
@@ -1962,6 +2028,7 @@ def run(
             field = ".".join(str(part) for part in error["loc"])
             typer.echo(f"- {field}: {error['msg']}")
         raise typer.Exit(code=1)
+    LinkedInScraper(settings).require_live_cdp_session()
     artifact = execute_linkedin_company_run(
         settings=settings,
         company=company,
@@ -2956,6 +3023,8 @@ def send_invites(
             field = ".".join(str(part) for part in error["loc"])
             typer.echo(f"- {field}: {error['msg']}")
         raise typer.Exit(code=1)
+    if execute:
+        LinkedInScraper(settings).require_live_cdp_session()
 
     with artifact_path.open(encoding="utf-8") as handle:
         payload = json.load(handle)

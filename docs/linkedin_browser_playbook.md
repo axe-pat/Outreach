@@ -13,7 +13,7 @@ The point of this document is simple: do not rediscover the same browser-profile
 2. On this machine, the verified working profile is:
 
 ```text
-/Users/akshat/Desktop/Claude Projects/Outreach/playwright/chrome-data
+/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data
 ```
 
 3. Always launch that profile with:
@@ -51,7 +51,7 @@ Use this exact shape when launching manually:
 
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --user-data-dir="/Users/akshat/Desktop/Claude Projects/Outreach/playwright/chrome-data" \
+  --user-data-dir="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data" \
   --remote-debugging-port=9222 \
   --enable-automation \
   https://www.linkedin.com/feed/
@@ -80,8 +80,8 @@ If either check fails, stop and relaunch Chrome correctly.
 ### Outreach
 
 ```bash
-cd "/Users/akshat/Desktop/Claude Projects/Outreach"
-export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude Projects/Outreach/playwright/chrome-data"
+cd "/Users/akshat/Desktop/Claude projects/Outreach"
+export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data"
 ./scripts/launch_outreach_browser.sh
 ./.venv/bin/python main.py check-linkedin-live
 ```
@@ -104,8 +104,8 @@ contacts or touchpoints to the workspace; tracking is written only with
 ### ResumeGenerator v1 discovery
 
 ```bash
-cd "/Users/akshat/Desktop/Claude Projects/ResumeGenerator v1"
-export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude Projects/Outreach/playwright/chrome-data"
+cd "/Users/akshat/Desktop/Claude projects/ResumeGenerator v1"
+export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data"
 ./discovery/scripts/launch_linkedin_browser.sh
 ./discovery/scripts/check_linkedin_live.sh
 ```

@@ -4,7 +4,7 @@ This file captures the original design recommendations for the project.
 
 For the current implemented system, including discovery, workbook storage, queues,
 LinkedIn execution, and diagrams, see
-[docs/system_overview.md](/Users/akshat/Desktop/Claude Projects/Outreach/docs/system_overview.md).
+[docs/system_overview.md](/Users/akshat/Desktop/Claude projects/Outreach/docs/system_overview.md).
 
 ## Recommendation
 

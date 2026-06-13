@@ -77,7 +77,7 @@ flowchart LR
 
 ### 1. Discovery Layer
 
-Implemented in [src/outreach/discovery](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/discovery).
+Implemented in [src/outreach/discovery](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/discovery).
 
 What it does:
 
@@ -98,7 +98,7 @@ Current extraction modes:
 
 ### 2. Workbook Layer
 
-Implemented in [src/outreach/tracking.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/tracking.py).
+Implemented in [src/outreach/tracking.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/tracking.py).
 
 This is the local source of truth:
 
@@ -178,7 +178,7 @@ These are the durable business objects we want to track over time:
 
 ### Artifacts
 
-Implemented in [src/outreach/artifacts.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/artifacts.py).
+Implemented in [src/outreach/artifacts.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/artifacts.py).
 
 These are immutable snapshots of runs:
 
@@ -251,7 +251,7 @@ There are currently two ranking views:
 
 ### 1. LinkedIn Company Queue
 
-Implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/cli.py).
+Implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/cli.py).
 
 Purpose:
 
@@ -267,7 +267,7 @@ Signals used:
 
 ### 2. Organization Intel
 
-Also implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/cli.py).
+Also implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/cli.py).
 
 Purpose:
 
@@ -283,7 +283,7 @@ Signals surfaced:
 
 ### 3. Target Action Queue
 
-Also implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/cli.py).
+Also implemented in [src/outreach/cli.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/cli.py).
 
 Purpose:
 
@@ -298,9 +298,9 @@ Signals used:
 
 ## LinkedIn As A Subsystem
 
-Implemented mainly in [src/outreach/services/linkedin.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/services/linkedin.py),
-[src/outreach/scoring.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/scoring.py),
-and [src/outreach/services/notes.py](/Users/akshat/Desktop/Claude Projects/Outreach/src/outreach/services/notes.py).
+Implemented mainly in [src/outreach/services/linkedin.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/services/linkedin.py),
+[src/outreach/scoring.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/scoring.py),
+and [src/outreach/services/notes.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/services/notes.py).
 
 This subsystem:
 

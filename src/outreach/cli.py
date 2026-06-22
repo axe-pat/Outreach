@@ -1250,6 +1250,51 @@ def build_linkedin_company_queue_items(
     return queue_items
 
 
+def build_company_note_context(workbook: OutreachWorkbook, company: str) -> dict[str, object]:
+    company_key = normalize_dedupe_text(company)
+    organization = next(
+        (
+            item
+            for item in workbook.list_organizations()
+            if normalize_dedupe_text(item.name) == company_key
+        ),
+        None,
+    )
+    if organization is None:
+        return {}
+
+    opportunities = [
+        item
+        for item in workbook.list_opportunities()
+        if item.organization_id == organization.organization_id
+    ]
+    opportunities.sort(key=lambda item: item.discovered_at, reverse=True)
+
+    tags = extract_tags_from_notes(organization.notes)
+    description = extract_description_from_notes(organization.notes)
+    scale_signal = extract_scale_signal_from_notes(organization.notes)
+    fit_rationale = ""
+    for opportunity in opportunities:
+        fit_rationale = parse_notes_metadata(opportunity.notes).get("fit_rationale", "")
+        if fit_rationale:
+            break
+
+    context: dict[str, object] = {
+        "organization_type": organization.organization_type.value,
+        "target_lists": organization.target_lists,
+        "tags": tags,
+        "description": description,
+        "scale_signal": scale_signal,
+        "opportunity_titles": [item.title for item in opportunities[:3]],
+        "fit_rationale": fit_rationale,
+    }
+    return {
+        key: value
+        for key, value in context.items()
+        if value not in ("", [], None)
+    }
+
+
 def execute_linkedin_company_run(
     *,
     settings: OutreachSettings,
@@ -1260,10 +1305,16 @@ def execute_linkedin_company_run(
     exclude_pass: list[str] | None = None,
     enable_marshall: bool = False,
     force_broad_fallback: bool = False,
+    note_context: dict | None = None,
 ) -> Path:
     scraper = LinkedInScraper(settings)
     scraper.require_live_cdp_session()
     note_generator = NoteGenerator()
+    if note_context is None:
+        note_context = build_company_note_context(
+            OutreachWorkbook(settings.resolved_tracking_workspace_dir),
+            company,
+        )
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
     startup_pool: dict[str, int | str | bool | None] = {
@@ -1538,6 +1589,7 @@ def execute_linkedin_company_run(
         scored_candidates[: settings.search.note_generation_limit],
         company=company,
         company_mode=company_mode,
+        note_context=note_context,
     )
     scored_candidates = [*noted_candidates, *scored_candidates[settings.search.note_generation_limit :]]
 
@@ -1551,6 +1603,7 @@ def execute_linkedin_company_run(
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
             "startup_pool": startup_pool,
+            "note_context": note_context,
             "count": len(scored_candidates),
             "notes_generated_count": len(noted_candidates),
             "results": scored_candidates,
@@ -2124,8 +2177,14 @@ def generate_notes(
 
     company = payload["company"]
     candidates = payload["results"]
+    note_context = payload.get("note_context") or {}
     note_generator = NoteGenerator()
-    annotated = note_generator.generate_batch(candidates, company=company, company_mode=company_mode)
+    annotated = note_generator.generate_batch(
+        candidates,
+        company=company,
+        company_mode=company_mode,
+        note_context=note_context,
+    )
     summary = {
         "send": sum(1 for item in annotated if item["note_qc"]["verdict"] == "send"),
         "blocked": sum(1 for item in annotated if item["note_qc"]["verdict"] == "blocked"),
@@ -2157,6 +2216,7 @@ def generate_notes(
             "source_artifact": str(artifact_path),
             "company": company,
             "company_mode": company_mode,
+            "note_context": note_context,
             "count": len(annotated),
             "qc_summary": summary,
             "ai_polish": ai_polish,

@@ -143,6 +143,92 @@ def test_shared_history_note_names_matched_company() -> None:
     assert note.within_limit is True
 
 
+def test_senior_product_note_uses_contribution_fit_ending() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Natalie Abeysena",
+            "title": "Head of Product, AI Platform",
+            "role_bucket": "Product",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="Deepgram",
+        company_mode="startup",
+        note_context={
+            "opportunity_titles": ["Product Management Intern, Summer 2026"],
+            "tags": ["ai", "developer tools"],
+            "description": "Voice AI platform for developers building speech products.",
+        },
+    )
+
+    assert note.family == "senior_product_contribution"
+    assert note.within_limit is True
+    assert note.length <= NOTE_CHAR_LIMIT
+    assert any(
+        phrase in note.text
+        for phrase in [
+            "where someone with my engineering + PM background could be most useful",
+            "project areas the product team is most excited about",
+            "could contribute",
+        ]
+    )
+
+
+def test_india_based_engineer_note_asks_for_referral_or_pointer() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Arjun Rao",
+            "title": "Senior Software Engineer",
+            "location": "Bengaluru, Karnataka, India",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="1Password",
+        company_mode="big_company",
+        note_context={
+            "opportunity_titles": ["Product Management Intern, Device Trust - Fall 2026"],
+        },
+    )
+
+    assert note.family == "engineering_referral"
+    assert note.ask_style == "referral"
+    assert note.within_limit is True
+    assert "referral" in note.text.lower()
+    assert any(phrase in note.text.lower() for phrase in ["pointer", "hiring-team", "hiring team"])
+
+
+def test_founder_note_uses_builder_fit_instead_of_generic_connection() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Michael Chen",
+            "title": "Co-Founder and CEO",
+            "role_bucket": "Founder",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="Yondu",
+        company_mode="startup",
+        note_context={
+            "tags": ["robotics", "logistics", "ai"],
+            "description": "Robotics workforce for logistics automation.",
+        },
+    )
+
+    assert note.family == "founder_builder_fit"
+    assert note.within_limit is True
+    assert any(phrase in note.text.lower() for phrase in ["builder", "operator", "useful", "team grows"])
+
+
 def test_batch_generation_adds_qc_payload() -> None:
     generator = NoteGenerator()
     annotated = generator.generate_batch(

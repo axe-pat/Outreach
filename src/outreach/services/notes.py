@@ -31,11 +31,50 @@ class NoteQualityCheck:
 class NoteGenerator:
     """Deterministic LinkedIn invite note generator tuned to the 300-char limit."""
 
-    def generate(self, candidate: dict, company: str, company_mode: str = "default") -> GeneratedNote:
+    def generate(
+        self,
+        candidate: dict,
+        company: str,
+        company_mode: str = "default",
+        note_context: dict | None = None,
+    ) -> GeneratedNote:
         first_name = self._first_name(candidate.get("name") or "there")
         company_for_note = " ".join(company.split()).rstrip(".")
         role_bucket = candidate.get("role_bucket") or "Other"
         ask_style = self._determine_ask_style(candidate, role_bucket, company_mode)
+        context = self._note_context(candidate, note_context)
+
+        use_contextual = (
+            not candidate.get("existing_connection")
+            and not candidate.get("usc_marshall")
+            and not candidate.get("usc")
+            and not candidate.get("shared_history")
+            and (
+                bool(context)
+                or role_bucket in {"Founder", "Adjacent"}
+                or (role_bucket == "Engineering" and self._is_india_based(candidate))
+            )
+        )
+        if use_contextual:
+            contextual = self._contextual_variants(
+                first_name=first_name,
+                company=company_for_note,
+                candidate=candidate,
+                role_bucket=role_bucket,
+                company_mode=company_mode,
+                context=context,
+            )
+            if contextual:
+                family, ask_style, variants = contextual
+                note = self._pick_variant(variants, candidate, company_for_note)
+                note = self._tighten_to_limit(note)
+                return GeneratedNote(
+                    text=note,
+                    family=family,
+                    ask_style=ask_style,
+                    length=len(note),
+                    within_limit=len(note) <= NOTE_CHAR_LIMIT,
+                )
 
         if candidate.get("existing_connection"):
             family = "existing_connection"
@@ -72,11 +111,22 @@ class NoteGenerator:
             within_limit=len(note) <= NOTE_CHAR_LIMIT,
         )
 
-    def generate_batch(self, candidates: list[dict], company: str, company_mode: str = "default") -> list[dict]:
+    def generate_batch(
+        self,
+        candidates: list[dict],
+        company: str,
+        company_mode: str = "default",
+        note_context: dict | None = None,
+    ) -> list[dict]:
         annotated: list[dict] = []
         recent_notes: list[str] = []
         for candidate in candidates:
-            generated = self.generate(candidate, company=company, company_mode=company_mode)
+            generated = self.generate(
+                candidate,
+                company=company,
+                company_mode=company_mode,
+                note_context=note_context,
+            )
             quality = self.quality_check(candidate, generated, recent_notes)
             enriched = {
                 **candidate,
@@ -163,7 +213,11 @@ class NoteGenerator:
             signal_hits += 1
         if candidate.get("shared_history"):
             signal_hits += 1
-        if candidate.get("role_bucket") in {"Product", "Engineering", "University Recruiting"}:
+        if candidate.get("role_bucket") in {"Founder", "Product", "Engineering", "Adjacent", "University Recruiting"}:
+            signal_hits += 1
+        if candidate.get("note_context"):
+            signal_hits += 1
+        if candidate.get("title"):
             signal_hits += 1
         if signal_hits < 2:
             flags.append("Weak personalization signal density")
@@ -176,12 +230,32 @@ class NoteGenerator:
                 r"\b(connect|learn|stay in touch|perspective|guidance|thoughts|hear about|hear more)\b",
                 lower,
             )
+            or re.search(
+                r"\b(referral|pointer|radar|useful|contribute|stand out|project areas|team.*excited|hiring team)\b",
+                lower,
+            )
         )
         if not ask_is_clear:
             flags.append("Ask is not clear")
             score -= 12
         else:
             strengths.append("Light, clear ask")
+
+        if any(
+            phrase in lower
+            for phrase in [
+                "caught my eye because",
+                "stood out because",
+                "noticed your",
+                "feels close to",
+                "strong fit",
+                "natural extension",
+            ]
+        ):
+            strengths.append("Uses specific hook")
+        elif generated.family not in {"usc", "usc_marshall", "existing_connection"}:
+            flags.append("Missing specific hook")
+            score -= 10
 
         recent_notes = recent_notes or []
         if recent_notes:
@@ -228,6 +302,7 @@ class NoteGenerator:
                 "usc": candidate.get("usc", False),
                 "shared_history": candidate.get("shared_history", False),
             },
+            "note_context": candidate.get("note_context") or {},
             "base_note": base_note,
         }
         prompt = (
@@ -270,10 +345,16 @@ class NoteGenerator:
     def _determine_ask_style(self, candidate: dict, role_bucket: str, company_mode: str) -> str:
         if candidate.get("existing_connection"):
             return "direct_help"
+        if self._is_india_based(candidate) and role_bucket == "Engineering":
+            return "referral"
         if role_bucket == "University Recruiting":
             return "direct_help"
         if candidate.get("usc_marshall") or candidate.get("usc") or candidate.get("shared_history"):
             return "guidance"
+        if role_bucket == "Founder":
+            return "builder_fit"
+        if role_bucket == "Adjacent":
+            return "contribution_fit"
         if company_mode == "startup":
             return "conversation"
         if company_mode == "big_company":
@@ -281,6 +362,240 @@ class NoteGenerator:
         if role_bucket in {"Product", "Engineering"}:
             return "conversation"
         return "guidance"
+
+    def _note_context(self, candidate: dict, note_context: dict | None) -> dict:
+        context = dict(note_context or {})
+        candidate_context = candidate.get("note_context") or {}
+        if isinstance(candidate_context, dict):
+            context.update(candidate_context)
+        if context:
+            candidate["note_context"] = context
+        return context
+
+    def _contextual_variants(
+        self,
+        *,
+        first_name: str,
+        company: str,
+        candidate: dict,
+        role_bucket: str,
+        company_mode: str,
+        context: dict,
+    ) -> tuple[str, str, list[str]] | None:
+        role = self._role_reference(context)
+        company_hook = self._company_hook(context, company_mode)
+        person_hook = self._person_hook(candidate)
+        background = self._background_for_context(context)
+
+        if self._is_india_based(candidate) and role_bucket == "Engineering":
+            return (
+                "engineering_referral",
+                "referral",
+                [
+                    f"Hi {first_name}, noticed your engineering work at {company}. I'm a former backend/data engineer now at USC Marshall applying for {role}. Would really value a referral or pointer on how to stand out to the hiring team.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall applying for {role} at {company}. Would be grateful to connect and ask if a referral or hiring-team pointer would make sense.",
+                    f"Hi {first_name}, your engineering path at {company} stood out. I'm applying for {role} after 5 years in backend/data systems and would value a referral or quick pointer if the fit looks reasonable.",
+                ],
+            )
+
+        if role_bucket == "Founder" or self._is_founder_title(candidate):
+            hook = company_hook or f"{company} caught my eye"
+            return (
+                "founder_builder_fit",
+                "builder_fit",
+                [
+                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring product/operator paths, and this feels close to work I've done. Would love to connect and understand where someone with my builder background could be useful as the team grows.",
+                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer, and {role} feels like a strong fit with how I've built systems before. Would love to connect and follow what you're building.",
+                    f"Hi {first_name}, {company} stood out because the product/company direction feels close to my builder background. I'm a Marshall MBA + former engineer exploring product/operator paths and would love to connect.",
+                ],
+            )
+
+        if role_bucket == "Product":
+            hook = person_hook or company_hook or f"{company} stood out because the product work seems deeply technical"
+            if self._is_senior_product_title(candidate):
+                return (
+                    "senior_product_contribution",
+                    "contribution_fit",
+                    [
+                        f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}; would love to connect and understand where someone with my engineering + PM background could be most useful.",
+                        f"Hi {first_name}, {company} stood out because {company_hook or 'the product work feels like a strong fit'}. I'm exploring {role} and would love to connect and hear what project areas the product team is most excited about this year.",
+                        f"Hi {first_name}, {hook}. {background} Would love to connect and understand how someone with my builder-to-PM background could contribute.",
+                    ],
+                )
+            return (
+                "product_hiring_path",
+                "hiring_path",
+                [
+                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}; would love to connect and understand the best way to get on the product team's radar.",
+                    f"Hi {first_name}, I'm exploring {role} at {company}, and the work feels close to what I've built around data systems and AI workflows. Would love to connect and hear what helped you understand the team/product bar.",
+                    f"Hi {first_name}, {company} feels like a strong fit for my engineering-to-PM path. Would love to connect and ask what tends to stand out to the product or hiring team.",
+                ],
+            )
+
+        if role_bucket == "Engineering":
+            hook = person_hook or f"your engineering work at {company} stood out"
+            return (
+                "engineering_product_bridge",
+                "technical_overlap",
+                [
+                    f"Hi {first_name}, {hook}. I'm a former backend/data engineer now at USC Marshall, exploring {role} where technical depth matters. Would love to connect and hear how builders influence product there.",
+                    f"Hi {first_name}, noticed your engineering work at {company}. I'm a Marshall MBA + former data/platform engineer exploring {role}; would love to connect and understand how technical builders work with product there.",
+                    f"Hi {first_name}, {hook}. {background} Would love to connect and learn how engineering-heavy product work actually gets shaped at {company}.",
+                ],
+            )
+
+        if role_bucket == "Adjacent":
+            hook = person_hook or company_hook or f"{company} caught my attention"
+            return (
+                "operator_contribution",
+                "contribution_fit",
+                [
+                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring product/operator roles, and the work feels close to systems I've built before. Would love to connect and understand where someone like me could be useful.",
+                    f"Hi {first_name}, {company} stood out because {company_hook or 'the role direction feels product- and operations-heavy'}. Would love to connect and hear which project areas the team is most excited about this year.",
+                ],
+            )
+
+        if context:
+            hook = company_hook or f"{company} caught my attention"
+            return (
+                "contextual_general",
+                "contribution_fit",
+                [
+                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}, and the fit feels close to work I've done in systems and applied AI. Would love to connect.",
+                    f"Hi {first_name}, {company} stood out because the work feels like a natural extension of my engineering + PM path. Would love to connect and understand where someone like me could be useful.",
+                ],
+            )
+
+        return None
+
+    def _role_reference(self, context: dict) -> str:
+        raw_titles = context.get("opportunity_titles") or context.get("latest_opportunity_titles") or []
+        if isinstance(raw_titles, str):
+            raw_titles = [raw_titles]
+        for raw_title in raw_titles:
+            title = self._clean_role_title(str(raw_title))
+            if title and self._is_relevant_note_role_title(title):
+                if title.lower().endswith("role"):
+                    return f"the {title}"
+                return f"the {title} role"
+        return "PM/product roles"
+
+    def _clean_role_title(self, title: str) -> str:
+        cleaned = " ".join(title.split()).strip(" -")
+        cleaned = re.sub(r"\s+-\s+.*$", "", cleaned)
+        cleaned = re.sub(r",\s*(summer|fall|spring|winter)\s+\d{4}.*$", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s*\([^)]*\)", "", cleaned)
+        cleaned = cleaned.strip(" ,-")
+        if cleaned.lower() in {"built in open roles", "open roles", "current open roles"}:
+            return ""
+        return cleaned
+
+    def _is_relevant_note_role_title(self, title: str) -> bool:
+        lower = title.lower()
+        off_target = [
+            "software engineer",
+            "solutions engineer",
+            "solution engineer",
+            "pre-sales",
+            "sales engineer",
+            "account executive",
+            "marketing designer",
+            "designer",
+            "recruiter",
+        ]
+        if any(signal in lower for signal in off_target):
+            return False
+        relevant = [
+            "product",
+            "pm intern",
+            "strategy",
+            "business operations",
+            "bizops",
+            "operator",
+            "founder",
+            "growth",
+            "program manager",
+        ]
+        return any(signal in lower for signal in relevant)
+
+    def _company_hook(self, context: dict, company_mode: str) -> str:
+        text = " ".join(
+            str(item)
+            for item in [
+                context.get("description", ""),
+                context.get("fit_rationale", ""),
+                " ".join(str(tag) for tag in context.get("tags", []) or []),
+                " ".join(str(title) for title in context.get("opportunity_titles", []) or []),
+            ]
+        ).lower()
+        if any(signal in text for signal in ["voice ai", "speech", "audio", "conversation intelligence"]):
+            return "the voice AI direction feels close to products I want to help shape"
+        if any(signal in text for signal in ["robotics", "logistics", "mobility", "autonomy"]):
+            return "the robotics/logistics problem feels close to my marketplace and systems background"
+        if any(signal in text for signal in ["agent", "ai", "artificial intelligence", "machine learning", "llm"]):
+            return "the AI product direction feels close to work I've done around data systems and applied AI"
+        if any(signal in text for signal in ["data", "platform", "api", "infrastructure", "developer"]):
+            return "the platform/data product direction feels close to systems I've built before"
+        if any(signal in text for signal in ["marketplace", "commerce", "payments", "fintech"]):
+            return "the product space connects with my marketplace and data systems background"
+        if company_mode == "startup":
+            return "the company direction feels like a strong fit for a builder/operator path"
+        return ""
+
+    def _background_for_context(self, context: dict) -> str:
+        hook = self._company_hook(context, "default")
+        if hook:
+            return f"I'm a Marshall MBA + former engineer, and {hook}."
+        return "I'm a Marshall MBA + former engineer with a background in data platforms and marketplaces."
+
+    def _person_hook(self, candidate: dict) -> str:
+        title = " ".join(str(candidate.get(field) or "") for field in ["title", "subtitle"]).strip()
+        lower = title.lower()
+        if not title:
+            return ""
+        if "voice ai" in lower:
+            return "noticed your Voice AI work"
+        if "robotics" in lower:
+            return "noticed your robotics work"
+        if "applied ai" in lower or " ai " in f" {lower} ":
+            return "noticed your applied AI work"
+        if "founder" in lower or "ceo" in lower:
+            return "your founder/operator path stood out"
+        if "product" in lower:
+            return "your product path stood out"
+        if "engineer" in lower or "engineering" in lower:
+            return "your engineering work stood out"
+        if "operations" in lower or "operator" in lower or "strategy" in lower:
+            return "your operator path stood out"
+        return ""
+
+    def _is_founder_title(self, candidate: dict) -> bool:
+        title = str(candidate.get("title") or "").lower()
+        return any(signal in title for signal in ["founder", "co-founder", "cofounder", "ceo", "chief executive"])
+
+    def _is_senior_product_title(self, candidate: dict) -> bool:
+        title = str(candidate.get("title") or "").lower()
+        return any(
+            signal in title
+            for signal in [
+                "head of product",
+                "director of product",
+                "vp product",
+                "vice president",
+                "chief product",
+                "group product",
+                "product leader",
+                "lead product",
+                "principal product",
+                "senior product",
+            ]
+        )
+
+    def _is_india_based(self, candidate: dict) -> bool:
+        location = str(candidate.get("location") or "").lower()
+        title = str(candidate.get("title") or "").lower()
+        india_signals = ["india", "bengaluru", "bangalore", "delhi", "gurgaon", "gurugram", "mumbai", "hyderabad", "pune", "chennai"]
+        return any(signal in location or signal in title for signal in india_signals)
 
     def _existing_connection_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "direct_help":
@@ -442,6 +757,10 @@ class NoteGenerator:
             ("with prior engineering experience at Intuit and Gojek, ", "with prior engineering experience, "),
             ("and learn from your experience there.", "and learn from your experience."),
             ("Your product path stood out, and I'd love to connect and learn from your experience.", "Your product path stood out. Would love to connect and learn from your experience."),
+            ("I'm a Marshall MBA + former engineer exploring product/operator paths, and this feels close to work I've done. ", "I'm a Marshall MBA + former engineer exploring product/operator paths. "),
+            ("Would love to connect and understand where someone with my builder background could be useful as the team grows.", "Would love to connect and understand where my builder background could be useful."),
+            ("Would love to connect and understand where someone with my engineering + PM background could be most useful.", "Would love to connect and understand where my engineering + PM background could be useful."),
+            ("Would be grateful to connect and ask if a referral or hiring-team pointer would make sense.", "Would value a referral or hiring-team pointer if the fit looks reasonable."),
         ]
         for source, target in replacements:
             if len(tightened) <= NOTE_CHAR_LIMIT:

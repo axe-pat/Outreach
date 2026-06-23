@@ -1,4 +1,28 @@
+import re
+
+import pytest
+
 from outreach.services.notes import NOTE_CHAR_LIMIT, NoteGenerator
+
+
+BAD_CONTEXTUAL_NOTE_PATTERNS = [
+    r"\byour engineering work stood out\b",
+    r"\byour .* work stood out\b",
+    r"\bthe company direction feels\b",
+    r"\bAI product direction\b",
+    r"\bproduct/company direction\b",
+    r"\bPM/product roles feels\b",
+    r"\btechnical startup where my builder background\b",
+]
+
+
+def assert_contextual_note_quality(note_text: str, company: str) -> None:
+    lower = note_text.lower()
+    assert len(note_text) <= NOTE_CHAR_LIMIT
+    assert company.lower() in note_text[:140].lower()
+    assert re.search(r"\b(marshall mba|usc marshall|fellow marshall|fellow trojan)\b", lower)
+    for pattern in BAD_CONTEXTUAL_NOTE_PATTERNS:
+        assert not re.search(pattern, note_text, flags=re.I), pattern
 
 
 def test_generates_usc_note_with_limit() -> None:
@@ -259,6 +283,243 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
     assert "ai product direction" not in lower
     assert "company direction" not in lower
     assert "roles feels" not in lower
+
+
+@pytest.mark.parametrize(
+    ("case_name", "company", "company_mode", "candidate", "note_context", "expected_family", "expected_phrases"),
+    [
+        (
+            "founder_without_specific_company_context",
+            "Zenyt.ai",
+            "startup",
+            {
+                "name": "Raphael Rozenblum",
+                "title": "Zenyt.ai co-founder and CTO | ex Amazon",
+                "role_bucket": "Founder",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {"opportunity_titles": ["Product Owner Internship"]},
+            "founder_builder_fit",
+            ["product/operator", "connect"],
+        ),
+        (
+            "founder_with_specific_company_context",
+            "Synphony",
+            "startup",
+            {
+                "name": "Sean Wu",
+                "title": "ex-NVIDIA AI | CEO @ Synphony",
+                "role_bucket": "Founder",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {
+                "tags": ["robotics", "agriculture", "saas"],
+                "description": "Strawberry picking robots, bed-level analytics, data pipeline integration, and robotics services.",
+            },
+            "founder_builder_fit",
+            ["Synphony's robotics + data pipeline", "connect"],
+        ),
+        (
+            "engineer_pointer",
+            "WorkWhile",
+            "startup",
+            {
+                "name": "Roshni Ramakrishnan",
+                "title": "Senior Software Engineer | ex-Gemini | ex-AWS",
+                "role_bucket": "Engineering",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {
+                "tags": ["artificial intelligence", "hr tech"],
+                "description": "Labor platform helping businesses fill shifts and reduce no-shows.",
+            },
+            "engineering_product_bridge",
+            ["pointer", "technical PM candidates"],
+        ),
+        (
+            "india_engineer_referral",
+            "Snyk",
+            "big_company",
+            {
+                "name": "Mehak Singh",
+                "title": "Associate Software Engineer at Snyk",
+                "location": "Haryana, India",
+                "role_bucket": "Engineering",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {
+                "tags": ["security", "developer tools"],
+                "description": "Developer-security platform for secure software delivery.",
+            },
+            "engineering_referral",
+            ["referral", "hiring team"],
+        ),
+        (
+            "senior_product_contribution",
+            "Deepgram",
+            "startup",
+            {
+                "name": "Natalie Abeysena",
+                "title": "AI Product Leader",
+                "role_bucket": "Product",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {
+                "tags": ["voice ai", "developer tools"],
+                "description": "Voice AI platform for developers building speech products.",
+                "opportunity_titles": ["Product Management Intern, Summer 2026"],
+            },
+            "senior_product_contribution",
+            ["product team", "Deepgram"],
+        ),
+        (
+            "operator_contribution",
+            "Zenyt.ai",
+            "startup",
+            {
+                "name": "Tristan Turon-Barrere",
+                "title": "Operations | UCSB",
+                "role_bucket": "Adjacent",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {"opportunity_titles": ["Product Owner Internship"]},
+            "operator_contribution",
+            ["product/operator", "useful"],
+        ),
+        (
+            "cloud_agent_workspace",
+            "Endstack",
+            "startup",
+            {
+                "name": "Sam Park",
+                "title": "Co-founder, CEO @ Endstack | YC F24",
+                "role_bucket": "Founder",
+                "usc": False,
+                "usc_marshall": False,
+                "existing_connection": False,
+                "shared_history": False,
+            },
+            {
+                "tags": ["generative-ai", "developer-tools", "ai-assistant"],
+                "description": "Desktop OS and cloud desktop workspace for humans and agents running in the cloud.",
+            },
+            "founder_builder_fit",
+            ["Endstack's cloud desktop/agent workspace", "connect"],
+        ),
+    ],
+)
+def test_contextual_notes_match_real_world_quality_bar(
+    case_name: str,
+    company: str,
+    company_mode: str,
+    candidate: dict,
+    note_context: dict,
+    expected_family: str,
+    expected_phrases: list[str],
+) -> None:
+    note = NoteGenerator().generate(
+        candidate,
+        company=company,
+        company_mode=company_mode,
+        note_context=note_context,
+    )
+
+    assert note.family == expected_family, case_name
+    assert note.within_limit is True
+    assert_contextual_note_quality(note.text, company)
+    for phrase in expected_phrases:
+        assert phrase.lower() in note.text.lower(), f"{case_name}: missing {phrase!r} in {note.text!r}"
+
+
+def test_warm_school_note_mentions_company_early() -> None:
+    note = NoteGenerator().generate(
+        {
+            "name": "Alden Chan",
+            "title": "Founding Finance @ Synphony (YC P26) | USC Marshall",
+            "role_bucket": "Other",
+            "usc": True,
+            "usc_marshall": True,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="Synphony",
+        company_mode="startup",
+    )
+
+    assert note.family == "usc_marshall"
+    assert note.within_limit is True
+    assert_contextual_note_quality(note.text, "Synphony")
+    assert "Fight On!" in note.text
+
+
+def test_contextual_batch_avoids_failed_send_shapes() -> None:
+    generator = NoteGenerator()
+    company = "WorkWhile"
+    note_context = {
+        "tags": ["artificial intelligence", "hr tech", "machine learning"],
+        "description": "Labor platform helping businesses fill shifts, improve fill rates, and reduce no-shows.",
+    }
+    candidates = [
+        {
+            "name": "Roshni Ramakrishnan",
+            "title": "Senior Software Engineer | ex-Gemini | ex-AWS",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        {
+            "name": "Owen Crook",
+            "title": "Software Engineer @ WorkWhile",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        {
+            "name": "Nikhil Bhagwat",
+            "title": "Product @ WorkWhile | McK, MIT Sloan & Harvard Kennedy alum",
+            "role_bucket": "Product",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+    ]
+
+    annotated = generator.generate_batch(
+        candidates,
+        company=company,
+        company_mode="startup",
+        note_context=note_context,
+    )
+
+    assert len(annotated) == len(candidates)
+    signatures = {generator._note_signature(item["note"]) for item in annotated}
+    assert len(signatures) >= 2
+    for item in annotated:
+        assert_contextual_note_quality(item["note"], company)
+        assert item["note_qc"]["verdict"] == "send"
 
 
 def test_batch_generation_adds_qc_payload() -> None:

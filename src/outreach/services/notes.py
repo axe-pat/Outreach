@@ -606,27 +606,27 @@ class NoteGenerator:
     def _usc_marshall_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Would love your perspective on how to position myself well. Fight On!",
-                f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. Would love your perspective on how to position myself well. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall and exploring PM opportunities at {company} after engineering roles at Intuit/Gojek. Would value any guidance you're open to sharing. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. Would love your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Would love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. Would love to connect and learn from your experience. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall and exploring PM opportunities at {company} after engineering roles at Intuit/Gojek. Would love to connect and learn from your path. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. Would love to connect and hear about your experience. Fight On!",
         ]
 
     def _usc_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Trojan here - I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love your perspective on how to position myself well. Fight On!",
-                f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Trojan here - I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} as a Marshall MBA with enterprise software/data platform experience. Would love your perspective on positioning myself well. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall and exploring PM roles at {company} after building data products and enterprise systems. Would value any guidance you're open to sharing. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} with a data platform and enterprise software background. Would love your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Trojan here - I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here - I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} as a Marshall MBA with a data platforms background. Would love to connect and learn from your experience. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall and exploring PM roles at {company} after building data products and enterprise systems. Would love to connect and hear about your experience. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} with enterprise software/data platform experience. Would love to connect and learn from your path. Fight On!",
         ]
 
     def _shared_history_variants(

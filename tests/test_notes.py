@@ -170,11 +170,12 @@ def test_senior_product_note_uses_contribution_fit_ending() -> None:
     assert any(
         phrase in note.text
         for phrase in [
-            "where someone with my engineering + PM background could be most useful",
+            "where my engineering + PM background could be useful",
             "project areas the product team is most excited about",
-            "could contribute",
+            "what tends to matter most to the product team",
         ]
     )
+    assert "Deepgram" in note.text.split(".", 1)[0]
 
 
 def test_india_based_engineer_note_asks_for_referral_or_pointer() -> None:
@@ -227,6 +228,37 @@ def test_founder_note_uses_builder_fit_instead_of_generic_connection() -> None:
     assert note.family == "founder_builder_fit"
     assert note.within_limit is True
     assert any(phrase in note.text.lower() for phrase in ["builder", "operator", "useful", "team grows"])
+    assert "Yondu" in note.text.split(".", 1)[0]
+
+
+def test_engineering_context_note_starts_with_identity_and_company() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Roshni Ramakrishnan",
+            "title": "Senior Software Engineer | ex-Gemini | ex-AWS",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="WorkWhile",
+        company_mode="startup",
+        note_context={
+            "tags": ["artificial intelligence", "hr tech", "machine learning"],
+            "description": "Labor platform helping businesses fill shifts and reduce no-shows.",
+        },
+    )
+
+    first_sentence = note.text.split(".", 1)[0]
+    lower = note.text.lower()
+    assert "WorkWhile" in first_sentence
+    assert "marshall mba" in lower or "usc marshall" in lower
+    assert "your engineering work stood out" not in lower
+    assert "ai product direction" not in lower
+    assert "company direction" not in lower
+    assert "roles feels" not in lower
 
 
 def test_batch_generation_adds_qc_payload() -> None:

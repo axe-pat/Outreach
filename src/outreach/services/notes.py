@@ -383,86 +383,85 @@ class NoteGenerator:
         context: dict,
     ) -> tuple[str, str, list[str]] | None:
         role = self._role_reference(context)
-        company_hook = self._company_hook(context, company_mode)
-        person_hook = self._person_hook(candidate)
-        background = self._background_for_context(context)
+        company_fit = self._company_fit_clause(company, context, company_mode)
+        person_hook = self._specific_person_hook(candidate)
 
         if self._is_india_based(candidate) and role_bucket == "Engineering":
             return (
                 "engineering_referral",
                 "referral",
                 [
-                    f"Hi {first_name}, noticed your engineering work at {company}. I'm a former backend/data engineer now at USC Marshall applying for {role}. Would really value a referral or pointer on how to stand out to the hiring team.",
-                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall applying for {role} at {company}. Would be grateful to connect and ask if a referral or hiring-team pointer would make sense.",
-                    f"Hi {first_name}, your engineering path at {company} stood out. I'm applying for {role} after 5 years in backend/data systems and would value a referral or quick pointer if the fit looks reasonable.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. Would value a referral or pointer on how to stand out to the hiring team if the fit looks reasonable.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring {role} at {company}. If there's a relevant opening, I'd value a referral or pointer to the right hiring path.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}. Would be grateful for a referral or quick pointer on the best way to get on the hiring team's radar.",
                 ],
             )
 
         if role_bucket == "Founder" or self._is_founder_title(candidate):
-            hook = company_hook or f"{company} caught my eye"
+            fit_sentence = f" {company_fit}" if company_fit else ""
             return (
                 "founder_builder_fit",
                 "builder_fit",
                 [
-                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring product/operator paths, and this feels close to work I've done. Would love to connect and understand where someone with my builder background could be useful as the team grows.",
-                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer, and {role} feels like a strong fit with how I've built systems before. Would love to connect and follow what you're building.",
-                    f"Hi {first_name}, {company} stood out because the product/company direction feels close to my builder background. I'm a Marshall MBA + former engineer exploring product/operator paths and would love to connect.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer interested in product/operator work at {company}.{fit_sentence} Would love to connect and understand where a technical MBA could be useful.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring product/operator paths at {company}.{fit_sentence} Would love to connect and follow what you're building.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}.{fit_sentence} Would love to connect and understand where someone with my background could contribute.",
                 ],
             )
 
         if role_bucket == "Product":
-            hook = person_hook or company_hook or f"{company} stood out because the product work seems deeply technical"
+            fit_clause = person_hook or company_fit or "The role looks close to my engineering-to-PM path."
             if self._is_senior_product_title(candidate):
                 return (
                     "senior_product_contribution",
                     "contribution_fit",
                     [
-                        f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}; would love to connect and understand where someone with my engineering + PM background could be most useful.",
-                        f"Hi {first_name}, {company} stood out because {company_hook or 'the product work feels like a strong fit'}. I'm exploring {role} and would love to connect and hear what project areas the product team is most excited about this year.",
-                        f"Hi {first_name}, {hook}. {background} Would love to connect and understand how someone with my builder-to-PM background could contribute.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand where my engineering + PM background could be useful.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}. {fit_clause} Would love to connect and hear what project areas the product team is most excited about.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring product roles at {company}. {fit_clause} Would love to connect and ask what tends to matter most to the product team.",
                     ],
                 )
             return (
                 "product_hiring_path",
                 "hiring_path",
                 [
-                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}; would love to connect and understand the best way to get on the product team's radar.",
-                    f"Hi {first_name}, I'm exploring {role} at {company}, and the work feels close to what I've built around data systems and AI workflows. Would love to connect and hear what helped you understand the team/product bar.",
-                    f"Hi {first_name}, {company} feels like a strong fit for my engineering-to-PM path. Would love to connect and ask what tends to stand out to the product or hiring team.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand the best way to get on the product team's radar.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring {role} at {company}. {fit_clause} Would love to connect and ask what tends to stand out to the product team.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}. Would love to connect and ask what usually helps candidates stand out to the team.",
                 ],
             )
 
         if role_bucket == "Engineering":
-            hook = person_hook or f"your engineering work at {company} stood out"
+            fit_clause = person_hook or company_fit or "Since you're on the engineering side there, I'd value your take."
             return (
                 "engineering_product_bridge",
                 "technical_overlap",
                 [
-                    f"Hi {first_name}, {hook}. I'm a former backend/data engineer now at USC Marshall, exploring {role} where technical depth matters. Would love to connect and hear how builders influence product there.",
-                    f"Hi {first_name}, noticed your engineering work at {company}. I'm a Marshall MBA + former data/platform engineer exploring {role}; would love to connect and understand how technical builders work with product there.",
-                    f"Hi {first_name}, {hook}. {background} Would love to connect and learn how engineering-heavy product work actually gets shaped at {company}.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring {role} at {company}. Since you're on the engineering side there, I'd value a pointer on how technical PM candidates can stand out.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring PM/product roles at {company}. {fit_clause} Would love a quick pointer on how builders work with product there.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at product roles at {company}. Since you've seen the engineering side, I'd value your take on how to get on the team's radar.",
                 ],
             )
 
         if role_bucket == "Adjacent":
-            hook = person_hook or company_hook or f"{company} caught my attention"
+            fit_clause = person_hook or company_fit or "The role direction feels close to systems and product work I've done."
             return (
                 "operator_contribution",
                 "contribution_fit",
                 [
-                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring product/operator roles, and the work feels close to systems I've built before. Would love to connect and understand where someone like me could be useful.",
-                    f"Hi {first_name}, {company} stood out because {company_hook or 'the role direction feels product- and operations-heavy'}. Would love to connect and hear which project areas the team is most excited about this year.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring product/operator roles at {company}. {fit_clause} Would love to connect and understand where someone like me could be useful.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product/operator paths at {company}. Would love to connect and hear which project areas the team is most excited about.",
                 ],
             )
 
         if context:
-            hook = company_hook or f"{company} caught my attention"
+            fit_clause = company_fit or "The role looks close to my engineering-to-PM path."
             return (
                 "contextual_general",
                 "contribution_fit",
                 [
-                    f"Hi {first_name}, {hook}. I'm a Marshall MBA + former engineer exploring {role}, and the fit feels close to work I've done in systems and applied AI. Would love to connect.",
-                    f"Hi {first_name}, {company} stood out because the work feels like a natural extension of my engineering + PM path. Would love to connect and understand where someone like me could be useful.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand where someone like me could be useful.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at PM/product roles at {company}. Would love to connect and ask what tends to matter most to the team.",
                 ],
             )
 
@@ -476,8 +475,8 @@ class NoteGenerator:
             title = self._clean_role_title(str(raw_title))
             if title and self._is_relevant_note_role_title(title):
                 if title.lower().endswith("role"):
-                    return f"the {title}"
-                return f"the {title} role"
+                    return title
+                return title
         return "PM/product roles"
 
     def _clean_role_title(self, title: str) -> str:
@@ -518,7 +517,7 @@ class NoteGenerator:
         ]
         return any(signal in lower for signal in relevant)
 
-    def _company_hook(self, context: dict, company_mode: str) -> str:
+    def _company_fit_clause(self, company: str, context: dict, company_mode: str) -> str:
         text = " ".join(
             str(item)
             for item in [
@@ -528,45 +527,39 @@ class NoteGenerator:
                 " ".join(str(title) for title in context.get("opportunity_titles", []) or []),
             ]
         ).lower()
+        if company.lower() == "workwhile" or any(signal in text for signal in ["labor platform", "shift", "workforce", "worker", "no-shows", "fill rates"]):
+            return f"{company}'s labor platform problem connects with marketplace ops systems I've worked on."
+        if company.lower() == "snyk" or any(signal in text for signal in ["security", "developer productivity", "secure software", "cybersecurity"]):
+            return f"{company}'s developer-security platform connects with my data/platform background."
+        if company.lower() == "synphony" or any(signal in text for signal in ["strawberry", "farming", "robotics", "robot foundation", "agriculture"]):
+            return f"{company}'s robotics + data pipeline angle connects with systems work I've done."
+        if company.lower() == "endstack" or any(signal in text for signal in ["desktop os", "cloud desktop", "agents running", "endos", "workspace"]):
+            return f"{company}'s cloud desktop/agent workspace is the kind of technical product I'd be excited to help shape."
         if any(signal in text for signal in ["voice ai", "speech", "audio", "conversation intelligence"]):
-            return "the voice AI direction feels close to products I want to help shape"
-        if any(signal in text for signal in ["robotics", "logistics", "mobility", "autonomy"]):
-            return "the robotics/logistics problem feels close to my marketplace and systems background"
-        if any(signal in text for signal in ["agent", "ai", "artificial intelligence", "machine learning", "llm"]):
-            return "the AI product direction feels close to work I've done around data systems and applied AI"
-        if any(signal in text for signal in ["data", "platform", "api", "infrastructure", "developer"]):
-            return "the platform/data product direction feels close to systems I've built before"
+            return f"{company}'s voice AI product connects with my data/platform background."
         if any(signal in text for signal in ["marketplace", "commerce", "payments", "fintech"]):
-            return "the product space connects with my marketplace and data systems background"
-        if company_mode == "startup":
-            return "the company direction feels like a strong fit for a builder/operator path"
+            return f"{company}'s product space connects with my marketplace and data systems background."
+        if any(signal in text for signal in ["platform", "api", "infrastructure", "developer"]):
+            return f"{company}'s platform work connects with systems I've built before."
+        if any(signal in text for signal in ["agent", "artificial intelligence", "machine learning", "llm", "generative-ai"]):
+            return f"{company}'s applied AI work connects with my data/platform background."
         return ""
 
-    def _background_for_context(self, context: dict) -> str:
-        hook = self._company_hook(context, "default")
-        if hook:
-            return f"I'm a Marshall MBA + former engineer, and {hook}."
-        return "I'm a Marshall MBA + former engineer with a background in data platforms and marketplaces."
-
-    def _person_hook(self, candidate: dict) -> str:
+    def _specific_person_hook(self, candidate: dict) -> str:
         title = " ".join(str(candidate.get(field) or "") for field in ["title", "subtitle"]).strip()
         lower = title.lower()
         if not title:
             return ""
         if "voice ai" in lower:
-            return "noticed your Voice AI work"
+            return "Your Voice AI background caught my eye."
         if "robotics" in lower:
-            return "noticed your robotics work"
+            return "Your robotics background caught my eye."
         if "applied ai" in lower or " ai " in f" {lower} ":
-            return "noticed your applied AI work"
-        if "founder" in lower or "ceo" in lower:
-            return "your founder/operator path stood out"
+            return "Your applied AI background caught my eye."
         if "product" in lower:
-            return "your product path stood out"
-        if "engineer" in lower or "engineering" in lower:
-            return "your engineering work stood out"
-        if "operations" in lower or "operator" in lower or "strategy" in lower:
-            return "your operator path stood out"
+            return "Your product background there caught my eye."
+        if any(signal in lower for signal in ["operations", "operator", "strategy", "chief of staff", "bizops"]):
+            return "Your operator/strategy background there caught my eye."
         return ""
 
     def _is_founder_title(self, candidate: dict) -> bool:
@@ -613,27 +606,27 @@ class NoteGenerator:
     def _usc_marshall_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Marshall alum here. I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Would love your perspective on how to position myself well. Fight On!",
-                f"Hi {first_name}, fellow Marshall alum here. I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Marshall alum here. I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Would love your perspective on how to position myself well. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would value any guidance you're open to sharing. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Marshall alum here. I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Your path stood out and I'd love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here. I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here. I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Would love to connect and learn from your experience. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm a 1Y MBA with an engineering background in data platforms and marketplaces, now exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
         ]
 
     def _usc_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Trojan here. I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love your perspective on how to position myself well. Fight On!",
-                f"Hi {first_name}, fellow Trojan here. I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Trojan here. I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love your perspective on how to position myself well. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would value any guidance you're open to sharing. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Trojan here. I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here. I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here. I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, exploring PM roles at {company}. Would love to connect and learn from your experience. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall after building data products and enterprise systems, and I'm exploring PM roles at {company}. Would love to connect and hear about your experience. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm a Marshall MBA with prior experience in enterprise software and data platforms, now exploring PM opportunities at {company}. Would love to connect and learn from your path. Fight On!",
         ]
 
     def _shared_history_variants(

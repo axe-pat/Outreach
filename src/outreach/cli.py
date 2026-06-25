@@ -2310,6 +2310,7 @@ def apply_linkedin_reconcile_results(
                     **raw,
                     "normalized_status": status,
                     "action": "missing_contact",
+                    "needs_follow_up": False,
                     "applied": False,
                 }
             )
@@ -2383,7 +2384,7 @@ def apply_linkedin_reconcile_results(
                 "normalized_status": status,
                 "action": action,
                 "new_contact_status": new_contact_status,
-                "needs_follow_up": status == "connected",
+                "needs_follow_up": status == "connected" and connected_result_needs_follow_up(raw),
                 "applied": applied,
             }
         )
@@ -2434,6 +2435,10 @@ def normalize_person_name(value: str) -> str:
     return normalize_dedupe_text(re.sub(r"\s+", " ", value or ""))
 
 
+def first_name_key(value: str) -> str:
+    return normalize_person_name(value).split(" ", maxsplit=1)[0]
+
+
 def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]) -> ContactRecord | None:
     thread_name = normalize_person_name(str(thread.get("name") or ""))
     if not thread_name:
@@ -2445,6 +2450,15 @@ def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]
         contact_name = normalize_person_name(contact.full_name)
         if contact_name and (thread_name in contact_name or contact_name in thread_name):
             return contact
+    thread_first = first_name_key(thread_name)
+    if thread_first:
+        first_name_matches = [
+            contact
+            for contact in contacts
+            if first_name_key(contact.full_name) == thread_first
+        ]
+        if len(first_name_matches) == 1:
+            return first_name_matches[0]
     return None
 
 
@@ -2479,6 +2493,18 @@ def message_thread_has_reply(thread: dict, original_invite_note: str = "") -> bo
     if latest_lower.startswith("you:"):
         return False
     return bool(thread.get("unread"))
+
+
+def connected_result_needs_follow_up(result: dict) -> bool:
+    latest_message = str(result.get("latest_message") or result.get("message_text") or "").strip()
+    last_sender = str(result.get("last_sender") or "").strip().lower()
+    original_invite_note = str(result.get("original_invite_note") or "").strip()
+    if not latest_message:
+        return True
+    if last_sender in {"you", "akshat"}:
+        if original_invite_note and normalize_dedupe_text(latest_message) != normalize_dedupe_text(original_invite_note):
+            return False
+    return True
 
 
 def build_linkedin_message_reconcile_results(

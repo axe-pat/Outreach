@@ -498,8 +498,6 @@ class LinkedInScraper:
               container.matches && container.matches('a[href*="/messaging/thread/"]') ? container : null
             );
             const href = anchor ? anchor.href : "";
-            if (!href || seen.has(href)) return null;
-            seen.add(href);
 
             const nameEl = container.querySelector(
               '.msg-conversation-listitem__participant-names, [data-anonymize="person-name"], h3, .entity-result__title-text'
@@ -512,17 +510,23 @@ class LinkedInScraper:
             );
             const textLines = normalize(container.innerText).split(/ (?=[A-Z][a-z]+\\b)/).map(normalize).filter(Boolean);
             const name = normalize(nameEl ? nameEl.textContent : "") || textLines[0] || "";
+            const timeText = normalize(timeEl ? timeEl.textContent : "");
             const latest = normalize(snippetEl ? snippetEl.textContent : "") || textLines.slice(1).join(" ");
             const lastSenderMatch = latest.match(/^([^:]{1,60}):\\s+(.+)$/);
             const unread = /unread/i.test(container.className || "") || container.querySelector('[aria-label*="unread" i]') !== null;
+            const threadId = href
+              ? (href.split('/messaging/thread/')[1]?.split(/[/?#]/)[0] || href)
+              : `synthetic:${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+            if (!name || !threadId || seen.has(threadId)) return null;
+            seen.add(threadId);
 
             return {
-              thread_id: href.split('/messaging/thread/')[1]?.split(/[/?#]/)[0] || href,
+              thread_id: threadId,
               name,
               thread_url: href,
               latest_message: lastSenderMatch ? normalize(lastSenderMatch[2]) : latest,
               last_sender: lastSenderMatch ? normalize(lastSenderMatch[1]) : "",
-              timestamp_text: normalize(timeEl ? timeEl.textContent : ""),
+              timestamp_text: timeText,
               unread,
             };
           };

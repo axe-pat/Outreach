@@ -676,6 +676,13 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
             status="Invited",
             linkedin_url="https://www.linkedin.com/in/old/",
         ),
+        ContactRecord(
+            contact_id="ct-shubhankit",
+            organization_id="org-d-matrix",
+            full_name="Shubhankit R.",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/shubhankitr/",
+        ),
     ]
     touchpoints = [
         TouchpointRecord(
@@ -693,6 +700,14 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
             status="Sent",
             message_kind="linkedin_invite",
             message_text="Hi Owen, would love a quick pointer on how builders work with product there.",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-shubhankit",
+            organization_id="org-d-matrix",
+            contact_id="ct-shubhankit",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Shubhankit, I'm exploring PM roles at d-Matrix.",
         ),
     ]
     threads = [
@@ -718,6 +733,13 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
             "latest_message": "Already seen",
             "last_sender": "Old Thread",
         },
+        {
+            "thread_id": "thread-shubhankit",
+            "name": "Shubhankit Rathore",
+            "thread_url": "",
+            "latest_message": "Hi Shubhankit, I'm exploring PM roles at d-Matrix.",
+            "last_sender": "You",
+        },
     ]
 
     results, next_state = build_linkedin_message_reconcile_results(
@@ -727,9 +749,9 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
         state={"seen_thread_ids": ["thread-old"]},
     )
 
-    assert [item["contact_id"] for item in results] == ["ct-roshni", "ct-owen"]
-    assert [item["status"] for item in results] == ["connected", "replied"]
-    assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old"}
+    assert [item["contact_id"] for item in results] == ["ct-roshni", "ct-owen", "ct-shubhankit"]
+    assert [item["status"] for item in results] == ["connected", "replied", "connected"]
+    assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

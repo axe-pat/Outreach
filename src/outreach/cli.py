@@ -3042,6 +3042,49 @@ def account_tracker_cmd(
     typer.echo(f"Output: {path}")
 
 
+@app.command("build-account-campaign-plan")
+def build_account_campaign_plan(
+    workspace: Annotated[
+        Path,
+        typer.Option(help="Path to the workspace directory containing CSVs"),
+    ] = Path("workspace"),
+    limit: Annotated[int, typer.Option(help="Maximum campaign actions to include")] = 30,
+) -> None:
+    """Build executable next actions for Tier A/B account campaigns."""
+    from outreach.account_tracker import build_account_rows, build_campaign_plan_rows
+
+    rows = build_account_rows(workspace)
+    plan_rows = build_campaign_plan_rows(rows)[:limit]
+    summary: dict[str, int] = {}
+    lane_summary: dict[str, int] = {}
+    for row in plan_rows:
+        summary[row.campaign_action] = summary.get(row.campaign_action, 0) + 1
+        lane_summary[row.lane_1_policy] = lane_summary.get(row.lane_1_policy, 0) + 1
+
+    artifact = write_artifact(
+        OutreachSettings().artifacts_dir,
+        "account-campaign-plan",
+        {
+            "count": len(plan_rows),
+            "limit": limit,
+            "summary": summary,
+            "lane_1_policy_summary": lane_summary,
+            "results": [row.__dict__ for row in plan_rows],
+        },
+    )
+
+    typer.echo(f"Built account campaign plan with {len(plan_rows)} actions.")
+    typer.echo(f"Summary: {summary}")
+    typer.echo(f"Lane 1 policy: {lane_summary}")
+    typer.echo(f"Artifact: {artifact}")
+    for row in plan_rows[: min(12, len(plan_rows))]:
+        typer.echo(
+            f"- {row.company} | tier={row.tier} | action={row.campaign_action} | "
+            f"channel={row.campaign_channel} | lane1={row.lane_1_policy} | priority={row.campaign_priority}"
+        )
+        typer.echo(f"  {row.campaign_reason}")
+
+
 @app.command()
 def doctor() -> None:
     try:

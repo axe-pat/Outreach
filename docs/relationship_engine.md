@@ -232,6 +232,24 @@ For Tier A/B companies, decide when to:
 - ask for referral
 - pause the account
 
+The planner should output concrete action records, not just a dashboard row. Current
+actions:
+
+- `enrich_company_context`
+- `map_more_contacts`
+- `send_initial_invites`
+- `expand_linkedin_wave`
+- `follow_up_connected_contact`
+- `continue_conversation`
+- `switch_to_email_or_wellfound`
+- `pause_account`
+
+Each action carries a `lane_1_policy`:
+
+- `track_2_owns`: normal ranked outreach should not independently touch this account.
+- `fresh_role_only`: Lane 1 may touch only if there is a fresh applied/generated role.
+- `lane_1_allowed`: normal outreach can handle it.
+
 ### 6. Reply + Conversation Agent
 
 Classify incoming replies and draft responses:
@@ -362,15 +380,35 @@ This is a manual override field in `company_overrides.csv` for now. Not auto-det
 Use `date_posted` from `jobs.xlsx` (via ResumeGenerator bridge) when available.
 Recency decay: roles older than 90 days should not get full hiring signal credit.
 
-### Relationship Depth and Tier
+### Relationship Depth
+
+Relationship progress is a direct score component (not just a sort tiebreaker):
+
+| Contact state | Points |
+|--------------|--------|
+| 3+ contacts Warm (replied) | +20 |
+| 1–2 contacts Warm | +15 |
+| 3+ contacts Connected (accepted, no reply) | +12 |
+| 1–2 contacts Connected | +8 |
+| No connections yet | 0 |
+
+A company where you have an active conversation outranks a company with better raw fit
+but zero relationship progress.
+
+### No-Domain-Data Penalty
+
+Companies imported from `jobs.xlsx` (ResumeGenerator) often have no tags or description.
+These get role fit + hiring credit (the PM intern listing is real) but are docked **−8 pts**
+since there's no domain signal to confirm fit. Stopgap until those imports are enriched
+with tags from YC/BuiltIn discovery or `company_overrides.csv`.
+
+### Tier Assignment
 
 Tier assignment (A/B/C) is based on fit_score rank. The **Action Queue** sort order
-weights relationship stage heavily — a company in `conversation_started` or
-`connected_no_conversation` always surfaces above a higher-scoring company with
-zero relationship progress.
+also weights relationship stage — `conversation_started` and `connected_no_conversation`
+always surface above higher-scoring companies with zero relationship progress.
 
-Tier A is the top 20 by score. Tier B is the next 40. These are rank-based, not
-threshold-based, so the A list stays stable at 20 companies as new orgs are discovered.
+Tier A is the top 20 by score. Tier B is the next 40. Rank-based, not threshold-based.
 
 ### Large Company Track (1000+ employees)
 
@@ -387,9 +425,10 @@ Large companies follow different campaign logic:
 
 - Prestige score: needs data source (Crunchbase funding, investor tier). One-time
   enrichment, refresh every ~2 weeks. Not yet implemented.
-- 2nd-degree density: computable from contact triggers but not yet wired into
-  reachability scoring.
+- 2nd-degree density: wired into reachability scoring (≥2 contacts with "2nd degree" in
+  notes → +3 pts). Populated automatically by the daily LinkedIn Playwright pipeline.
 - `date_posted` recency decay: jobs.xlsx has the field; bridge to account tracker
   not yet built.
-- Large company track: flag and fork logic not yet implemented.
+- Large company track: team size now parses correctly, but channel/playbook fork logic
+  is still not fully implemented.
 - `company_overrides.csv` brand score column: not yet added.

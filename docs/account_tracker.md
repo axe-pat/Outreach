@@ -18,17 +18,41 @@ outreach account-tracker --workspace workspace --output workspace/account_tracke
 - **Tier A — Active Campaign** — top 20 companies
 - **Action Queue** — Tier A/B companies with actionable stages, sorted by urgency
   (conversation → connected → active outreach → people mapped → priority target)
+- **Campaign Plan** — concrete Track 2 actions with channel, reason, and Lane 1 policy
 
 ## Key Columns
 
 | Column | Notes |
 |--------|-------|
-| Fit Score | 0–100, sum of profile fit + role fit + team size gate + reachability + hiring likelihood |
+| Fit Score | profile fit (0–25) + role fit (0–25) + team gate (−10–0) + reachability (0–12) + hiring (0–20) + relationship depth (0–20) − no-domain penalty (−8 if applicable) |
 | Tier | A (top 20) / B (next 40) / C (rest) — rank-based, not threshold |
 | Account Stage | Derived from contact/touchpoint state — see relationship_engine.md |
 | Why Fit | Top signals that drove the score |
 | Next Action | Recommended move based on account stage |
-| Score: Profile / Role / Reach / Hiring | Component breakdown for transparency |
+| Campaign Action | Concrete Track 2 action such as `expand_linkedin_wave`, `map_more_contacts`, or `switch_to_email_or_wellfound` |
+| Lane 1 Policy | How normal outreach should treat the company: `track_2_owns`, `fresh_role_only`, or `lane_1_allowed` |
+| Score: Profile / Role / Team / Reach / Hiring / Rel | Per-component breakdown for transparency |
+
+## Campaign Plan
+
+Build the JSON/action artifact without opening Excel:
+
+```bash
+outreach build-account-campaign-plan --limit 30
+```
+
+Action meanings:
+
+| Action | Meaning |
+|--------|---------|
+| `enrich_company_context` | Role exists, but company/domain context is too thin for bespoke campaign motion |
+| `map_more_contacts` | Strong account, but not enough relevant people mapped |
+| `send_initial_invites` | Relevant people are mapped, but no first wave has been sent |
+| `expand_linkedin_wave` | Some LinkedIn outreach sent; expand toward a fuller account wave |
+| `follow_up_connected_contact` | Someone accepted; send accepted-invite follow-up before new outreach |
+| `continue_conversation` | Real conversation exists; move toward coffee chat, routing, or referral |
+| `switch_to_email_or_wellfound` | LinkedIn wave is not converting; add/switch channel |
+| `pause_account` | Do not spend relationship-engine budget right now |
 
 ## Source Files
 

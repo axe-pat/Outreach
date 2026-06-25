@@ -102,6 +102,8 @@ DOMAIN_TAGS: dict[str, int] = {
 }
 
 PROFILE_FIT_CAP = 25
+LINKEDIN_WAVE_SIZE = 8
+MIN_MAPPED_CONTACTS = 3
 
 # ---------------------------------------------------------------------------
 # Role fit patterns
@@ -174,6 +176,33 @@ class AccountRow:
     score_reachability: int = 0
     score_hiring: int = 0
     score_relationship: int = 0
+    data_quality_flags: str = ""
+    campaign_action: str = ""
+    campaign_channel: str = ""
+    campaign_priority: int = 0
+    campaign_reason: str = ""
+    lane_1_policy: str = ""
+
+
+@dataclass
+class CampaignPlanRow:
+    company: str
+    tier: str
+    fit_score: int
+    account_stage: str
+    campaign_action: str
+    campaign_channel: str
+    campaign_priority: int
+    campaign_reason: str
+    lane_1_policy: str
+    why_fit: str
+    people_mapped: int
+    invites_sent: int
+    accepted: int
+    replies: int
+    target_role: str
+    next_due_date: str
+    organization_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +217,13 @@ def _parse_notes(notes: str) -> dict[str, str]:
             k, _, v = part.partition("=")
             result[k.strip()] = v.strip()
     return result
+
+
+def _parse_team_size(value: str) -> Optional[int]:
+    match = re.search(r"\d[\d,]*", value or "")
+    if not match:
+        return None
+    return int(match.group(0).replace(",", ""))
 
 
 def _text_mentions_company(text: str, company: str) -> bool:
@@ -215,8 +251,7 @@ def _score_profile_fit(org: OrganizationRecord) -> tuple[int, list[str], str, Op
     parsed = _parse_notes(org.notes)
     tags_raw = parsed.get("tags", "").lower()
     description = parsed.get("description", "").lower()
-    team_size_str = parsed.get("team_size", "")
-    team_size = int(team_size_str) if team_size_str.isdigit() else None
+    team_size = _parse_team_size(parsed.get("team_size", ""))
 
     score = 0
     matched: list[str] = []
@@ -274,6 +309,25 @@ def _score_team_gate(team_size: Optional[int]) -> int:
         return -5   # marginal
     # 15–200: sweet spot, no adjustment
     return 0
+
+
+def _data_quality_flags(
+    *,
+    org: OrganizationRecord,
+    profile_fit: int,
+    team_size: Optional[int],
+    opportunities: list[OpportunityRecord],
+) -> list[str]:
+    flags: list[str] = []
+    if profile_fit == 0 and "imported from resumegenerator" in org.notes.lower():
+        flags.append("needs_domain_enrichment")
+    if team_size is None and "team_size=" in org.notes.lower():
+        flags.append("team_size_unparsed")
+    if not org.website and not org.linkedin_url:
+        flags.append("missing_company_url")
+    if opportunities and profile_fit == 0:
+        flags.append("role_without_domain_context")
+    return flags
 
 
 def _score_reachability(
@@ -397,6 +451,97 @@ def _derive_stage(
         (date.today() + timedelta(days=3)).isoformat()
 
 
+def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str]:
+    flags = {item.strip() for item in row.data_quality_flags.split(";") if item.strip()}
+    if row.tier == "C" or row.fit_score < 18:
+        return (
+            "pause_account",
+            "none",
+            10,
+            "Not in Tier A/B or not enough current fit to spend relationship-engine budget.",
+            "lane_1_allowed",
+        )
+    if "needs_domain_enrichment" in flags or "role_without_domain_context" in flags:
+        return (
+            "enrich_company_context",
+            "research",
+            85 if row.tier == "A" else 65,
+            "Role signal is strong, but company/domain fit is under-specified; enrich before more campaign touches.",
+            "fresh_role_only",
+        )
+    if row.account_stage == "conversation_started":
+        return (
+            "continue_conversation",
+            "linkedin",
+            100,
+            "A real conversation exists; prioritize moving toward coffee chat, referral, or routing.",
+            "track_2_owns",
+        )
+    if row.account_stage == "connected_no_conversation":
+        return (
+            "follow_up_connected_contact",
+            "linkedin",
+            95,
+            "Someone accepted but has not replied; send the accepted-invite follow-up before new outreach.",
+            "track_2_owns",
+        )
+    if row.account_stage == "people_mapped" and row.invites_sent == 0:
+        return (
+            "send_initial_invites",
+            "linkedin",
+            80 if row.tier == "A" else 60,
+            "Relevant people are mapped but no LinkedIn wave has been sent.",
+            "track_2_owns",
+        )
+    if row.people_mapped < MIN_MAPPED_CONTACTS:
+        return (
+            "map_more_contacts",
+            "linkedin",
+            75 if row.tier == "A" else 55,
+            f"Only {row.people_mapped} relevant contact(s) mapped; build a better account map before sending more.",
+            "track_2_owns",
+        )
+    if row.account_stage == "outreach_active":
+        if row.invites_sent >= LINKEDIN_WAVE_SIZE and row.accepted == 0 and row.replies == 0:
+            return (
+                "switch_to_email_or_wellfound",
+                "email/wellfound",
+                90 if row.tier == "A" else 70,
+                f"{row.invites_sent} LinkedIn invites with no accepts/replies; add or switch channel instead of another blind wave.",
+                "track_2_owns",
+            )
+        if row.invites_sent < LINKEDIN_WAVE_SIZE:
+            return (
+                "expand_linkedin_wave",
+                "linkedin",
+                78 if row.tier == "A" else 58,
+                f"{row.invites_sent} invite(s) sent; expand toward an {LINKEDIN_WAVE_SIZE}-person wave if contacts are relevant.",
+                "track_2_owns",
+            )
+        return (
+            "wait_for_accepts",
+            "linkedin",
+            45,
+            "LinkedIn wave is in flight; reconcile accepts/replies before new account touches.",
+            "track_2_owns",
+        )
+    if row.account_stage in {"priority_target", "unqualified"}:
+        return (
+            "map_more_contacts" if row.fit_score >= 30 else "enrich_company_context",
+            "linkedin" if row.fit_score >= 30 else "research",
+            70 if row.tier == "A" else 50,
+            "Account has enough score to inspect, but is not ready for a campaign touch yet.",
+            "fresh_role_only" if row.tier in {"A", "B"} else "lane_1_allowed",
+        )
+    return (
+        "pause_account",
+        "none",
+        10,
+        "No high-leverage campaign action detected.",
+        "lane_1_allowed",
+    )
+
+
 # Human-readable label map for why_fit
 _LABEL = {
     "artificial-intelligence": "AI/ML",
@@ -473,6 +618,12 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         s_reach, r_signals = _score_reachability(org, company_contacts)
         s_hiring, _ = _score_hiring(oo)
         s_rel, rel_label = _score_relationship_depth(company_contacts)
+        quality_flags = _data_quality_flags(
+            org=org,
+            profile_fit=s_profile,
+            team_size=team_size,
+            opportunities=oo,
+        )
 
         # No-domain-data discount: jobs.xlsx imports with empty tags/description
         # get role+hiring credit but we have no idea if they're actually a fit.
@@ -505,8 +656,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         replies = sum(1 for c in company_contacts if c.status in REPLIED_STATUSES)
 
         stage, next_action, next_due = _derive_stage(fit_score, company_contacts)
-
-        rows.append(AccountRow(
+        row = AccountRow(
             organization_id=org.organization_id,
             company=org.name,
             org_type=org.organization_type,
@@ -532,13 +682,68 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             score_reachability=s_reach,
             score_hiring=s_hiring,
             score_relationship=s_rel,
-        ))
+            data_quality_flags=";".join(quality_flags),
+        )
+        (
+            row.campaign_action,
+            row.campaign_channel,
+            row.campaign_priority,
+            row.campaign_reason,
+            row.lane_1_policy,
+        ) = _campaign_plan_for_account(row)
+        rows.append(row)
 
     rows.sort(key=lambda r: r.fit_score, reverse=True)
     for i, r in enumerate(rows):
         r.tier = "A" if i < 20 else ("B" if i < 60 else "C")
+        (
+            r.campaign_action,
+            r.campaign_channel,
+            r.campaign_priority,
+            r.campaign_reason,
+            r.lane_1_policy,
+        ) = _campaign_plan_for_account(r)
 
     return rows
+
+
+def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
+    actionable = [
+        row
+        for row in rows
+        if row.campaign_action not in {"pause_account", "wait_for_accepts"}
+    ]
+    actionable.sort(
+        key=lambda row: (
+            row.campaign_priority,
+            row.tier == "A",
+            row.fit_score,
+            row.company.lower(),
+        ),
+        reverse=True,
+    )
+    return [
+        CampaignPlanRow(
+            company=row.company,
+            tier=row.tier,
+            fit_score=row.fit_score,
+            account_stage=row.account_stage,
+            campaign_action=row.campaign_action,
+            campaign_channel=row.campaign_channel,
+            campaign_priority=row.campaign_priority,
+            campaign_reason=row.campaign_reason,
+            lane_1_policy=row.lane_1_policy,
+            why_fit=row.why_fit,
+            people_mapped=row.people_mapped,
+            invites_sent=row.invites_sent,
+            accepted=row.accepted,
+            replies=row.replies,
+            target_role=row.target_role,
+            next_due_date=row.next_due_date,
+            organization_id=row.organization_id,
+        )
+        for row in actionable
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +768,11 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Advocates",       "advocates",         11),
     ("Next Action",     "next_action",       40),
     ("Next Due",        "next_due_date",     12),
+    ("Campaign Action", "campaign_action",   26),
+    ("Campaign Channel","campaign_channel",  18),
+    ("Campaign Priority","campaign_priority",16),
+    ("Campaign Reason", "campaign_reason",   50),
+    ("Lane 1 Policy",   "lane_1_policy",     18),
     ("Score: Profile",  "score_profile_fit", 14),
     ("Score: Role",     "score_role_fit",    12),
     ("Score: Team",     "score_team_gate",   12),
@@ -571,6 +781,7 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Score: Rel",      "score_relationship",11),
     ("Org Type",        "org_type",          12),
     ("Tags",            "tags",              40),
+    ("Data Flags",      "data_quality_flags",30),
     ("Target Lists",    "target_lists",      20),
     ("Website",         "website",           30),
 ]
@@ -587,6 +798,26 @@ ACTION_COLS: list[tuple[str, str, int]] = [
     ("Next Due",      "next_due_date", 12),
     ("People Mapped", "people_mapped", 14),
     ("Invites Sent",  "invites_sent",  13),
+]
+
+CAMPAIGN_COLS: list[tuple[str, str, int]] = [
+    ("Company",           "company",            22),
+    ("Tier",              "tier",                6),
+    ("Priority",          "campaign_priority",  10),
+    ("Campaign Action",   "campaign_action",    26),
+    ("Channel",           "campaign_channel",   16),
+    ("Account Stage",     "account_stage",      24),
+    ("Lane 1 Policy",     "lane_1_policy",      18),
+    ("Reason",            "campaign_reason",    54),
+    ("Why Fit",           "why_fit",            45),
+    ("Fit Score",         "fit_score",          10),
+    ("Target Role",       "target_role",        28),
+    ("People Mapped",     "people_mapped",      14),
+    ("Invites Sent",      "invites_sent",       13),
+    ("Accepted",          "accepted",           10),
+    ("Replies",           "replies",             9),
+    ("Next Due",          "next_due_date",      12),
+    ("Organization ID",    "organization_id",    24),
 ]
 
 TIER_COLORS = {"A": "D6F5D6", "B": "FFF9C4", "C": "F5F5F5"}
@@ -635,12 +866,12 @@ def _write_row(ws, ri: int, row: AccountRow, cols: list) -> None:
         elif hdr == "Account Stage":
             c.fill = stage_fill
             c.alignment = LEFT
-        elif hdr in ("Why Fit", "Next Action", "Tags"):
+        elif hdr in ("Why Fit", "Next Action", "Tags", "Campaign Reason", "Reason", "Data Flags"):
             c.alignment = WRAP
         elif hdr in ("Fit Score", "People Mapped", "Invites Sent", "Accepted",
                      "Replies", "Coffee Chats", "Advocates", "Team Size",
                      "Score: Profile", "Score: Role", "Score: Team",
-                     "Score: Reach", "Score: Hiring"):
+                     "Score: Reach", "Score: Hiring", "Campaign Priority", "Priority"):
             c.alignment = CTR
         else:
             c.alignment = LEFT
@@ -686,6 +917,13 @@ def generate_excel(rows: list[AccountRow], output_path: Path) -> Path:
     for ri, row in enumerate(action_rows, 2):
         _write_row(ws3, ri, row, ACTION_COLS)
     ws3.auto_filter.ref = f"A1:{get_column_letter(len(ACTION_COLS))}1"
+
+    ws4 = wb.create_sheet("Campaign Plan")
+    ws4.freeze_panes = "D2"
+    _write_header(ws4, CAMPAIGN_COLS)
+    for ri, row in enumerate(build_campaign_plan_rows(rows), 2):
+        _write_row(ws4, ri, row, CAMPAIGN_COLS)
+    ws4.auto_filter.ref = f"A1:{get_column_letter(len(CAMPAIGN_COLS))}1"
 
     wb.save(output_path)
     return output_path

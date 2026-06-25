@@ -361,6 +361,8 @@ def _data_quality_flags(
         flags.append("missing_company_url")
     if opportunities and profile_fit == 0:
         flags.append("role_without_domain_context")
+    if _parse_notes(org.notes).get("context_confidence") == "inferred_from_job":
+        flags.append("context_inferred_from_job")
     return flags
 
 
@@ -462,6 +464,9 @@ def _score_pitch_strength(
         elif team_size < 10:
             score -= 2
             reasons.append("very small team")
+    if "context_inferred_from_job" in data_quality_flags:
+        score = min(score, 3)
+        reasons.append("job-inferred context")
     return max(0, min(PITCH_SCORE_MAX, score)), ", ".join(reasons)
 
 
@@ -491,6 +496,8 @@ def _score_account_campaign(
         score -= 8
     elif "role_without_domain_context" in data_quality_flags:
         score -= 5
+    if "context_inferred_from_job" in data_quality_flags:
+        score -= 4
     return max(0, score)
 
 

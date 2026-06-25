@@ -10,6 +10,20 @@ outreach account-tracker
 outreach account-tracker --workspace workspace --output workspace/account_tracker.xlsx
 ```
 
+Before trusting Track 2 tiers for newly imported companies, run company-context
+enrichment:
+
+```bash
+# Preview missing/stale context using public pages/search first
+outreach enrich-company-context --limit 50
+
+# Write verified public context for a focused batch
+outreach enrich-company-context --limit 50 --execute
+
+# Fast all-company preview from local ResumeGenerator fit rationales only
+outreach enrich-company-context --limit 300 --no-network
+```
+
 ## Output
 
 `workspace/account_tracker.xlsx` — four sheets:
@@ -33,6 +47,27 @@ outreach account-tracker --workspace workspace --output workspace/account_tracke
 | Campaign Action | Concrete Track 2 action such as `expand_linkedin_wave`, `map_more_contacts`, or `switch_to_email_or_wellfound` |
 | Lane 1 Policy | How normal outreach should treat the company: `track_2_owns`, `fresh_role_only`, or `lane_1_allowed` |
 | Score: Profile / Role / Team / Reach / Hiring / Rel / Brand / Pitch / Account Hiring | Per-component breakdown for transparency |
+
+## Company Context Enrichment
+
+`enrich-company-context` fills the `tags=...`, `description=...`, and `context_*`
+metadata that Account Score depends on.
+
+Selection rules:
+
+- new job-imported companies with no tags/description are selected automatically
+- stale context is selected again after `context_refresh_after`
+- targeted refresh is available with repeated `--company` options
+
+Confidence levels:
+
+| Confidence | Meaning |
+|------------|---------|
+| `external_verified` | Context came from a fetched public company/source page |
+| `inferred_from_job` | Context came from ResumeGenerator job fit rationale; useful, but discounted by Account Score |
+
+Use `--no-network` for a fast local backfill. Use default network mode for verified
+context, preferably in bounded batches because public pages/search can be slower.
 
 ## Campaign Plan
 

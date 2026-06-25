@@ -1,0 +1,100 @@
+from pathlib import Path
+
+from outreach.account_tracker import build_account_rows
+from outreach.company_enrichment import enrich_company_contexts
+from outreach.tracking import OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook
+
+
+class FakeFetcher:
+    def __init__(self, html_by_url: dict[str, str]) -> None:
+        self.html_by_url = html_by_url
+
+    def fetch_text(self, url: str) -> str:
+        if url not in self.html_by_url:
+            raise ValueError(f"unexpected url: {url}")
+        return self.html_by_url[url]
+
+
+def test_company_enrichment_updates_missing_context_from_job_rationale(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-centerfield",
+            name="Centerfield",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="jobs;resume_generator;pre_apply",
+            notes="Imported from ResumeGenerator v1 jobs.xlsx | latest_resume_status=generated",
+        )
+    )
+    workbook.upsert_opportunity(
+        OpportunityRecord(
+            opportunity_id="opp-centerfield",
+            organization_id="org-centerfield",
+            title="Product Manager Intern",
+            opportunity_type="internship",
+            source_url="https://www.linkedin.com/jobs/view/123/",
+            notes=(
+                "fit_rationale=[Proceed / High Priority] Structured PM internship with strong "
+                "technical leverage from data/platform background and AI workflow ownership."
+            ),
+        )
+    )
+
+    results = enrich_company_contexts(tmp_path, execute=True, use_web_search=False)
+
+    assert results[0].company == "Centerfield"
+    assert results[0].status == "updated"
+    assert results[0].confidence == "inferred_from_job"
+
+    enriched = OutreachWorkbook(tmp_path).list_organizations()[0]
+    assert "context_confidence=inferred_from_job" in enriched.notes
+    assert "data-platform" in enriched.notes
+    assert "artificial-intelligence" in enriched.notes
+
+    row = build_account_rows(tmp_path)[0]
+    assert "context_inferred_from_job" in row.data_quality_flags
+    assert "needs_domain_enrichment" not in row.data_quality_flags
+
+
+def test_company_enrichment_prefers_external_website_context(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-typeface",
+            name="Typeface",
+            organization_type=OrganizationType.COMPANY,
+            website="https://www.typeface.ai",
+            notes="Imported from ResumeGenerator v1 jobs.xlsx | latest_resume_status=generated",
+        )
+    )
+    fetcher = FakeFetcher(
+        {
+            "https://www.typeface.ai": """
+            <html>
+              <head>
+                <title>Typeface AI content platform</title>
+                <meta name="description" content="Typeface is a generative AI platform for enterprise content workflows and brand-safe marketing automation.">
+              </head>
+              <body><p>Enterprise teams use Typeface to automate AI content workflows.</p></body>
+            </html>
+            """
+        }
+    )
+
+    results = enrich_company_contexts(
+        tmp_path,
+        execute=True,
+        use_web_search=False,
+        fetcher=fetcher,
+    )
+
+    assert results[0].company == "Typeface"
+    assert results[0].confidence == "external_verified"
+
+    enriched = OutreachWorkbook(tmp_path).list_organizations()[0]
+    assert "context_confidence=external_verified" in enriched.notes
+    assert "description=Typeface is a generative AI platform" in enriched.notes
+    assert "artificial-intelligence" in enriched.notes
+    assert "workflow-automation" in enriched.notes

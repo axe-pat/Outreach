@@ -254,6 +254,34 @@ Each action carries a `lane_1_policy`:
 - `fresh_role_only`: Lane 1 may touch only if there is a fresh applied/generated role.
 - `lane_1_allowed`: normal outreach can handle it.
 
+### 5a. Company Context Enrichment
+
+Track 2 scoring depends on company-level context, so the system now includes a
+separate enrichment pass:
+
+```bash
+outreach enrich-company-context --limit 50
+outreach enrich-company-context --limit 50 --execute
+outreach enrich-company-context --limit 300 --no-network
+```
+
+The command selects companies with missing/stale `tags` or `description`, including
+new companies imported from ResumeGenerator jobs. It writes:
+
+- `tags`
+- `description`
+- `context_enriched_at`
+- `context_refresh_after`
+- `context_source`
+- `context_confidence`
+- `context_evidence_url`
+
+Confidence matters:
+
+- `external_verified`: public company/source page was fetched; safest for Account Score
+- `inferred_from_job`: ResumeGenerator job rationale was used; helpful, but Account
+  Score discounts it so a job rationale does not masquerade as verified company truth
+
 ### 6. Reply + Conversation Agent
 
 Classify incoming replies and draft responses:
@@ -466,8 +494,8 @@ Large companies follow different campaign logic:
 
 ### Open Decisions / Still To Build
 
-- Company enrichment: many `jobs.xlsx` imports still lack tags/description, so their
-  campaign action should often be `enrich_company_context`.
+- Company enrichment: command exists, but it should be wired into the final daily
+  orchestrator as a small new-company pass plus a fortnightly stale-context refresh.
 - Prestige score: automatic list is still lightweight. Crunchbase/funding/investor tier
   enrichment would make the 0–12 brand component much stronger.
 - 2nd-degree density: wired into reachability scoring (≥2 contacts with "2nd degree" in

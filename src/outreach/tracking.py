@@ -242,6 +242,19 @@ class OutreachWorkbook:
             lambda row: self._same_organization(row, record),
         )
 
+    def update_organization(self, organization_id: str, **updates: str) -> OrganizationRecord | None:
+        self.initialize()
+        rows = self._read_rows("organizations")
+        for row in rows:
+            if row.get("organization_id") != organization_id:
+                continue
+            for key, value in updates.items():
+                if key in self._fieldnames("organizations") and value is not None:
+                    row[key] = str(value)
+            self._write_rows("organizations", rows)
+            return OrganizationRecord(**row)
+        return None
+
     def upsert_opportunity(self, record: OpportunityRecord) -> tuple[OpportunityRecord, bool]:
         return self._create_or_get(
             "opportunities",

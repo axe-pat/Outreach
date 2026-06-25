@@ -3085,6 +3085,84 @@ def build_account_campaign_plan(
         typer.echo(f"  {row.campaign_reason}")
 
 
+@app.command("enrich-company-context")
+def enrich_company_context_cmd(
+    workspace: Annotated[
+        Path,
+        typer.Option(help="Path to the workspace directory containing CSVs"),
+    ] = Path("workspace"),
+    limit: Annotated[int, typer.Option(help="Maximum companies to enrich")] = 50,
+    refresh_days: Annotated[int, typer.Option(help="Refresh context older than this many days")] = 14,
+    company: Annotated[
+        list[str] | None,
+        typer.Option("--company", help="Only enrich a named company; repeat for multiple companies"),
+    ] = None,
+    execute: Annotated[
+        bool,
+        typer.Option(help="Write enrichment back to organizations.csv; default is preview only"),
+    ] = False,
+    network: Annotated[
+        bool,
+        typer.Option(help="Fetch public company/source pages before falling back to local job-rationale inference"),
+    ] = True,
+    web_search: Annotated[
+        bool,
+        typer.Option(help="Use public web search when direct company/source URLs are unavailable"),
+    ] = True,
+) -> None:
+    """Fill missing or stale company context used by Track 2 account scoring."""
+    from outreach.company_enrichment import enrich_company_contexts
+
+    results = enrich_company_contexts(
+        workspace,
+        limit=limit,
+        refresh_days=refresh_days,
+        companies=set(company or []),
+        execute=execute,
+        use_network=network,
+        use_web_search=web_search,
+    )
+    summary: dict[str, int] = {}
+    confidence_summary: dict[str, int] = {}
+    for row in results:
+        summary[row.status] = summary.get(row.status, 0) + 1
+        if row.confidence:
+            confidence_summary[row.confidence] = confidence_summary.get(row.confidence, 0) + 1
+
+    artifact = write_artifact(
+        OutreachSettings().artifacts_dir,
+        "company-context-enrichment",
+        {
+            "workspace": str(workspace),
+            "limit": limit,
+            "refresh_days": refresh_days,
+            "companies": company or [],
+            "execute": execute,
+            "network": network,
+            "web_search": web_search,
+            "summary": summary,
+            "confidence_summary": confidence_summary,
+            "results": [row.__dict__ for row in results],
+        },
+    )
+
+    typer.echo(f"{'Updated' if execute else 'Planned'} company context for {len(results)} companies.")
+    typer.echo(f"Summary: {summary}")
+    if confidence_summary:
+        typer.echo(f"Confidence: {confidence_summary}")
+    typer.echo(f"Artifact: {artifact}")
+    for row in results[: min(12, len(results))]:
+        tag_text = ",".join(row.tags[:6]) if row.tags else "-"
+        typer.echo(
+            f"- {row.company} | status={row.status} | confidence={row.confidence or '-'} | "
+            f"source={row.source or '-'} | tags={tag_text}"
+        )
+        if row.description:
+            typer.echo(f"  {row.description[:180]}")
+        elif row.error:
+            typer.echo(f"  error={row.error}")
+
+
 @app.command()
 def doctor() -> None:
     try:

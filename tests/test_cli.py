@@ -8,6 +8,7 @@ from outreach.cli import (
     apply_linkedin_reconcile_results,
     apply_raw_candidate,
     build_linkedin_company_queue_items,
+    build_linkedin_followup_drafts,
     build_linkedin_reconcile_queue_items,
     build_linkedin_message_reconcile_results,
     build_organization_intel_items,
@@ -752,6 +753,86 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
     assert [item["contact_id"] for item in results] == ["ct-roshni", "ct-owen", "ct-shubhankit"]
     assert [item["status"] for item in results] == ["connected", "replied", "connected"]
     assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
+
+
+def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-snyk",
+            name="Snyk",
+            organization_type=OrganizationType.COMPANY,
+        ),
+        OrganizationRecord(
+            organization_id="org-sortly",
+            name="Sortly",
+            organization_type=OrganizationType.COMPANY,
+        ),
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-mehak",
+            organization_id="org-snyk",
+            full_name="Mehak Singh",
+            title="Associate Software Engineer at Snyk",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-deepanshu",
+            organization_id="org-sortly",
+            full_name="Deepanshu Johar",
+            title="SWE 2 @ Sortly",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-hamid",
+            organization_id="org-snyk",
+            full_name="Hamid Example",
+            title="Software Engineer",
+            contact_type="Engineering",
+        ),
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-mehak",
+                "organization_id": "org-snyk",
+                "name": "Mehak Singh",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Would really value a referral or pointer on how to stand out to the hiring team.",
+            },
+            {
+                "contact_id": "ct-deepanshu",
+                "organization_id": "org-sortly",
+                "name": "Deepanshu Johar",
+                "normalized_status": "replied",
+                "latest_message": "I can share your profile to the HR in case that helps ?",
+            },
+            {
+                "contact_id": "ct-hamid",
+                "organization_id": "org-snyk",
+                "name": "Hamid Example",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "I'm exploring PM roles and would love to learn from your experience.",
+            },
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert [item["draft_kind"] for item in drafts] == [
+        "accepted_follow_up",
+        "referral_offer_reply",
+        "accepted_follow_up",
+    ]
+    assert "referral" in str(drafts[0]["draft_message"]).lower()
+    assert "short blurb" in str(drafts[1]["draft_message"]).lower()
+    assert drafts[0]["company"] == "Snyk"
+    assert drafts[0]["original_invite_note"].startswith("Would really value")
+    assert drafts[1]["latest_message"].startswith("I can share your profile")
+    assert "referral path or hiring contact" in str(drafts[2]["draft_message"])
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

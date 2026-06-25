@@ -2578,6 +2578,193 @@ def build_linkedin_message_reconcile_results(
     return results, next_state
 
 
+def first_name(value: str) -> str:
+    return (value or "there").strip().split()[0]
+
+
+def infer_followup_audience(contact: ContactRecord, original_invite_note: str = "") -> str:
+    invite_text = original_invite_note.lower()
+    profile_text = " ".join([contact.contact_type, contact.title]).lower()
+    if "referral" in invite_text:
+        return "referral_engineer"
+    if any(token in profile_text for token in ["founder", "co-founder", "ceo", "chief executive"]):
+        return "founder"
+    if any(token in profile_text for token in ["recruiter", "talent", "university recruiting", "campus"]):
+        return "recruiter"
+    if any(token in profile_text for token in ["product", "pm ", "product manager", "apm"]):
+        return "product"
+    if any(
+        token in profile_text
+        for token in [
+            "engineer",
+            "engineering",
+            "developer",
+            "architect",
+            "software",
+            "backend",
+            "infrastructure",
+            "deep learning",
+            "genai",
+            "accelerator",
+            "r&d",
+        ]
+    ):
+        return "engineering"
+    return "general"
+
+
+def accepted_followup_draft(*, company: str, contact: ContactRecord, original_invite_note: str) -> tuple[str, str]:
+    name = first_name(contact.full_name)
+    audience = infer_followup_audience(contact, original_invite_note)
+    if audience == "referral_engineer":
+        return (
+            "safe_to_review",
+            (
+                f"Thanks for connecting, {name}. I'm targeting PM/product roles at {company} where my backend/data "
+                "engineering background is useful. If I send a tight resume + 3-line blurb, would you be open to "
+                "a referral, or pointing me to the right hiring contact?"
+            ),
+        )
+    if audience == "founder":
+        return (
+            "review",
+            (
+                f"Thanks for connecting, {name}. I'm exploring product/operator paths where my engineering + "
+                f"Marshall background can be useful. Would it be worth sending you a 4-line note on where I think "
+                f"I could help at {company}, or is there someone better to route that to?"
+            ),
+        )
+    if audience == "product":
+        return (
+            "review",
+            (
+                f"Thanks for connecting, {name}. I'm trying to understand where {company}'s product team values "
+                "PM candidates who can go deep with engineering/data. Is there a product or recruiting person "
+                "you'd suggest I get on the radar of?"
+            ),
+        )
+    if audience == "recruiter":
+        return (
+            "safe_to_review",
+            (
+                f"Thanks for connecting, {name}. I'm a Marshall MBA + former data/platform engineer exploring "
+                f"PM/product internship paths at {company}. What's the best process for someone with my background "
+                "to get on the team's radar?"
+            ),
+        )
+    if audience == "engineering":
+        return (
+            "safe_to_review",
+            (
+                f"Thanks for connecting, {name}. I'm trying to get on the radar at {company} for PM/product roles "
+                "where my data/platform engineering background helps. If I send a tight resume + 3-line blurb, "
+                "would you be open to pointing me to the right referral path or hiring contact?"
+            ),
+        )
+    return (
+        "safe_to_review",
+        (
+            f"Thanks for connecting, {name}. I'm trying to move from data/platform engineering into PM work at "
+            f"{company}. From your side of the org, who is usually the best person for a technical PM candidate "
+            "to get on the radar of?"
+        ),
+    )
+
+
+def reply_followup_draft(*, company: str, contact: ContactRecord, latest_message: str) -> tuple[str, str, str]:
+    name = first_name(contact.full_name)
+    lower = latest_message.lower()
+    if "share your profile" in lower or "share your resume" in lower or "hr" in lower:
+        return (
+            "referral_offer_reply",
+            "review",
+            (
+                f"That would be amazing, thanks {name}. Short blurb if useful: Marshall MBA + 5 yrs backend/data "
+                "platform engineering, now targeting PM/product roles where technical depth helps. Happy to send "
+                "resume too if HR wants it."
+            ),
+        )
+    if any(token in lower for token in ["small team", "high-impact", "high ownership", "customer", "feedback"]):
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"This is super helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop "
+                f"at {company} is exactly what I'm looking for. Do you think there's a PM/product internship path "
+                "there, or someone on product/recruiting I should ask?"
+            ),
+        )
+    return (
+        "conversation_reply",
+        "review",
+        (
+            f"Thanks {name}, this is helpful. I'm trying to understand where my engineering + Marshall background "
+            f"could fit at {company}. Would you suggest I speak with someone on product/recruiting, or is there a "
+            "better path to get on the team's radar?"
+        ),
+    )
+
+
+def build_linkedin_followup_drafts(
+    *,
+    reconcile_results: list[dict],
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+) -> list[dict[str, object]]:
+    organization_map = {item.organization_id: item for item in organizations}
+    contact_map = {item.contact_id: item for item in contacts}
+    drafts: list[dict[str, object]] = []
+
+    for item in reconcile_results:
+        contact_id = str(item.get("contact_id") or "")
+        contact = contact_map.get(contact_id)
+        if contact is None:
+            continue
+        organization = organization_map.get(contact.organization_id)
+        company = organization.name if organization else ""
+        status = str(item.get("normalized_status") or item.get("status") or "")
+        if status == "connected" and item.get("needs_follow_up"):
+            recommendation, draft = accepted_followup_draft(
+                company=company,
+                contact=contact,
+                original_invite_note=str(item.get("original_invite_note") or ""),
+            )
+            draft_kind = "accepted_follow_up"
+        elif status == "replied":
+            draft_kind, recommendation, draft = reply_followup_draft(
+                company=company,
+                contact=contact,
+                latest_message=str(item.get("latest_message") or item.get("message_text") or ""),
+            )
+        else:
+            continue
+
+        drafts.append(
+            {
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "company": company,
+                "name": contact.full_name,
+                "title": contact.title,
+                "contact_type": contact.contact_type,
+                "linkedin_url": contact.linkedin_url,
+                "draft_kind": draft_kind,
+                "send_recommendation": recommendation,
+                "draft_message": draft,
+                "draft_length": len(draft),
+                "source_status": status,
+                "latest_message": item.get("latest_message", ""),
+                "last_sender": item.get("last_sender", ""),
+                "timestamp_text": item.get("timestamp_text", ""),
+                "original_invite_note": item.get("original_invite_note", ""),
+                "thread_id": item.get("thread_id", ""),
+                "thread_url": item.get("thread_url", ""),
+            }
+        )
+
+    return drafts
+
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -4080,6 +4267,55 @@ def reconcile_linkedin_messages(
             f"- {item.get('name') or item.get('thread_id')} | status={item['normalized_status']} | "
             f"action={item['action']} | follow_up={item['needs_follow_up']}"
         )
+
+
+@app.command("draft-linkedin-followups")
+def draft_linkedin_followups(
+    reconcile_artifact: Annotated[
+        Path,
+        typer.Option(help="Path to a linkedin-message-reconcile or linkedin-reconcile artifact"),
+    ],
+    limit: Annotated[int, typer.Option(help="Maximum drafts to emit")] = 25,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    with reconcile_artifact.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=list(payload.get("results") or []),
+        organizations=workbook.list_organizations(),
+        contacts=workbook.list_contacts(),
+    )[:limit]
+
+    summary: dict[str, int] = {}
+    for draft in drafts:
+        key = str(draft["draft_kind"])
+        summary[key] = summary.get(key, 0) + 1
+
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-followup-drafts",
+        {
+            "source_artifact": str(reconcile_artifact),
+            "count": len(drafts),
+            "summary": summary,
+            "results": drafts,
+        },
+    )
+
+    typer.echo(f"Drafted {len(drafts)} LinkedIn follow-ups.")
+    typer.echo(f"Summary: {summary}")
+    typer.echo(f"Artifact: {artifact}")
+    for draft in drafts[: min(12, len(drafts))]:
+        typer.echo(
+            f"- {draft['name']} | {draft['company']} | {draft['draft_kind']} | "
+            f"{draft['send_recommendation']} | len={draft['draft_length']}"
+        )
+        typer.echo(f"  Original: {draft.get('original_invite_note') or '(missing)'}")
+        if draft.get("latest_message") and draft.get("last_sender") != "You":
+            typer.echo(f"  Latest from {draft.get('last_sender') or 'contact'}: {draft['latest_message']}")
+        typer.echo(f"  {draft['draft_message']}")
 
 
 @app.command("send-invites")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -881,6 +882,304 @@ def action_priority(action: str) -> int:
         "skip": 0,
     }
     return priorities.get(action, 0)
+
+
+CONNECTED_CONTACT_STATUSES = {"accepted", "connected", "warm", "already connected"}
+CONVERSATION_CONTACT_STATUSES = {
+    "replied",
+    "conversation",
+    "coffee chat",
+    "coffee chat scheduled",
+    "coffee chat done",
+    "referral",
+    "champion",
+}
+SENT_TOUCHPOINT_STATUSES = {"sent", "already connected"}
+CONVERSATION_TOUCHPOINT_STATUSES = {
+    "replied",
+    "reply received",
+    "conversation",
+    "coffee chat scheduled",
+    "coffee chat done",
+    "referral",
+}
+
+
+def parse_iso_timestamp(value: str) -> datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def relationship_action_priority(action: str) -> int:
+    priorities = {
+        "follow_up_connected_contact": 7,
+        "send_initial_invites": 6,
+        "expand_contact_wave": 5,
+        "run_linkedin_people_search": 4,
+        "research_email_path": 3,
+        "wait_for_accepts": 2,
+        "maintain_relationship": 1,
+        "watch": 0,
+    }
+    return priorities.get(action, 0)
+
+
+def relationship_contact_first_name(contact: ContactRecord | None) -> str:
+    if contact is None:
+        return "there"
+    return (contact.full_name or "there").strip().split()[0]
+
+
+def build_relationship_follow_up_message(company: str, contact: ContactRecord | None) -> str:
+    first_name = relationship_contact_first_name(contact)
+    return (
+        f"Hi {first_name}, thanks for connecting. I'm a Marshall MBA + former data/platform engineer "
+        f"exploring product/operator paths at {company}. Would value your quick read on where someone "
+        "with my background could be useful or who owns PM/internship hiring."
+    )
+
+
+def relationship_stage(
+    *,
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+) -> str:
+    contact_statuses = {(contact.status or "").strip().lower() for contact in contacts}
+    touchpoint_statuses = {(touchpoint.status or "").strip().lower() for touchpoint in touchpoints}
+    touchpoint_kinds = {(touchpoint.message_kind or "").strip().lower() for touchpoint in touchpoints}
+
+    if contact_statuses.intersection({"referral", "champion"}) or touchpoint_statuses.intersection({"referral", "champion"}):
+        return "champion"
+    if (
+        contact_statuses.intersection(CONVERSATION_CONTACT_STATUSES)
+        or touchpoint_statuses.intersection(CONVERSATION_TOUCHPOINT_STATUSES)
+        or any("reply" in kind or "coffee" in kind for kind in touchpoint_kinds)
+    ):
+        return "conversation"
+    if contact_statuses.intersection(CONNECTED_CONTACT_STATUSES):
+        return "connected_no_conversation"
+    if touchpoint_statuses.intersection(SENT_TOUCHPOINT_STATUSES) or "invited" in contact_statuses:
+        return "outreach_sent"
+    if contacts:
+        return "contacts_found"
+    return "unstarted"
+
+
+def latest_relationship_touch_at(contacts: list[ContactRecord], touchpoints: list[TouchpointRecord]) -> datetime | None:
+    timestamps: list[datetime] = []
+    for contact in contacts:
+        parsed = parse_iso_timestamp(contact.last_contacted_at or contact.discovered_at)
+        if parsed is not None:
+            timestamps.append(parsed)
+    for touchpoint in touchpoints:
+        parsed = parse_iso_timestamp(touchpoint.sent_at or touchpoint.recorded_at)
+        if parsed is not None:
+            timestamps.append(parsed)
+    if not timestamps:
+        return None
+    return max(timestamps)
+
+
+def build_relationship_loop_items(
+    *,
+    organizations: list[OrganizationRecord],
+    opportunities: list[OpportunityRecord],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    include_target_lists: tuple[str, ...] = (),
+    min_fit_score: int = 55,
+    target_relationships: int = 3,
+    outreach_wave_size: int = 10,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
+    reference_now = now or datetime.now(UTC)
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=UTC)
+    else:
+        reference_now = reference_now.astimezone(UTC)
+
+    opportunity_map: dict[str, list[OpportunityRecord]] = {}
+    for item in opportunities:
+        opportunity_map.setdefault(item.organization_id, []).append(item)
+
+    contact_map: dict[str, list[ContactRecord]] = {}
+    for item in contacts:
+        contact_map.setdefault(item.organization_id, []).append(item)
+
+    touchpoint_map: dict[str, list[TouchpointRecord]] = {}
+    for item in touchpoints:
+        touchpoint_map.setdefault(item.organization_id, []).append(item)
+
+    required_tags = {tag.strip().lower() for tag in include_target_lists if tag.strip()}
+    items: list[dict[str, object]] = []
+    for organization in organizations:
+        organization_tags = split_semicolon_tags(organization.target_lists)
+        if required_tags and not required_tags.intersection(organization_tags):
+            continue
+
+        organization_opportunities = opportunity_map.get(organization.organization_id, [])
+        organization_contacts = contact_map.get(organization.organization_id, [])
+        organization_touchpoints = touchpoint_map.get(organization.organization_id, [])
+        tags = extract_tags_from_notes(organization.notes)
+        description = extract_description_from_notes(organization.notes)
+        fit_score, fit_reasons = infer_fit_reasons(
+            organization=organization,
+            tags=tags,
+            description=description,
+            opportunities=organization_opportunities,
+        )
+        scored_opportunities: list[dict[str, object]] = []
+        for opportunity in organization_opportunities:
+            relevance_score, relevance_reasons = score_opportunity_relevance(
+                opportunity.title,
+                organization,
+                organization_description=description,
+            )
+            scored_opportunities.append(
+                {
+                    "title": opportunity.title,
+                    "location": opportunity.location,
+                    "source_url": opportunity.source_url,
+                    "relevance_score": relevance_score,
+                    "relevance_reasons": relevance_reasons,
+                    "action": classify_opportunity_action(relevance_score),
+                }
+            )
+        scored_opportunities.sort(key=lambda item: int(item["relevance_score"]), reverse=True)
+        relevant_roles = [item for item in scored_opportunities if item["action"] == "apply_now"]
+        borderline_roles = [item for item in scored_opportunities if item["action"] == "review"]
+
+        connected_contacts = [
+            contact
+            for contact in organization_contacts
+            if (contact.status or "").strip().lower() in CONNECTED_CONTACT_STATUSES
+        ]
+        conversation_contacts = [
+            contact
+            for contact in organization_contacts
+            if (contact.status or "").strip().lower() in CONVERSATION_CONTACT_STATUSES
+        ]
+        sent_touchpoints = [
+            touchpoint
+            for touchpoint in organization_touchpoints
+            if (touchpoint.status or "").strip().lower() in SENT_TOUCHPOINT_STATUSES
+        ]
+        invite_contacts = [
+            contact
+            for contact in organization_contacts
+            if (contact.status or "").strip().lower() in {"invited", "invite ready", "connected", "warm"}
+        ]
+        sent_count = max(len(sent_touchpoints), len(invite_contacts))
+        stage = relationship_stage(contacts=organization_contacts, touchpoints=organization_touchpoints)
+        last_touch_at = latest_relationship_touch_at(organization_contacts, organization_touchpoints)
+        days_since_last_touch = (
+            max(0, (reference_now - last_touch_at).days)
+            if last_touch_at is not None
+            else None
+        )
+        relationship_gap = max(target_relationships - len(conversation_contacts), 0)
+        manual_priority_tags = {"priority", "core", "relationship", "target", "dream"}
+        is_core_candidate = bool(
+            fit_score >= min_fit_score
+            or relevant_roles
+            or manual_priority_tags.intersection(organization_tags)
+        )
+
+        follow_up_contact = connected_contacts[0] if connected_contacts else None
+        suggested_message = ""
+        if not is_core_candidate:
+            next_action = "watch"
+            action_reason = "Fit is not strong enough for the relationship-engine core list yet."
+        elif stage in {"champion", "conversation"}:
+            next_action = "maintain_relationship"
+            action_reason = "There is already a real conversation or champion signal; keep this warm deliberately."
+        elif connected_contacts:
+            next_action = "follow_up_connected_contact"
+            action_reason = "At least one person is connected, but we have not logged a real conversation yet."
+            suggested_message = build_relationship_follow_up_message(organization.name, follow_up_contact)
+        elif not organization_contacts:
+            next_action = "run_linkedin_people_search"
+            action_reason = "Company is a fit, but we have no people mapped yet."
+        elif sent_count == 0:
+            next_action = "send_initial_invites"
+            action_reason = "People are mapped, but no invite has been sent yet."
+        elif sent_count >= outreach_wave_size and not connected_contacts:
+            next_action = "research_email_path"
+            action_reason = "LinkedIn outreach has enough volume without a warm connection; add another channel."
+        elif days_since_last_touch is not None and days_since_last_touch < 3:
+            next_action = "wait_for_accepts"
+            action_reason = "Recent invites are still fresh; do not over-rotate before LinkedIn has time to resolve."
+        else:
+            next_action = "expand_contact_wave"
+            action_reason = "The company still fits and the last outreach wave has not created a conversation."
+
+        account_score = (
+            fit_score
+            + len(relevant_roles) * 10
+            + relationship_gap * 8
+            + relationship_action_priority(next_action) * 6
+            + min(len(organization_contacts), outreach_wave_size)
+            - min(sent_count, outreach_wave_size)
+        )
+
+        items.append(
+            {
+                "organization_id": organization.organization_id,
+                "company": organization.name,
+                "relationship_goal": "summer_fall_internship",
+                "relationship_stage": stage,
+                "account_score": account_score,
+                "fit_score": fit_score,
+                "fit_band": fit_band_from_score(fit_score),
+                "fit_reasons": fit_reasons,
+                "why_fit_for_akshat": explain_fit_for_candidate(
+                    organization=organization,
+                    tags=tags,
+                    opportunities=organization_opportunities,
+                    fit_reasons=fit_reasons,
+                ),
+                "target_lists": organization.target_lists,
+                "organization_type": organization.organization_type.value,
+                "scale_signal": extract_scale_signal_from_notes(organization.notes),
+                "opportunity_count": len(organization_opportunities),
+                "relevant_role_count": len(relevant_roles),
+                "borderline_role_count": len(borderline_roles),
+                "top_roles": scored_opportunities[:5],
+                "contact_count": len(organization_contacts),
+                "connected_contact_count": len(connected_contacts),
+                "conversation_contact_count": len(conversation_contacts),
+                "touchpoint_count": len(organization_touchpoints),
+                "sent_invite_count": sent_count,
+                "target_relationships": target_relationships,
+                "relationship_gap": relationship_gap,
+                "last_touch_at": last_touch_at.isoformat() if last_touch_at else "",
+                "days_since_last_touch": days_since_last_touch,
+                "next_action": next_action,
+                "action_reason": action_reason,
+                "suggested_contact_id": follow_up_contact.contact_id if follow_up_contact else "",
+                "suggested_contact_name": follow_up_contact.full_name if follow_up_contact else "",
+                "suggested_message": suggested_message,
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            relationship_action_priority(str(item["next_action"])),
+            int(item["account_score"]),
+            int(item["fit_score"]),
+            str(item["company"]).lower(),
+        ),
+        reverse=True,
+    )
+    return items
 
 
 def build_target_action_queue_items(
@@ -2518,6 +2817,65 @@ def build_organization_intel(
         typer.echo(
             f"- {item['company']} | fit={item['fit_band']} ({item['fit_score']}) | "
             f"jobs={item['opportunity_count']} | scale={item['scale_signal'] or 'n/a'}"
+        )
+
+
+@app.command("build-relationship-loop")
+def build_relationship_loop(
+    limit: Annotated[int, typer.Option(help="Maximum company accounts to include")] = 30,
+    include_target_list: Annotated[
+        list[str] | None,
+        typer.Option("--include-target-list", help="Only include organizations from these target lists"),
+    ] = None,
+    min_fit_score: Annotated[
+        int,
+        typer.Option(help="Minimum fit score for a company to be treated as a core relationship target"),
+    ] = 55,
+    target_relationships: Annotated[
+        int,
+        typer.Option(help="Desired number of real conversations/champions per core company"),
+    ] = 3,
+    outreach_wave_size: Annotated[
+        int,
+        typer.Option(help="LinkedIn invite count after which the planner suggests adding another channel"),
+    ] = 10,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    items = build_relationship_loop_items(
+        organizations=workbook.list_organizations(),
+        opportunities=workbook.list_opportunities(),
+        contacts=workbook.list_contacts(),
+        touchpoints=workbook.list_touchpoints(),
+        include_target_lists=tuple(include_target_list or []),
+        min_fit_score=min_fit_score,
+        target_relationships=target_relationships,
+        outreach_wave_size=outreach_wave_size,
+    )[:limit]
+
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "relationship-loop",
+        {
+            "count": len(items),
+            "filters": {
+                "limit": limit,
+                "include_target_lists": include_target_list or [],
+                "min_fit_score": min_fit_score,
+                "target_relationships": target_relationships,
+                "outreach_wave_size": outreach_wave_size,
+            },
+            "results": items,
+        },
+    )
+
+    typer.echo(f"Built relationship loop for {len(items)} company accounts.")
+    typer.echo(f"Artifact: {artifact}")
+    for item in items[: min(12, len(items))]:
+        typer.echo(
+            f"- {item['company']} | stage={item['relationship_stage']} | next={item['next_action']} | "
+            f"fit={item['fit_band']} ({item['fit_score']}) | contacts={item['contact_count']} | "
+            f"sent={item['sent_invite_count']} | connected={item['connected_contact_count']}"
         )
 
 

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +8,7 @@ from outreach.cli import (
     apply_raw_candidate,
     build_linkedin_company_queue_items,
     build_organization_intel_items,
+    build_relationship_loop_items,
     build_target_action_queue_items,
     candidate_mentions_company,
     classify_opportunity_action,
@@ -945,6 +946,145 @@ def test_build_target_action_queue_distinguishes_apply_vs_outreach() -> None:
     outreach_item = next(item for item in items if item["company"] == "OutreachCo")
     assert outreach_item["action"] == "outreach_now"
     assert outreach_item["relevant_role_count"] == 0
+
+
+def test_relationship_loop_follow_up_connected_contact() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-synphony",
+        name="Synphony",
+        organization_type=OrganizationType.STARTUP,
+        target_lists="yc;startup;hiring",
+        notes="team_size=12 | tags=robotics,ai,data | description=Robotics automation platform with a data pipeline for physical AI.",
+    )
+    contact = ContactRecord(
+        contact_id="ct-sean",
+        organization_id="org-synphony",
+        full_name="Sean Wu",
+        title="CEO",
+        contact_type="Founder",
+        status="Connected",
+        last_contacted_at="2026-06-24T10:00:00+00:00",
+    )
+    touchpoint = TouchpointRecord(
+        touchpoint_id="tp-1",
+        organization_id="org-synphony",
+        contact_id="ct-sean",
+        status="Sent",
+        message_kind="linkedin_invite",
+        message_text="Hi Sean, I'm a Marshall MBA exploring product/operator paths at Synphony.",
+        sent_at="2026-06-24T10:00:00+00:00",
+    )
+
+    items = build_relationship_loop_items(
+        organizations=[organization],
+        opportunities=[],
+        contacts=[contact],
+        touchpoints=[touchpoint],
+        now=datetime(2026, 6, 25, tzinfo=UTC),
+    )
+
+    assert items[0]["company"] == "Synphony"
+    assert items[0]["relationship_stage"] == "connected_no_conversation"
+    assert items[0]["next_action"] == "follow_up_connected_contact"
+    assert items[0]["suggested_contact_name"] == "Sean Wu"
+    assert "thanks for connecting" in str(items[0]["suggested_message"])
+    assert "Synphony" in str(items[0]["suggested_message"])
+
+
+def test_relationship_loop_runs_people_search_when_core_company_has_no_contacts() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-mount",
+        name="Mount",
+        organization_type=OrganizationType.STARTUP,
+        target_lists="yc;startup;hiring",
+        notes="team_size=2 | tags=insurance,ai,security | description=Insurance and risk evaluation for AI agents.",
+    )
+    opportunity = OpportunityRecord(
+        opportunity_id="opp-1",
+        organization_id="org-mount",
+        title="Product Management Intern",
+    )
+
+    items = build_relationship_loop_items(
+        organizations=[organization],
+        opportunities=[opportunity],
+        contacts=[],
+        touchpoints=[],
+        now=datetime(2026, 6, 25, tzinfo=UTC),
+    )
+
+    assert items[0]["relationship_stage"] == "unstarted"
+    assert items[0]["next_action"] == "run_linkedin_people_search"
+    assert items[0]["relationship_goal"] == "summer_fall_internship"
+    assert items[0]["relationship_gap"] == 3
+
+
+def test_relationship_loop_adds_channel_after_stale_linkedin_wave() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-workwhile",
+        name="WorkWhile",
+        organization_type=OrganizationType.STARTUP,
+        target_lists="startup;hiring;priority",
+        notes="team_size=90 | tags=marketplace,platform | description=Labor marketplace platform for hourly work.",
+    )
+    contacts = [
+        ContactRecord(
+            contact_id=f"ct-{index}",
+            organization_id="org-workwhile",
+            full_name=f"Engineer {index}",
+            contact_type="Engineering",
+            status="Invited",
+            last_contacted_at="2026-06-18T10:00:00+00:00",
+        )
+        for index in range(10)
+    ]
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id=f"tp-{index}",
+            organization_id="org-workwhile",
+            contact_id=f"ct-{index}",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text=f"Invite {index}",
+            sent_at="2026-06-18T10:00:00+00:00",
+        )
+        for index in range(10)
+    ]
+
+    items = build_relationship_loop_items(
+        organizations=[organization],
+        opportunities=[],
+        contacts=contacts,
+        touchpoints=touchpoints,
+        outreach_wave_size=10,
+        now=datetime(2026, 6, 25, tzinfo=UTC),
+    )
+
+    assert items[0]["relationship_stage"] == "outreach_sent"
+    assert items[0]["next_action"] == "research_email_path"
+    assert items[0]["sent_invite_count"] == 10
+
+
+def test_relationship_loop_does_not_treat_generic_startup_tag_as_core() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-low-fit",
+        name="LowFit Startup",
+        organization_type=OrganizationType.STARTUP,
+        target_lists="startup;hiring",
+        notes="team_size=30 | tags=consumer,social | description=Consumer social events app.",
+    )
+
+    items = build_relationship_loop_items(
+        organizations=[organization],
+        opportunities=[],
+        contacts=[],
+        touchpoints=[],
+        min_fit_score=70,
+        now=datetime(2026, 6, 25, tzinfo=UTC),
+    )
+
+    assert items[0]["next_action"] == "watch"
+    assert "not strong enough" in str(items[0]["action_reason"])
 
 
 def test_build_resume_outreach_queue_applies_override_bias_and_company_cap() -> None:

@@ -296,6 +296,29 @@ Signals used:
 - whether outreach has already happened
 - whether the org is strong enough for founder/operator outreach even without a posted role
 
+### 4. Priority Account Tracker
+
+Implemented in [src/outreach/account_tracker.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/account_tracker.py).
+
+This is the relationship engine layer. Where the company queue and org intel tools help
+decide where to aim next LinkedIn run, the account tracker maintains a living view of
+every company's relationship state and the highest-leverage move at each one.
+
+Purpose:
+
+- score every company in the workbook on profile fit, role fit, reachability, and hiring likelihood
+- assign Tier A (top 20), Tier B (next 40), or Tier C
+- derive account stage from actual contact/touchpoint state (e.g. `outreach_active`, `connected_no_conversation`, `conversation_started`)
+- surface a next action and due date for every Tier A/B company
+
+Output: `workspace/account_tracker.xlsx` with three sheets:
+
+- **Account Tracker** — all companies, full scoring detail, filterable
+- **Tier A — Active Campaign** — top 20 only
+- **Action Queue** — Tier A/B companies with actionable stages, sorted by urgency
+
+See [docs/account_tracker.md](/Users/akshat/Desktop/Claude projects/Outreach/docs/account_tracker.md) for scoring formula and stage definitions.
+
 ## LinkedIn As A Subsystem
 
 Implemented mainly in [src/outreach/services/linkedin.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/services/linkedin.py),
@@ -338,6 +361,7 @@ The important commands now group into four buckets:
 - `build-linkedin-company-queue`
 - `dispatch-linkedin-company-queue`
 - `build-organization-intel`
+- `account-tracker` — score all companies, assign tiers, derive stages, write `workspace/account_tracker.xlsx`
 
 ### LinkedIn Execution
 

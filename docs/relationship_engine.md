@@ -261,3 +261,135 @@ surface only the parts that need judgment:
 
 Every artifact should be reviewable, but the default direction is automation with
 guardrails.
+
+---
+
+## Scoring Philosophy
+
+This section records the design decisions behind the priority company scorer
+(`src/outreach/account_tracker.py`). Update here when scoring logic changes.
+
+### Fit Domains
+
+Domains where Akshat has a real, earned credential — not a stretch:
+
+| Domain | Credential |
+|--------|-----------|
+| AI-powered SaaS products | FlairX (current AI PM intern), L'Oréal AI workflow project |
+| Data infrastructure / data platforms | Hevo Data — ETL pipelines, enterprise data onboarding |
+| API / integration platforms | Hevo is a data connector/integration tool at its core |
+| Observability / monitoring | Hevo 2.0 AI monitoring platform (H-MONITORING-AI story) |
+| Developer tools / DevEx | Engineering depth + internal tooling built; profile lists DevEx as target |
+| Hiring tech / workflow automation | FlairX + ResumeGenerator side project — built and interned in this space |
+| Consumer marketplace / logistics | Gojek — fare pricing, fleet API, marketplace dynamics |
+| Supply chain / ops tech | Gojek fleet and logistics work |
+| Enterprise SaaS with product culture | Notion, Rippling, Ramp, Airtable type companies — technical PM fit |
+| FinTech / billing | Intuit — SMB billing, financial data systems |
+| Payments infrastructure | Intuit billing; Stripe, Recurly adjacents are fair |
+| Healthcare IT | Optum — regulated AI, clinical workflows (weaker interest, real credential) |
+| AI agents / autonomous workflow | ResumeGenerator and Outreach system are working agentic products |
+
+Domains removed from scoring (too broad, no specific credential):
+`b2b`, `saas`, `enterprise`, `workflow`, `api`, `automation`, `security`, `marketplace` as generic tags.
+These inflated scores for any generic tech company rather than signaling real fit.
+
+### Profile Fit Scoring
+
+Profile fit is tag-matching against company description and tags. Scoring should be
+domain-specific and weighted by credential strength:
+
+- Highest weight (5 pts): AI/ML products, data infrastructure, developer tools, hiring tech
+- Medium weight (4 pts): observability, integration platforms, marketplace/logistics, fintech
+- Lower weight (3 pts): healthcare IT, payments, ops tech, supply chain
+
+Cap profile fit contribution at 25 pts before any bonus.
+
+### Team Size — Maturity Gate
+
+Team size is NOT a reachability signal. It is a company maturity gate that affects
+whether a real PM internship is likely to exist and be meaningful.
+
+| Team size | Score adjustment |
+|-----------|-----------------|
+| < 10 | Hard penalty (−10): too small, no real PM structure |
+| 10–15 | Slight discount (−5): marginal, very hands-on |
+| 15–200 | No adjustment: sweet spot for startup internships |
+| 200–1000 | Neutral: mid/large startup |
+| 1000+ | Large company track: different campaign logic |
+
+Mount at 2 people should not rank #1. A 2-person company has no PM internship in
+any meaningful sense.
+
+### Reachability
+
+Reachability should capture only Akshat's specific network advantages — not generic
+startup size or general approachability. Max 12 pts.
+
+| Signal | Points | How detected |
+|--------|--------|-------------|
+| USC / Marshall connection | +5 | `usc` or `marshall` in contact notes/triggers |
+| Indian / Delhi background in contacts | +4 | `india`, `indian`, `delhi` in contact notes |
+| Shared past employer (Intuit/Gojek/Hevo/Optum founder or exec) | +4 | keywords in org description or contact notes |
+| LA location | +3 | city contains `Los Angeles`, `LA`, `Santa Monica`, etc. |
+| 2nd-degree connection density | +3 if ≥2 2nd-degree contacts | `2nd Degree` in contact triggers |
+
+Things removed from reachability:
+- Team size (moved to maturity gate above)
+- YC visibility (not a reachability advantage, moved to prestige/brand signal)
+
+### Brand / Prestige Signal
+
+Reuse the Brand / Company Quality rubric from `discovery/auto/scorer_prompt.md`:
+
+| Score | Company type |
+|-------|-------------|
+| 5 | Top-tier: FAANG+, TikTok, Stripe, Figma, Databricks, Rubrik, Rippling, Ramp |
+| 4 | Strong mid-tier: well-regarded SaaS, funded growth-stage startup with product culture |
+| 3 | Recognizable but not top-tier; relevant domain |
+| 2 | Smaller or less-known; limited brand value |
+| 1 | Low signal or irrelevant industry |
+
+This is a manual override field in `company_overrides.csv` for now. Not auto-detected.
+
+### Hiring Likelihood
+
+- Internship posted (recent, within 45 days): +20
+- Internship posted (older, 45–90 days): +12
+- FT role posted: +10
+- Any opportunity discovered: +5
+- Nothing: 0
+
+Use `date_posted` from `jobs.xlsx` (via ResumeGenerator bridge) when available.
+Recency decay: roles older than 90 days should not get full hiring signal credit.
+
+### Relationship Depth and Tier
+
+Tier assignment (A/B/C) is based on fit_score rank. The **Action Queue** sort order
+weights relationship stage heavily — a company in `conversation_started` or
+`connected_no_conversation` always surfaces above a higher-scoring company with
+zero relationship progress.
+
+Tier A is the top 20 by score. Tier B is the next 40. These are rank-based, not
+threshold-based, so the A list stays stable at 20 companies as new orgs are discovered.
+
+### Large Company Track (1000+ employees)
+
+Large companies follow different campaign logic:
+- Map the org hierarchy first — prioritize PM managers, Directors of Product, and
+  recruiters over ICs
+- Target ~5–7 people closest to the hiring decision (PM managers, Dir of Product,
+  recruiters who post PM roles)
+- Target ~5 people for referral path (any engineer or PM who can submit internally)
+- Multi-touchpoint still valid; direct referral ask is the primary outcome
+- Account stage derivation same as startups; next action copy differs
+
+### Open Decisions / Still To Build
+
+- Prestige score: needs data source (Crunchbase funding, investor tier). One-time
+  enrichment, refresh every ~2 weeks. Not yet implemented.
+- 2nd-degree density: computable from contact triggers but not yet wired into
+  reachability scoring.
+- `date_posted` recency decay: jobs.xlsx has the field; bridge to account tracker
+  not yet built.
+- Large company track: flag and fork logic not yet implemented.
+- `company_overrides.csv` brand score column: not yet added.

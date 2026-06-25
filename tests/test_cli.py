@@ -776,6 +776,89 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
     assert [item["contact_id"] for item in results] == ["ct-roshni", "ct-owen", "ct-shubhankit"]
     assert [item["status"] for item in results] == ["connected", "replied", "connected"]
     assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
+    assert set(next_state["thread_states"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
+    assert next_state["thread_states"]["thread-old"]["signature"] == "old thread|already seen"
+
+
+def test_build_linkedin_message_reconcile_results_detects_changed_seen_thread() -> None:
+    contacts = [
+        ContactRecord(
+            contact_id="ct-owen",
+            organization_id="org-workwhile",
+            full_name="Owen Crook",
+            status="Connected",
+            linkedin_url="https://www.linkedin.com/in/owen/",
+        ),
+    ]
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-owen",
+            organization_id="org-workwhile",
+            contact_id="ct-owen",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Owen, would love a quick pointer on technical PM paths.",
+        ),
+    ]
+
+    results, next_state = build_linkedin_message_reconcile_results(
+        threads=[
+            {
+                "thread_id": "thread-owen",
+                "name": "Owen Crook",
+                "thread_url": "https://www.linkedin.com/messaging/thread/thread-owen/",
+                "latest_message": "Happy to help. What role are you looking at?",
+                "last_sender": "Owen Crook",
+            },
+        ],
+        contacts=contacts,
+        touchpoints=touchpoints,
+        state={
+            "seen_thread_ids": ["thread-owen"],
+            "thread_states": {
+                "thread-owen": {
+                    "signature": "you|hi owen would love a quick pointer on technical pm paths",
+                },
+            },
+        },
+    )
+
+    assert len(results) == 1
+    assert results[0]["contact_id"] == "ct-owen"
+    assert results[0]["status"] == "replied"
+    assert results[0]["thread_changed"] is True
+    assert results[0]["state_reason"] == "changed_latest"
+    assert next_state["thread_states"]["thread-owen"]["signature"] == "owen crook|happy to help. what role are you looking at?"
+
+
+def test_build_linkedin_message_reconcile_results_baselines_legacy_seen_thread() -> None:
+    contacts = [
+        ContactRecord(
+            contact_id="ct-old",
+            organization_id="org-workwhile",
+            full_name="Old Thread",
+            status="Connected",
+            linkedin_url="https://www.linkedin.com/in/old/",
+        ),
+    ]
+
+    results, next_state = build_linkedin_message_reconcile_results(
+        threads=[
+            {
+                "thread_id": "thread-old",
+                "name": "Old Thread",
+                "thread_url": "https://www.linkedin.com/messaging/thread/thread-old/",
+                "latest_message": "Already seen",
+                "last_sender": "Old Thread",
+            },
+        ],
+        contacts=contacts,
+        touchpoints=[],
+        state={"seen_thread_ids": ["thread-old"]},
+    )
+
+    assert results == []
+    assert next_state["thread_states"]["thread-old"]["signature"] == "old thread|already seen"
 
 
 def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:

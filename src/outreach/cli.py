@@ -2404,6 +2404,7 @@ def load_linkedin_message_state(path: Path) -> dict[str, object]:
     if not path.exists():
         return {
             "seen_thread_ids": [],
+            "thread_states": {},
             "last_snapshot_at": "",
         }
     try:
@@ -2411,14 +2412,23 @@ def load_linkedin_message_state(path: Path) -> dict[str, object]:
     except json.JSONDecodeError:
         return {
             "seen_thread_ids": [],
+            "thread_states": {},
             "last_snapshot_at": "",
         }
     seen = payload.get("seen_thread_ids") or []
     if not isinstance(seen, list):
         seen = []
+    thread_states = payload.get("thread_states") or {}
+    if not isinstance(thread_states, dict):
+        thread_states = {}
     return {
         **payload,
         "seen_thread_ids": [str(item) for item in seen if str(item).strip()],
+        "thread_states": {
+            str(key): value
+            for key, value in thread_states.items()
+            if str(key).strip() and isinstance(value, dict)
+        },
     }
 
 
@@ -2429,6 +2439,12 @@ def save_linkedin_message_state(path: Path, state: dict[str, object]) -> None:
 
 def message_thread_key(thread: dict) -> str:
     return str(thread.get("thread_id") or thread.get("thread_url") or "").strip()
+
+
+def message_thread_signature(thread: dict) -> str:
+    latest_message = normalize_dedupe_text(str(thread.get("latest_message") or thread.get("message_text") or ""))
+    last_sender = normalize_dedupe_text(str(thread.get("last_sender") or ""))
+    return f"{last_sender}|{latest_message}"
 
 
 def normalize_person_name(value: str) -> str:
@@ -2520,7 +2536,16 @@ def build_linkedin_message_reconcile_results(
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     seen_thread_ids = {str(item) for item in state.get("seen_thread_ids", []) if str(item).strip()}
     all_thread_ids = set(seen_thread_ids)
+    existing_thread_states = {
+        str(key): value
+        for key, value in (state.get("thread_states") or {}).items()
+        if str(key).strip() and isinstance(value, dict)
+    }
+    next_thread_states: dict[str, dict[str, object]] = {
+        key: dict(value) for key, value in existing_thread_states.items()
+    }
     results: list[dict[str, object]] = []
+    snapshot_at = utc_now_iso()
 
     for thread in threads:
         key = message_thread_key(thread)
@@ -2528,7 +2553,30 @@ def build_linkedin_message_reconcile_results(
             continue
         all_thread_ids.add(key)
         is_new_thread = key not in seen_thread_ids
-        if not include_seen and not is_new_thread:
+        current_signature = message_thread_signature(thread)
+        previous_signature = str(existing_thread_states.get(key, {}).get("signature") or "")
+        thread_changed = bool(previous_signature and current_signature != previous_signature)
+        state_reason = (
+            "new_thread"
+            if is_new_thread
+            else "changed_latest"
+            if thread_changed
+            else "include_seen"
+            if include_seen
+            else "baseline_seen"
+        )
+        next_thread_states[key] = {
+            **next_thread_states.get(key, {}),
+            "signature": current_signature,
+            "name": str(thread.get("name") or ""),
+            "latest_message": str(thread.get("latest_message") or ""),
+            "last_sender": str(thread.get("last_sender") or ""),
+            "timestamp_text": str(thread.get("timestamp_text") or ""),
+            "thread_url": str(thread.get("thread_url") or ""),
+            "last_seen_at": snapshot_at,
+            "first_seen_at": str(next_thread_states.get(key, {}).get("first_seen_at") or snapshot_at),
+        }
+        if not include_seen and not is_new_thread and not thread_changed:
             continue
 
         contact = match_contact_for_message_thread(thread, contacts)
@@ -2542,6 +2590,10 @@ def build_linkedin_message_reconcile_results(
                     "thread_url": thread.get("thread_url", ""),
                     "latest_message": thread.get("latest_message", ""),
                     "is_new_thread": is_new_thread,
+                    "thread_changed": thread_changed,
+                    "thread_signature": current_signature,
+                    "previous_thread_signature": previous_signature,
+                    "state_reason": state_reason,
                 }
             )
             continue
@@ -2550,8 +2602,12 @@ def build_linkedin_message_reconcile_results(
         has_reply = message_thread_has_reply(thread, original_invite_note)
         status = "replied" if has_reply else "connected"
         detail = (
-            "New LinkedIn message thread has an apparent inbound reply."
+            "Existing LinkedIn message thread has a new apparent inbound reply."
+            if has_reply and thread_changed
+            else "New LinkedIn message thread has an apparent inbound reply."
             if has_reply
+            else "Existing LinkedIn message thread latest message changed."
+            if thread_changed
             else "New LinkedIn message thread indicates the invite was accepted."
         )
         results.append(
@@ -2569,6 +2625,10 @@ def build_linkedin_message_reconcile_results(
                 "timestamp_text": thread.get("timestamp_text", ""),
                 "unread": bool(thread.get("unread")),
                 "is_new_thread": is_new_thread,
+                "thread_changed": thread_changed,
+                "thread_signature": current_signature,
+                "previous_thread_signature": previous_signature,
+                "state_reason": state_reason,
                 "original_invite_note": original_invite_note,
             }
         )
@@ -2576,7 +2636,8 @@ def build_linkedin_message_reconcile_results(
     next_state = {
         **state,
         "seen_thread_ids": sorted(all_thread_ids),
-        "last_snapshot_at": utc_now_iso(),
+        "thread_states": next_thread_states,
+        "last_snapshot_at": snapshot_at,
     }
     return results, next_state
 
@@ -2953,6 +3014,32 @@ def execute_linkedin_followup_send(
 
 
 app = typer.Typer(help="Outreach engine CLI")
+
+
+@app.command("account-tracker")
+def account_tracker_cmd(
+    workspace: Annotated[
+        Path,
+        typer.Option(help="Path to the workspace directory containing CSVs"),
+    ] = Path("workspace"),
+    output: Annotated[
+        Path,
+        typer.Option(help="Output path for the Excel file"),
+    ] = Path("workspace/account_tracker.xlsx"),
+) -> None:
+    """Build the priority company account tracker and output to Excel."""
+    from outreach.account_tracker import run as run_tracker
+
+    typer.echo(f"Loading workbook from {workspace} ...")
+    rows, path = run_tracker(workbook_dir=workspace, output_path=output)
+
+    tier_counts = {"A": 0, "B": 0, "C": 0}
+    for r in rows:
+        tier_counts[r.tier] = tier_counts.get(r.tier, 0) + 1
+
+    typer.echo(f"Scored {len(rows)} companies")
+    typer.echo(f"  Tier A: {tier_counts['A']}  |  Tier B: {tier_counts['B']}  |  Tier C: {tier_counts['C']}")
+    typer.echo(f"Output: {path}")
 
 
 @app.command()

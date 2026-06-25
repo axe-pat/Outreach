@@ -97,6 +97,16 @@ class InviteSendResult:
     screenshot_path: str | None = None
 
 
+@dataclass
+class LinkedInReconcileResult:
+    contact_id: str
+    name: str
+    linkedin_url: str
+    status: str
+    detail: str
+    screenshot_path: str | None = None
+
+
 class InviteCandidateTimeoutError(RuntimeError):
     """Raised when a single invite candidate takes too long to process."""
 
@@ -400,6 +410,103 @@ class LinkedInScraper:
                     pass
             finally:
                 browser.close()
+
+    def reconcile_connection_statuses(self, candidates: list[dict]) -> list[LinkedInReconcileResult]:
+        self.require_live_cdp_session()
+        with sync_playwright() as playwright:
+            browser = self._connect_over_cdp(playwright)
+            try:
+                context = browser.contexts[0]
+                preflight = self._session_preflight(context)
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before reconcile: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                baseline_pages = list(context.pages)
+                results: list[LinkedInReconcileResult] = []
+                for candidate in candidates:
+                    self._close_run_spawned_pages(context, keep_pages=baseline_pages)
+                    page = context.new_page()
+                    page.set_default_timeout(15000)
+                    try:
+                        result = self._reconcile_single_connection(page, candidate)
+                    except Exception as exc:
+                        result = LinkedInReconcileResult(
+                            contact_id=str(candidate.get("contact_id") or ""),
+                            name=str(candidate.get("name") or candidate.get("full_name") or "Unknown"),
+                            linkedin_url=str(candidate.get("linkedin_url") or ""),
+                            status="error",
+                            detail=f"Profile reconcile crashed: {exc}",
+                            screenshot_path=self._save_screenshot(page, "reconcile-error"),
+                        )
+                    results.append(result)
+                    self._close_page_safely(page)
+                    self._close_run_spawned_pages(context, keep_pages=baseline_pages)
+                return results
+            finally:
+                browser.close()
+
+    def _reconcile_single_connection(self, page: Page, candidate: dict) -> LinkedInReconcileResult:
+        contact_id = str(candidate.get("contact_id") or "")
+        name = str(candidate.get("name") or candidate.get("full_name") or "Unknown")
+        linkedin_url = str(candidate.get("linkedin_url") or "")
+        if not linkedin_url:
+            return LinkedInReconcileResult(
+                contact_id=contact_id,
+                name=name,
+                linkedin_url="",
+                status="skipped",
+                detail="Missing LinkedIn URL.",
+            )
+
+        if not self._navigate_profile(page, linkedin_url):
+            return LinkedInReconcileResult(
+                contact_id=contact_id,
+                name=name,
+                linkedin_url=linkedin_url,
+                status="navigation_error",
+                detail="Could not load LinkedIn profile reliably.",
+                screenshot_path=self._save_screenshot(page, "reconcile-navigation-error"),
+            )
+        page.evaluate("window.scrollTo(0, 0)")
+        self._human_pause(page)
+
+        if self._profile_has_pending_signal(page):
+            return LinkedInReconcileResult(
+                contact_id=contact_id,
+                name=name,
+                linkedin_url=linkedin_url,
+                status="pending",
+                detail="Profile still shows a pending invite.",
+                screenshot_path=self._save_screenshot(page, "reconcile-pending"),
+            )
+        if self._profile_has_connected_signal(page):
+            return LinkedInReconcileResult(
+                contact_id=contact_id,
+                name=name,
+                linkedin_url=linkedin_url,
+                status="connected",
+                detail="Profile shows a connection/message signal.",
+                screenshot_path=self._save_screenshot(page, "reconcile-connected"),
+            )
+        if self._find_connect_button(page, candidate_name=name) is not None:
+            return LinkedInReconcileResult(
+                contact_id=contact_id,
+                name=name,
+                linkedin_url=linkedin_url,
+                status="not_connected",
+                detail="Profile has an available Connect action.",
+                screenshot_path=self._save_screenshot(page, "reconcile-not-connected"),
+            )
+        return LinkedInReconcileResult(
+            contact_id=contact_id,
+            name=name,
+            linkedin_url=linkedin_url,
+            status="unknown",
+            detail="Profile did not expose a clear pending, connected, or connect signal.",
+            screenshot_path=self._save_screenshot(page, "reconcile-unknown"),
+        )
 
     def _validate_user_data_dir(self, path: Path) -> None:
         self.settings.validate_explicit_linkedin_profile()
@@ -1064,6 +1171,49 @@ class LinkedInScraper:
 
         if self._has_primary_profile_connected_signal(page):
             return True
+        return False
+
+    def _profile_has_pending_signal(self, page: Page) -> bool:
+        locators = [
+            page.get_by_text("Pending", exact=True),
+            page.get_by_role("button", name=re.compile("Pending", re.I)),
+            page.locator('button[aria-label*="Pending" i]'),
+            page.get_by_role("button", name=re.compile("Remove invitation", re.I)),
+            page.locator('button[aria-label*="Remove invitation" i]'),
+        ]
+        return self._has_visible_profile_action(page, locators)
+
+    def _profile_has_connected_signal(self, page: Page) -> bool:
+        locators = [
+            page.get_by_role("button", name=re.compile("^Message$", re.I)),
+            page.get_by_role("link", name=re.compile("^Message$", re.I)),
+            page.locator('button[aria-label*="Message" i]'),
+            page.locator('a[aria-label*="Message" i]'),
+            page.get_by_role("button", name=re.compile("Remove connection", re.I)),
+            page.locator('button[aria-label*="Remove connection" i]'),
+        ]
+        return self._has_visible_profile_action(page, locators)
+
+    def _has_visible_profile_action(self, page: Page, locators: list) -> bool:
+        viewport_width = self._viewport_width(page)
+        for locator in locators:
+            try:
+                count = locator.count()
+            except Exception:
+                continue
+            for idx in range(count):
+                item = locator.nth(idx)
+                try:
+                    box = item.bounding_box()
+                except Exception:
+                    box = None
+                if not box:
+                    continue
+                if box["y"] > 900:
+                    continue
+                if box["x"] > viewport_width * 0.86:
+                    continue
+                return True
         return False
 
     def _find_connect_button(self, page: Page, candidate_name: str | None = None):

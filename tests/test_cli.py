@@ -5,8 +5,10 @@ from types import SimpleNamespace
 
 from outreach.cli import (
     attach_search_urls_to_candidates,
+    apply_linkedin_reconcile_results,
     apply_raw_candidate,
     build_linkedin_company_queue_items,
+    build_linkedin_reconcile_queue_items,
     build_organization_intel_items,
     build_relationship_loop_items,
     build_target_action_queue_items,
@@ -44,7 +46,7 @@ from outreach.cli import (
 )
 from outreach.config import OutreachSettings
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
-from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, SourceKind, TouchpointRecord
+from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
 
 
 def test_tpm_titles_bucket_as_product() -> None:
@@ -532,6 +534,122 @@ def test_execute_invite_batch_dry_run_does_not_persist(monkeypatch, tmp_path: Pa
     assert status_counts == {"dry_run_ready": 1}
     assert contacts_added == 0
     assert touchpoints_added == 0
+
+
+def test_build_linkedin_reconcile_queue_selects_stale_invites() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-snyk",
+        name="Snyk",
+        organization_type=OrganizationType.COMPANY,
+    )
+    stale_contact = ContactRecord(
+        contact_id="ct-stale",
+        organization_id="org-snyk",
+        full_name="Mehak Singh",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/mehak/",
+        last_contacted_at="2026-06-24T08:00:00+00:00",
+    )
+    fresh_contact = ContactRecord(
+        contact_id="ct-fresh",
+        organization_id="org-snyk",
+        full_name="Fresh Invite",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/fresh/",
+        last_contacted_at="2026-06-25T10:30:00+00:00",
+    )
+    connected_contact = ContactRecord(
+        contact_id="ct-connected",
+        organization_id="org-snyk",
+        full_name="Already Connected",
+        status="Connected",
+        linkedin_url="https://www.linkedin.com/in/connected/",
+        last_contacted_at="2026-06-24T08:00:00+00:00",
+    )
+    invite_touchpoint = TouchpointRecord(
+        touchpoint_id="tp-stale",
+        organization_id="org-snyk",
+        contact_id="ct-stale",
+        status="Sent",
+        message_kind="linkedin_invite",
+        message_text="Hi Mehak, would value a referral pointer.",
+        sent_at="2026-06-24T08:00:00+00:00",
+    )
+
+    items = build_linkedin_reconcile_queue_items(
+        organizations=[organization],
+        contacts=[stale_contact, fresh_contact, connected_contact],
+        touchpoints=[invite_touchpoint],
+        min_age_hours=12,
+        max_age_days=14,
+        now=datetime(2026, 6, 25, 12, 0, tzinfo=UTC),
+    )
+
+    assert [item["contact_id"] for item in items] == ["ct-stale"]
+    assert items[0]["company"] == "Snyk"
+    assert items[0]["original_invite_note"] == "Hi Mehak, would value a referral pointer."
+
+
+def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-workwhile",
+            name="WorkWhile",
+            organization_type=OrganizationType.STARTUP,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-roshni",
+            organization_id="org-workwhile",
+            full_name="Roshni Ramakrishnan",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/roshni/",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-owen",
+            organization_id="org-workwhile",
+            full_name="Owen Crook",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/owen/",
+        )
+    )
+
+    result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "contact_id": "ct-roshni",
+                "name": "Roshni Ramakrishnan",
+                "linkedin_url": "https://www.linkedin.com/in/roshni/",
+                "status": "connected",
+                "detail": "Profile shows Message.",
+            },
+            {
+                "contact_id": "ct-owen",
+                "name": "Owen Crook",
+                "linkedin_url": "https://www.linkedin.com/in/owen/",
+                "status": "replied",
+                "message_text": "Happy to help. What role are you looking at?",
+            },
+        ],
+        source_artifact="artifacts/reconcile.json",
+        apply_changes=True,
+    )
+
+    assert result["summary"]["connected"] == 1
+    assert result["summary"]["replied"] == 1
+    assert result["summary"]["updated_contacts"] == 2
+    assert result["summary"]["touchpoints_added"] == 2
+    contacts = {item.contact_id: item for item in workbook.list_contacts()}
+    assert contacts["ct-roshni"].status == "Connected"
+    assert contacts["ct-owen"].status == "Replied"
+    touchpoints = workbook.list_touchpoints()
+    assert {item.status for item in touchpoints} == {"Accepted", "Replied"}
+    assert any(item.message_kind == "linkedin_reply" for item in touchpoints)
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

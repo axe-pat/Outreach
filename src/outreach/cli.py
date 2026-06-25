@@ -2164,6 +2164,237 @@ def attach_search_urls_to_candidates(payload: dict, candidates: list[dict]) -> l
         enriched.append(item)
     return enriched
 
+
+def latest_invite_touchpoint_for_contact(touchpoints: list[TouchpointRecord]) -> TouchpointRecord | None:
+    invite_touchpoints = [
+        item
+        for item in touchpoints
+        if item.contact_id and (item.message_kind or "").strip().lower() == "linkedin_invite"
+    ]
+    invite_touchpoints.sort(
+        key=lambda item: parse_iso_timestamp(item.sent_at or item.recorded_at) or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    )
+    return invite_touchpoints[0] if invite_touchpoints else None
+
+
+def build_linkedin_reconcile_queue_items(
+    *,
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    include_statuses: tuple[str, ...] = ("Invited",),
+    max_age_days: int = 14,
+    min_age_hours: int = 12,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
+    reference_now = now or datetime.now(UTC)
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=UTC)
+    else:
+        reference_now = reference_now.astimezone(UTC)
+
+    organization_map = {item.organization_id: item for item in organizations}
+    touchpoint_map: dict[str, list[TouchpointRecord]] = {}
+    for item in touchpoints:
+        if item.contact_id:
+            touchpoint_map.setdefault(item.contact_id, []).append(item)
+
+    status_filter = {item.strip().lower() for item in include_statuses if item.strip()}
+    items: list[dict[str, object]] = []
+    for contact in contacts:
+        if contact.preferred_channel != OutreachChannel.LINKEDIN:
+            continue
+        if not contact.linkedin_url:
+            continue
+        if status_filter and (contact.status or "").strip().lower() not in status_filter:
+            continue
+
+        latest_invite = latest_invite_touchpoint_for_contact(touchpoint_map.get(contact.contact_id, []))
+        last_touch_at = parse_iso_timestamp(
+            contact.last_contacted_at
+            or (latest_invite.sent_at if latest_invite else "")
+            or (latest_invite.recorded_at if latest_invite else "")
+            or contact.discovered_at
+        )
+        age_hours = (
+            max(0.0, (reference_now - last_touch_at).total_seconds() / 3600)
+            if last_touch_at is not None
+            else None
+        )
+        if age_hours is not None and age_hours < min_age_hours:
+            continue
+        if age_hours is not None and age_hours > max_age_days * 24:
+            continue
+
+        organization = organization_map.get(contact.organization_id)
+        items.append(
+            {
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "company": organization.name if organization else "",
+                "name": contact.full_name,
+                "title": contact.title,
+                "contact_type": contact.contact_type,
+                "status": contact.status,
+                "linkedin_url": contact.linkedin_url,
+                "last_contacted_at": contact.last_contacted_at,
+                "last_touch_at": last_touch_at.isoformat() if last_touch_at else "",
+                "age_hours": round(age_hours, 1) if age_hours is not None else None,
+                "original_invite_note": latest_invite.message_text if latest_invite else "",
+                "source_touchpoint_id": latest_invite.touchpoint_id if latest_invite else "",
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            float(item["age_hours"] or 0),
+            str(item["company"]).lower(),
+            str(item["name"]).lower(),
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def normalize_reconcile_status(status: str) -> str:
+    normalized = (status or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "accepted": "connected",
+        "already_connected": "connected",
+        "connection_accepted": "connected",
+        "reply": "replied",
+        "reply_received": "replied",
+        "message_received": "replied",
+        "still_pending": "pending",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def apply_linkedin_reconcile_results(
+    *,
+    workbook: OutreachWorkbook,
+    results: list[dict],
+    source_artifact: str = "",
+    apply_changes: bool = False,
+) -> dict[str, object]:
+    contacts = workbook.list_contacts()
+    contact_by_id = {item.contact_id: item for item in contacts}
+    contact_by_url = {
+        normalize_dedupe_text(item.linkedin_url): item
+        for item in contacts
+        if item.linkedin_url
+    }
+
+    processed: list[dict[str, object]] = []
+    summary = {
+        "connected": 0,
+        "replied": 0,
+        "pending": 0,
+        "not_connected": 0,
+        "unknown": 0,
+        "missing_contact": 0,
+        "updated_contacts": 0,
+        "touchpoints_added": 0,
+    }
+
+    for raw in results:
+        status = normalize_reconcile_status(str(raw.get("status") or ""))
+        contact = contact_by_id.get(str(raw.get("contact_id") or ""))
+        if contact is None:
+            contact = contact_by_url.get(normalize_dedupe_text(str(raw.get("linkedin_url") or "")))
+        if contact is None:
+            summary["missing_contact"] += 1
+            processed.append(
+                {
+                    **raw,
+                    "normalized_status": status,
+                    "action": "missing_contact",
+                    "applied": False,
+                }
+            )
+            continue
+
+        action = "no_change"
+        new_contact_status = ""
+        touchpoint_status = ""
+        message_kind = "linkedin_reconcile"
+        message_text = ""
+        if status == "connected":
+            summary["connected"] += 1
+            action = "mark_connected"
+            new_contact_status = "Connected"
+            touchpoint_status = "Accepted"
+            message_text = "LinkedIn invite accepted."
+        elif status == "replied":
+            summary["replied"] += 1
+            action = "mark_replied"
+            new_contact_status = "Replied"
+            touchpoint_status = "Replied"
+            message_kind = "linkedin_reply"
+            message_text = str(raw.get("message_text") or raw.get("reply_text") or "LinkedIn reply detected.").strip()
+        elif status == "pending":
+            summary["pending"] += 1
+        elif status == "not_connected":
+            summary["not_connected"] += 1
+        else:
+            summary["unknown"] += 1
+
+        applied = False
+        if apply_changes and new_contact_status:
+            updated = workbook.update_contact(
+                contact.contact_id,
+                status=new_contact_status,
+                last_contacted_at=utc_now_iso(),
+            )
+            if updated is not None:
+                summary["updated_contacts"] += 1
+                contact = updated
+            if message_text:
+                _, created = workbook.append_touchpoint(
+                    TouchpointRecord(
+                        touchpoint_id=workbook.make_touchpoint_id(
+                            contact.organization_id,
+                            contact.contact_id,
+                            OutreachChannel.LINKEDIN.value,
+                            message_text,
+                            source_artifact=source_artifact,
+                        ),
+                        organization_id=contact.organization_id,
+                        contact_id=contact.contact_id,
+                        channel=OutreachChannel.LINKEDIN,
+                        status=touchpoint_status,
+                        message_kind=message_kind,
+                        message_text=message_text,
+                        recorded_at=utc_now_iso(),
+                        source_artifact=source_artifact,
+                        notes=f"reconcile_status={status} | detail={raw.get('detail', '')}",
+                    )
+                )
+                if created:
+                    summary["touchpoints_added"] += 1
+            applied = True
+
+        processed.append(
+            {
+                **raw,
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "normalized_status": status,
+                "action": action,
+                "new_contact_status": new_contact_status,
+                "needs_follow_up": status == "connected",
+                "applied": applied,
+            }
+        )
+
+    return {
+        "apply": apply_changes,
+        "summary": summary,
+        "results": processed,
+    }
+
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -3415,6 +3646,141 @@ def import_linkedin_artifact(
     typer.echo(f"- source_id: {summary.source_id}")
     typer.echo(f"- contacts_added: {summary.contacts_added}")
     typer.echo(f"- touchpoints_added: {summary.touchpoints_added}")
+
+
+@app.command("build-linkedin-reconcile-queue")
+def build_linkedin_reconcile_queue(
+    limit: Annotated[int, typer.Option(help="Maximum invited contacts to include")] = 50,
+    include_status: Annotated[
+        list[str] | None,
+        typer.Option("--include-status", help="Contact statuses to check, default: Invited"),
+    ] = None,
+    max_age_days: Annotated[
+        int,
+        typer.Option(help="Only include contacts last touched within this many days"),
+    ] = 14,
+    min_age_hours: Annotated[
+        int,
+        typer.Option(help="Do not re-check invites newer than this many hours"),
+    ] = 12,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    items = build_linkedin_reconcile_queue_items(
+        organizations=workbook.list_organizations(),
+        contacts=workbook.list_contacts(),
+        touchpoints=workbook.list_touchpoints(),
+        include_statuses=tuple(include_status or ["Invited"]),
+        max_age_days=max_age_days,
+        min_age_hours=min_age_hours,
+    )[:limit]
+
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-reconcile-queue",
+        {
+            "count": len(items),
+            "filters": {
+                "limit": limit,
+                "include_status": include_status or ["Invited"],
+                "max_age_days": max_age_days,
+                "min_age_hours": min_age_hours,
+            },
+            "results": items,
+        },
+    )
+
+    typer.echo(f"Built LinkedIn reconcile queue with {len(items)} contacts.")
+    typer.echo(f"Artifact: {artifact}")
+    for item in items[: min(12, len(items))]:
+        typer.echo(
+            f"- {item['company']} | {item['name']} | status={item['status']} | "
+            f"age_hours={item['age_hours']}"
+        )
+
+
+@app.command("reconcile-linkedin")
+def reconcile_linkedin(
+    queue_artifact: Annotated[
+        Path | None,
+        typer.Option(help="Optional reconcile queue artifact to inspect live"),
+    ] = None,
+    results_artifact: Annotated[
+        Path | None,
+        typer.Option(help="Optional artifact with pre-detected reconcile results"),
+    ] = None,
+    live: Annotated[
+        bool,
+        typer.Option(help="Inspect LinkedIn profiles from the queue using the live browser session"),
+    ] = False,
+    apply_changes: Annotated[
+        bool,
+        typer.Option("--apply", help="Update contacts/touchpoints. Default is dry-run artifact only."),
+    ] = False,
+    limit: Annotated[int, typer.Option(help="Maximum contacts to reconcile")] = 25,
+    max_age_days: Annotated[int, typer.Option(help="Queue fallback max age in days")] = 14,
+    min_age_hours: Annotated[int, typer.Option(help="Queue fallback minimum age in hours")] = 12,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+
+    source_artifact = ""
+    if live:
+        if queue_artifact is not None:
+            with queue_artifact.open(encoding="utf-8") as handle:
+                queue_payload = json.load(handle)
+            candidates = list(queue_payload.get("results") or [])[:limit]
+            source_artifact = str(queue_artifact)
+        else:
+            candidates = build_linkedin_reconcile_queue_items(
+                organizations=workbook.list_organizations(),
+                contacts=workbook.list_contacts(),
+                touchpoints=workbook.list_touchpoints(),
+                max_age_days=max_age_days,
+                min_age_hours=min_age_hours,
+            )[:limit]
+        if not candidates:
+            typer.echo("No LinkedIn contacts matched the reconcile queue filters.")
+            raise typer.Exit(code=1)
+        LinkedInScraper(settings).require_live_cdp_session()
+        detected = LinkedInScraper(settings).reconcile_connection_statuses(candidates)
+        raw_results = [item.__dict__ for item in detected]
+    elif results_artifact is not None:
+        with results_artifact.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        raw_results = list(payload.get("results") or [])
+        source_artifact = str(results_artifact)
+    else:
+        typer.echo("Pass --live or --results-artifact to reconcile LinkedIn state.")
+        raise typer.Exit(code=1)
+
+    reconcile_result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=raw_results,
+        source_artifact=source_artifact,
+        apply_changes=apply_changes,
+    )
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-reconcile",
+        {
+            "live": live,
+            "apply": apply_changes,
+            "source_artifact": source_artifact,
+            "count": len(raw_results),
+            **reconcile_result,
+        },
+    )
+
+    typer.echo(f"Reconciled {len(raw_results)} LinkedIn contacts.")
+    typer.echo(f"Mode: {'apply' if apply_changes else 'dry run'}")
+    typer.echo(f"Summary: {reconcile_result['summary']}")
+    typer.echo(f"Artifact: {artifact}")
+    for item in reconcile_result["results"][: min(12, len(reconcile_result["results"]))]:
+        typer.echo(
+            f"- {item.get('name') or item.get('contact_id')} | status={item['normalized_status']} | "
+            f"action={item['action']} | applied={item['applied']}"
+        )
 
 
 @app.command("send-invites")

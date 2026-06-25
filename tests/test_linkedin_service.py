@@ -174,6 +174,31 @@ def test_send_single_invite_prefers_connect_over_messageish_connected_signal(mon
     assert result.status == "dry_run_ready"
 
 
+def test_reconcile_single_connection_distinguishes_connected_from_pending(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _StubPage()
+
+    monkeypatch.setattr(scraper, "_navigate_profile", lambda _page, _url: True)
+    monkeypatch.setattr(scraper, "_human_pause", lambda _page: None)
+    monkeypatch.setattr(scraper, "_save_screenshot", lambda _page, label: f"{label}.png")
+    monkeypatch.setattr(scraper, "_profile_has_pending_signal", lambda _page: False)
+    monkeypatch.setattr(scraper, "_profile_has_connected_signal", lambda _page: True)
+    monkeypatch.setattr(scraper, "_find_connect_button", lambda _page, candidate_name=None: None)
+
+    result = scraper._reconcile_single_connection(
+        page,
+        {
+            "contact_id": "ct-1",
+            "name": "Test User",
+            "linkedin_url": "https://www.linkedin.com/in/test-user/",
+        },
+    )
+
+    assert result.contact_id == "ct-1"
+    assert result.status == "connected"
+    assert result.screenshot_path == "reconcile-connected.png"
+
+
 def test_send_single_invite_skips_search_result_shortcut_for_execute(monkeypatch) -> None:
     scraper = LinkedInScraper(OutreachSettings())
     page = _StubPage()

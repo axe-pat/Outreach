@@ -2616,7 +2616,36 @@ def infer_followup_audience(contact: ContactRecord, original_invite_note: str = 
     return "general"
 
 
-def accepted_followup_draft(*, company: str, contact: ContactRecord, original_invite_note: str) -> tuple[str, str]:
+def founder_context_line(company: str, organization: OrganizationRecord | None) -> str:
+    organization_text = " ".join(
+        [
+            organization.notes if organization else "",
+            organization.target_lists if organization else "",
+        ]
+    ).lower()
+    if "agent analytics" in organization_text or "ai agents" in organization_text:
+        return (
+            f"{company}'s AI agent analytics work feels close to my data/platform + applied AI background."
+        )
+    return f"{company} feels like the kind of early team where product, ops, and execution sit close together."
+
+
+def product_context_line(contact: ContactRecord) -> str:
+    title = contact.title.lower()
+    if "ai" in title or "data infrastructure" in title:
+        return "Your AI/data infrastructure work feels close to problems I've worked around."
+    if "security" in title or "developer" in title:
+        return "Your developer-facing product work feels close to problems I've worked around."
+    return "Your technically deep product work feels close to problems I've worked around."
+
+
+def accepted_followup_draft(
+    *,
+    company: str,
+    contact: ContactRecord,
+    original_invite_note: str,
+    organization: OrganizationRecord | None = None,
+) -> tuple[str, str]:
     name = first_name(contact.full_name)
     audience = infer_followup_audience(contact, original_invite_note)
     if audience == "referral_engineer":
@@ -2629,21 +2658,23 @@ def accepted_followup_draft(*, company: str, contact: ContactRecord, original_in
             ),
         )
     if audience == "founder":
+        context_line = founder_context_line(company, organization)
         return (
             "review",
             (
                 f"Thanks for connecting, {name}. I'm exploring product/operator paths where my engineering + "
-                f"Marshall background can be useful. Would it be worth sending you a 4-line note on where I think "
-                f"I could help at {company}, or is there someone better to route that to?"
+                f"Marshall background can be useful. {context_line} Do you think a profile like mine could be "
+                "useful there?"
             ),
         )
     if audience == "product":
+        context_line = product_context_line(contact)
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I'm trying to understand where {company}'s product team values "
-                "PM candidates who can go deep with engineering/data. Is there a product or recruiting person "
-                "you'd suggest I get on the radar of?"
+                f"Thanks for connecting, {name}. I'm exploring PM/product roles at {company} from an engineering + "
+                f"data/platform background. {context_line} Do you think a profile like mine could be useful on "
+                "the product side there?"
             ),
         )
     if audience == "recruiter":
@@ -2731,6 +2762,7 @@ def build_linkedin_followup_drafts(
                 company=company,
                 contact=contact,
                 original_invite_note=str(item.get("original_invite_note") or ""),
+                organization=organization,
             )
             draft_kind = "accepted_follow_up"
         elif status == "replied":
@@ -2750,6 +2782,10 @@ def build_linkedin_followup_drafts(
                 "name": contact.full_name,
                 "title": contact.title,
                 "contact_type": contact.contact_type,
+                "followup_audience": infer_followup_audience(
+                    contact,
+                    str(item.get("original_invite_note") or ""),
+                ),
                 "linkedin_url": contact.linkedin_url,
                 "draft_kind": draft_kind,
                 "send_recommendation": recommendation,
@@ -4314,6 +4350,11 @@ def draft_linkedin_followups(
         typer.echo(
             f"- {draft['name']} | {draft['company']} | {draft['draft_kind']} | "
             f"{draft['send_recommendation']} | len={draft['draft_length']}"
+        )
+        typer.echo(f"  Title: {draft.get('title') or '(missing)'}")
+        typer.echo(
+            f"  Audience: {draft.get('followup_audience') or '(unknown)'}"
+            f" | contact_type={draft.get('contact_type') or '(missing)'}"
         )
         typer.echo(f"  Original: {draft.get('original_invite_note') or '(missing)'}")
         if draft.get("latest_message") and draft.get("last_sender") != "You":

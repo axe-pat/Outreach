@@ -787,6 +787,12 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
             name="Sortly",
             organization_type=OrganizationType.COMPANY,
         ),
+        OrganizationRecord(
+            organization_id="org-voker",
+            name="Voker",
+            organization_type=OrganizationType.STARTUP,
+            notes="description=Voker is the Agent Analytics Platform for monitoring and improving your AI agents.",
+        ),
     ]
     contacts = [
         ContactRecord(
@@ -809,6 +815,20 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
             full_name="Hamid Example",
             title="Software Engineer",
             contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-david",
+            organization_id="org-snyk",
+            full_name="David Alessi",
+            title="Product @ Snyk | AI, Data Infrastructure, ex-Microsoft",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-tyler",
+            organization_id="org-voker",
+            full_name="Tyler Postle",
+            title="CEO @ Voker (YC S24): AI Founder & Operator",
+            contact_type="Founder",
         ),
     ]
 
@@ -837,6 +857,22 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
                 "needs_follow_up": True,
                 "original_invite_note": "I'm exploring PM roles and would love to learn from your experience.",
             },
+            {
+                "contact_id": "ct-david",
+                "organization_id": "org-snyk",
+                "name": "David Alessi",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Would love to connect and learn how engineering-heavy product work gets shaped.",
+            },
+            {
+                "contact_id": "ct-tyler",
+                "organization_id": "org-voker",
+                "name": "Tyler Postle",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Would love to connect and learn from your experience.",
+            },
         ],
         organizations=organizations,
         contacts=contacts,
@@ -846,6 +882,8 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
         "accepted_follow_up",
         "referral_offer_reply",
         "accepted_follow_up",
+        "accepted_follow_up",
+        "accepted_follow_up",
     ]
     assert "referral" in str(drafts[0]["draft_message"]).lower()
     assert "short blurb" in str(drafts[1]["draft_message"]).lower()
@@ -853,6 +891,13 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[0]["original_invite_note"].startswith("Would really value")
     assert drafts[1]["latest_message"].startswith("I can share your profile")
     assert "referral path or hiring contact" in str(drafts[2]["draft_message"])
+    assert drafts[3]["followup_audience"] == "product"
+    assert "do you think a profile like mine could be useful" in str(drafts[3]["draft_message"]).lower()
+    assert "product or recruiting person" not in str(drafts[3]["draft_message"]).lower()
+    assert "on the product side" in str(drafts[3]["draft_message"])
+    assert drafts[4]["followup_audience"] == "founder"
+    assert "AI agent analytics work" in str(drafts[4]["draft_message"])
+    assert "Do you think a profile like mine could be useful there?" in str(drafts[4]["draft_message"])
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

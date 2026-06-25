@@ -12,7 +12,7 @@ outreach account-tracker --workspace workspace --output workspace/account_tracke
 
 ## Output
 
-`workspace/account_tracker.xlsx` — three sheets:
+`workspace/account_tracker.xlsx` — four sheets:
 
 - **Account Tracker** — all companies, full detail, auto-filter on every column
 - **Tier A — Active Campaign** — top 20 companies
@@ -24,14 +24,15 @@ outreach account-tracker --workspace workspace --output workspace/account_tracke
 
 | Column | Notes |
 |--------|-------|
-| Fit Score | profile fit (0–25) + role fit (0–25) + team gate (−10–0) + reachability (0–12) + hiring (0–20) + relationship depth (0–20) − no-domain penalty (−8 if applicable) |
-| Tier | A (top 20) / B (next 40) / C (rest) — rank-based, not threshold |
+| Account Score | Track 2 relationship-campaign priority: profile/domain fit + reachability + brand/manual priority + relationship traction + capped hiring + pitch strength + team gate/data penalties |
+| Fit Score | Opportunity-weighted score retained for context: profile fit + role fit + team gate + reachability + raw hiring + relationship depth − no-domain penalty |
+| Tier | A (top 20) / B (next 40) / C (rest) — rank-based by Account Score, not threshold |
 | Account Stage | Derived from contact/touchpoint state — see relationship_engine.md |
 | Why Fit | Top signals that drove the score |
 | Next Action | Recommended move based on account stage |
 | Campaign Action | Concrete Track 2 action such as `expand_linkedin_wave`, `map_more_contacts`, or `switch_to_email_or_wellfound` |
 | Lane 1 Policy | How normal outreach should treat the company: `track_2_owns`, `fresh_role_only`, or `lane_1_allowed` |
-| Score: Profile / Role / Team / Reach / Hiring / Rel | Per-component breakdown for transparency |
+| Score: Profile / Role / Team / Reach / Hiring / Rel / Brand / Pitch / Account Hiring | Per-component breakdown for transparency |
 
 ## Campaign Plan
 

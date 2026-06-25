@@ -79,14 +79,17 @@ Signals:
 
 - profile fit: data/platform, marketplaces, applied AI, dev tools, product ops,
   infrastructure, fintech/security systems, technical PM work
-- role fit: PM intern, APM, product ops, founder's associate, strategy/operator,
-  technical PM, high-fit adjacent internships
-- reachability: smaller team, YC/startup, visible founders, product/engineering
-  density, USC/Marshall/India/referral paths
-- hiring likelihood: active roles, internships, recent jobs, growth/team-size signal
+- reachability: USC/Marshall, India/Delhi, shared employer, LA, and 2nd-degree paths
+- brand/prestige/manual priority: top-tier brand, strong product company, YC/funded
+  startup, or Akshat explicitly marks it priority/core/dream
+- relationship traction: accepted invites and real replies matter because they are
+  already partway toward the outcome
+- hiring likelihood: active roles and internships matter, but should be capped so a
+  role-only company does not outrank a better long-term relationship target
 - pitch strength: whether the outreach can be grounded in real work rather than
   forced specificity
-- manual priority: companies Akshat explicitly marks as target/core/dream/priority
+- team gate/data quality: very tiny teams and missing company context should slow
+  the relationship campaign until the account is better understood
 
 Tiers:
 
@@ -98,6 +101,7 @@ Excel/CSV is the right first visual surface. The account view should include:
 
 - company
 - tier
+- account score
 - fit score
 - why fit
 - target role/path
@@ -287,6 +291,20 @@ guardrails.
 This section records the design decisions behind the priority company scorer
 (`src/outreach/account_tracker.py`). Update here when scoring logic changes.
 
+### Two Scores, Two Jobs
+
+The tracker intentionally keeps two different scores:
+
+| Score | Purpose |
+|-------|---------|
+| Account Campaign Score | Track 2 ranking/tiering. Answers: "Should we persistently build relationships at this company?" |
+| Fit Score | Opportunity context. Answers: "Is there a role/application signal worth preserving or enriching?" |
+
+Campaign actions are a separate layer from score. The score decides durable priority;
+the action decides the next move based on state. A company can have low Account Score
+but still get `enrich_company_context` if it has a strong role signal and missing
+domain data.
+
 ### Fit Domains
 
 Domains where Akshat has a real, earned credential — not a stretch:
@@ -307,9 +325,10 @@ Domains where Akshat has a real, earned credential — not a stretch:
 | Healthcare IT | Optum — regulated AI, clinical workflows (weaker interest, real credential) |
 | AI agents / autonomous workflow | ResumeGenerator and Outreach system are working agentic products |
 
-Domains removed from scoring (too broad, no specific credential):
-`b2b`, `saas`, `enterprise`, `workflow`, `api`, `automation`, `security`, `marketplace` as generic tags.
-These inflated scores for any generic tech company rather than signaling real fit.
+Broad terms are allowed only when they are earned and token-matched, not substring
+matched. For example, `api` cannot match `Capital`, `llm` cannot match `fulfillment`,
+and `ai` cannot match random word fragments. Generic enterprise wording alone should
+not create profile fit.
 
 ### Profile Fit Scoring
 
@@ -321,6 +340,24 @@ domain-specific and weighted by credential strength:
 - Lower weight (3 pts): healthcare IT, payments, ops tech, supply chain
 
 Cap profile fit contribution at 25 pts before any bonus.
+
+### Account Campaign Score
+
+Track 2 Account Campaign Score is:
+
+| Component | Range | Notes |
+|-----------|-------|-------|
+| Profile/domain fit | 0–25 | Earned domains only; token-aware matching |
+| Reachability | 0–12 | Akshat-specific paths only |
+| Brand/prestige/manual priority | 0–12 | Manual priority can override brand inside this cap; it does not stack beyond 12 |
+| Relationship traction | 0–20 | Active/replied relationships beat cold accounts |
+| Account hiring signal | 0–8 | Capped hiring/role nudge, not the center of Track 2 |
+| Pitch strength | 0–10 | Strong story + warm path + workable team size |
+| Team gate | −10–0 | Penalizes teams too small for meaningful PM/operator path |
+| Missing domain context | −8 or −5 | Prevents role-only imports from becoming priority accounts |
+
+This is deliberately not role-fit-heavy. A PM internship with no company thesis should
+trigger enrichment, not automatically become Tier A.
 
 ### Team Size — Maturity Gate
 
@@ -355,19 +392,21 @@ Things removed from reachability:
 - Team size (moved to maturity gate above)
 - YC visibility (not a reachability advantage, moved to prestige/brand signal)
 
-### Brand / Prestige Signal
+### Brand / Prestige / Manual Priority Signal
 
-Reuse the Brand / Company Quality rubric from `discovery/auto/scorer_prompt.md`:
+Current implementation uses an automatic first pass:
 
 | Score | Company type |
 |-------|-------------|
-| 5 | Top-tier: FAANG+, TikTok, Stripe, Figma, Databricks, Rubrik, Rippling, Ramp |
-| 4 | Strong mid-tier: well-regarded SaaS, funded growth-stage startup with product culture |
-| 3 | Recognizable but not top-tier; relevant domain |
-| 2 | Smaller or less-known; limited brand value |
-| 1 | Low signal or irrelevant industry |
+| 12 | Top-tier product/company brand or explicit `dream` / `tier-a` manual tag |
+| 10 | Explicit `priority`, `core`, `relationship`, or `target` manual tag |
+| 8 | Strong known product company |
+| 5 | YC signal |
+| 3 | Recognizable source signal such as BuiltIn/growth-stage/funding text |
+| 0 | No brand/manual-priority signal |
 
-This is a manual override field in `company_overrides.csv` for now. Not auto-detected.
+Manual priority and brand live in the same capped component so they can promote an
+account without double-counting.
 
 ### Hiring Likelihood
 
@@ -379,6 +418,10 @@ This is a manual override field in `company_overrides.csv` for now. Not auto-det
 
 Use `date_posted` from `jobs.xlsx` (via ResumeGenerator bridge) when available.
 Recency decay: roles older than 90 days should not get full hiring signal credit.
+
+For Account Campaign Score, hiring is deliberately compressed into `Account Hiring`
+(0–8). Raw hiring still appears in Fit Score so active internships remain visible for
+Lane 1/apply-driven follow-up.
 
 ### Relationship Depth
 
@@ -404,7 +447,7 @@ with tags from YC/BuiltIn discovery or `company_overrides.csv`.
 
 ### Tier Assignment
 
-Tier assignment (A/B/C) is based on fit_score rank. The **Action Queue** sort order
+Tier assignment (A/B/C) is based on Account Campaign Score rank. The **Action Queue** sort order
 also weights relationship stage — `conversation_started` and `connected_no_conversation`
 always surface above higher-scoring companies with zero relationship progress.
 
@@ -423,12 +466,15 @@ Large companies follow different campaign logic:
 
 ### Open Decisions / Still To Build
 
-- Prestige score: needs data source (Crunchbase funding, investor tier). One-time
-  enrichment, refresh every ~2 weeks. Not yet implemented.
+- Company enrichment: many `jobs.xlsx` imports still lack tags/description, so their
+  campaign action should often be `enrich_company_context`.
+- Prestige score: automatic list is still lightweight. Crunchbase/funding/investor tier
+  enrichment would make the 0–12 brand component much stronger.
 - 2nd-degree density: wired into reachability scoring (≥2 contacts with "2nd degree" in
   notes → +3 pts). Populated automatically by the daily LinkedIn Playwright pipeline.
 - `date_posted` recency decay: jobs.xlsx has the field; bridge to account tracker
   not yet built.
 - Large company track: team size now parses correctly, but channel/playbook fork logic
   is still not fully implemented.
-- `company_overrides.csv` brand score column: not yet added.
+- Manual priority currently comes from account target-list/notes tags. A structured
+  `company_overrides.csv` priority/brand field would be cleaner.

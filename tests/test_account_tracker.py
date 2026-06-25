@@ -106,6 +106,50 @@ def test_account_tracker_parses_team_size_with_commas_and_words(tmp_path: Path) 
     assert "team_size_unparsed" not in row.data_quality_flags
 
 
+def test_account_tracker_profile_fit_uses_token_boundaries(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-capital-fulfillment",
+            name="Capital Fulfillment",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "team_size=225 Employees | tags=fintech,financial services | "
+                "description=Capital Fulfillment hires talented teams for high trust member support."
+            ),
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.score_profile_fit == 4
+    assert "AI/ML" not in row.why_fit
+    assert "LLM/AI" not in row.why_fit
+    assert "API/integration" not in row.why_fit
+    assert "talent" not in row.why_fit
+
+
+def test_account_tracker_manual_priority_counts_without_stacking_brand(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-dream-data",
+            name="Dream Data",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="relationship;dream",
+            notes="tags=data-platform | description=Data platform for enterprise workflows.",
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.score_brand == 12
+    assert "manual priority" in row.why_fit
+    assert row.account_score > row.fit_score
+
+
 def test_account_campaign_plan_switches_channel_after_large_dead_linkedin_wave(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path)
     workbook.initialize()
@@ -168,6 +212,8 @@ def test_account_campaign_plan_flags_role_without_domain_context(tmp_path: Path)
     plan = build_campaign_plan_rows([row])[0]
 
     assert "needs_domain_enrichment" in row.data_quality_flags
+    assert row.account_score < row.fit_score
     assert row.campaign_action == "enrich_company_context"
     assert plan.campaign_action == "enrich_company_context"
+    assert plan.account_score == row.account_score
     assert plan.lane_1_policy == "fresh_role_only"

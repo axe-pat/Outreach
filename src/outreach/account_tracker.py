@@ -93,6 +93,7 @@ DOMAIN_TAGS: dict[str, int] = {
     # Healthcare IT — Optum
     "healthcare": 3,
     "health-tech": 3,
+    "healthtech": 3,
     "digital-health": 3,
     "medtech": 3,
     # AI agents / autonomous workflow — ResumeGenerator, Outreach
@@ -104,6 +105,9 @@ DOMAIN_TAGS: dict[str, int] = {
 PROFILE_FIT_CAP = 25
 LINKEDIN_WAVE_SIZE = 8
 MIN_MAPPED_CONTACTS = 3
+BRAND_SCORE_MAX = 12
+PITCH_SCORE_MAX = 10
+MANUAL_PRIORITY_TAGS = {"priority", "core", "relationship", "target", "dream", "track-2", "tier-a"}
 
 # ---------------------------------------------------------------------------
 # Role fit patterns
@@ -154,6 +158,7 @@ class AccountRow:
     city: str
     website: str
     fit_score: int = 0
+    account_score: int = 0
     tier: str = "C"
     why_fit: str = ""
     target_role: str = ""
@@ -176,6 +181,9 @@ class AccountRow:
     score_reachability: int = 0
     score_hiring: int = 0
     score_relationship: int = 0
+    score_brand: int = 0
+    score_pitch_strength: int = 0
+    score_account_hiring: int = 0
     data_quality_flags: str = ""
     campaign_action: str = ""
     campaign_channel: str = ""
@@ -189,6 +197,7 @@ class CampaignPlanRow:
     company: str
     tier: str
     fit_score: int
+    account_score: int
     account_stage: str
     campaign_action: str
     campaign_channel: str
@@ -226,6 +235,29 @@ def _parse_team_size(value: str) -> Optional[int]:
     return int(match.group(0).replace(",", ""))
 
 
+def _normalize_tag(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _split_normalized_tags(value: str) -> set[str]:
+    return {
+        tag
+        for tag in (_normalize_tag(part) for part in re.split(r"[,;|]", value or ""))
+        if tag
+    }
+
+
+def _mentions_domain_term(text: str, term: str) -> bool:
+    normalized = _normalize_tag(term)
+    if not normalized:
+        return False
+    parts = [re.escape(part) for part in normalized.split("-") if part]
+    if not parts:
+        return False
+    pattern = r"(?<![a-z0-9])" + r"[\s\-+/&]+".join(parts) + r"(?![a-z0-9])"
+    return re.search(pattern, text.lower()) is not None
+
+
 def _text_mentions_company(text: str, company: str) -> bool:
     text_lower = text.lower()
     company_lower = company.lower().strip()
@@ -252,11 +284,13 @@ def _score_profile_fit(org: OrganizationRecord) -> tuple[int, list[str], str, Op
     tags_raw = parsed.get("tags", "").lower()
     description = parsed.get("description", "").lower()
     team_size = _parse_team_size(parsed.get("team_size", ""))
+    normalized_tags = _split_normalized_tags(tags_raw)
 
     score = 0
     matched: list[str] = []
     for tag, pts in DOMAIN_TAGS.items():
-        if tag in tags_raw or tag in description:
+        normalized_tag = _normalize_tag(tag)
+        if normalized_tag in normalized_tags or _mentions_domain_term(description, tag):
             score += pts
             matched.append(tag)
 
@@ -328,6 +362,136 @@ def _data_quality_flags(
     if opportunities and profile_fit == 0:
         flags.append("role_without_domain_context")
     return flags
+
+
+def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
+    text = " ".join([org.name, org.target_lists, org.notes]).lower()
+    target_tags = _split_normalized_tags(org.target_lists)
+    top_tier = {
+        "stripe",
+        "scale ai",
+        "figma",
+        "databricks",
+        "rippling",
+        "ramp",
+        "openai",
+        "anthropic",
+        "notion",
+        "airtable",
+        "cursor",
+        "vercel",
+        "coinbase",
+    }
+    strong = {
+        "zoom",
+        "typeface",
+        "deel",
+        "faire",
+        "checkr",
+        "motive",
+        "webflow",
+        "pagerduty",
+        "amplitude",
+        "monte carlo",
+        "klaviyo",
+        "airwallex",
+        "celonis",
+        "navan",
+        "maven",
+    }
+    company = org.name.lower().strip()
+    manual_score = 0
+    manual_label = ""
+    if target_tags.intersection(MANUAL_PRIORITY_TAGS) or any(
+        _mentions_domain_term(text, token)
+        for token in ("manual priority", "tier a", "dream company", "priority account")
+    ):
+        manual_score = 12 if ("dream" in target_tags or "tier-a" in target_tags) else 10
+        manual_label = "manual priority"
+
+    brand_score = 0
+    brand_label = ""
+    if company in top_tier:
+        brand_score = 12
+        brand_label = "top-tier brand"
+    elif company in strong:
+        brand_score = 8
+        brand_label = "strong brand"
+    elif target_tags.intersection({"yc", "y-combinator"}) or _mentions_domain_term(text, "y combinator"):
+        brand_score = 5
+        brand_label = "YC signal"
+    elif target_tags.intersection({"built-in", "builtin"}) or any(
+        _mentions_domain_term(text, token)
+        for token in ("built in", "growth stage", "series a", "series b", "series c")
+    ):
+        brand_score = 3
+        brand_label = "recognizable company signal"
+
+    if manual_score >= brand_score:
+        return min(BRAND_SCORE_MAX, manual_score), manual_label
+    return min(BRAND_SCORE_MAX, brand_score), brand_label
+
+
+def _score_pitch_strength(
+    *,
+    profile_fit: int,
+    reachability: int,
+    team_size: Optional[int],
+    data_quality_flags: list[str],
+) -> tuple[int, str]:
+    if "needs_domain_enrichment" in data_quality_flags or "role_without_domain_context" in data_quality_flags:
+        return 0, "needs domain context"
+    score = 0
+    reasons: list[str] = []
+    if profile_fit >= 20:
+        score += 5
+        reasons.append("strong profile story")
+    elif profile_fit >= 12:
+        score += 3
+        reasons.append("usable profile story")
+    if reachability >= 5:
+        score += 3
+        reasons.append("warm path")
+    elif reachability > 0:
+        score += 1
+        reasons.append("some reachability")
+    if team_size is not None:
+        if 15 <= team_size <= 1000:
+            score += 2
+            reasons.append("team size supports targeted relationship work")
+        elif team_size < 10:
+            score -= 2
+            reasons.append("very small team")
+    return max(0, min(PITCH_SCORE_MAX, score)), ", ".join(reasons)
+
+
+def _score_account_hiring(role_score: int, hiring_score: int) -> int:
+    if hiring_score >= 20 and role_score >= 18:
+        return 8
+    if hiring_score >= 10 and role_score >= 12:
+        return 6
+    if hiring_score >= 5:
+        return 3
+    return 0
+
+
+def _score_account_campaign(
+    *,
+    profile_fit: int,
+    reachability: int,
+    brand: int,
+    relationship: int,
+    account_hiring: int,
+    pitch_strength: int,
+    team_gate: int,
+    data_quality_flags: list[str],
+) -> int:
+    score = profile_fit + reachability + brand + relationship + account_hiring + pitch_strength + team_gate
+    if "needs_domain_enrichment" in data_quality_flags:
+        score -= 8
+    elif "role_without_domain_context" in data_quality_flags:
+        score -= 5
+    return max(0, score)
 
 
 def _score_reachability(
@@ -424,11 +588,11 @@ def _score_relationship_depth(contacts: list[ContactRecord]) -> tuple[int, str]:
 
 
 def _derive_stage(
-    fit_score: int,
+    account_score: int,
     contacts: list[ContactRecord],
 ) -> tuple[str, str, str]:
     if not contacts:
-        if fit_score >= 45:
+        if account_score >= 30:
             return "priority_target", "Map contacts on LinkedIn", \
                 (date.today() + timedelta(days=7)).isoformat()
         return "unqualified", "Evaluate fit", \
@@ -453,7 +617,23 @@ def _derive_stage(
 
 def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str]:
     flags = {item.strip() for item in row.data_quality_flags.split(";") if item.strip()}
-    if row.tier == "C" or row.fit_score < 18:
+    if "needs_domain_enrichment" in flags or "role_without_domain_context" in flags:
+        if row.fit_score < 25 and row.score_brand == 0:
+            return (
+                "pause_account",
+                "none",
+                10,
+                "Company/domain fit is under-specified and there is not enough role, brand, or relationship signal to enrich yet.",
+                "lane_1_allowed",
+            )
+        return (
+            "enrich_company_context",
+            "research",
+            85 if row.tier == "A" else (65 if row.tier == "B" else 45),
+            "Company/domain fit is under-specified for a relationship campaign; enrich before more touches.",
+            "fresh_role_only",
+        )
+    if row.tier == "C":
         return (
             "pause_account",
             "none",
@@ -461,13 +641,13 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
             "Not in Tier A/B or not enough current fit to spend relationship-engine budget.",
             "lane_1_allowed",
         )
-    if "needs_domain_enrichment" in flags or "role_without_domain_context" in flags:
+    if row.account_score < 18:
         return (
-            "enrich_company_context",
-            "research",
-            85 if row.tier == "A" else 65,
-            "Role signal is strong, but company/domain fit is under-specified; enrich before more campaign touches.",
-            "fresh_role_only",
+            "pause_account",
+            "none",
+            10,
+            "Not enough durable account fit to spend relationship-engine budget.",
+            "lane_1_allowed",
         )
     if row.account_stage == "conversation_started":
         return (
@@ -527,8 +707,8 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
         )
     if row.account_stage in {"priority_target", "unqualified"}:
         return (
-            "map_more_contacts" if row.fit_score >= 30 else "enrich_company_context",
-            "linkedin" if row.fit_score >= 30 else "research",
+            "map_more_contacts" if row.account_score >= 30 else "enrich_company_context",
+            "linkedin" if row.account_score >= 30 else "research",
             70 if row.tier == "A" else 50,
             "Account has enough score to inspect, but is not ready for a campaign touch yet.",
             "fresh_role_only" if row.tier in {"A", "B"} else "lane_1_allowed",
@@ -559,8 +739,11 @@ _LABEL = {
     "data-pipeline": "data pipelines",
     "etl": "ETL/data",
     "analytics": "analytics",
+    "business-intelligence": "BI/analytics",
+    "warehousing": "data warehouse",
     "integration": "API/integration",
     "api": "API/integration",
+    "connectivity": "API/connectivity",
     "observability": "observability",
     "monitoring": "monitoring",
     "developer-tools": "dev tools",
@@ -572,14 +755,23 @@ _LABEL = {
     "hr-tech": "HR tech",
     "talent": "talent",
     "workflow-automation": "workflow automation",
+    "automation": "automation",
     "marketplace": "marketplace",
     "logistics": "logistics",
     "mobility": "mobility",
+    "transportation": "transportation",
+    "delivery": "delivery",
+    "gig-economy": "gig economy",
     "fintech": "fintech",
     "payments": "payments",
+    "financial-technology": "fintech",
     "billing": "billing/fintech",
+    "banking": "banking/fintech",
     "healthcare": "healthcare",
     "health-tech": "health tech",
+    "healthtech": "health tech",
+    "digital-health": "digital health",
+    "medtech": "medtech",
     "agentic": "AI agents",
     "copilot": "AI copilot",
     "productivity": "productivity",
@@ -624,6 +816,14 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             team_size=team_size,
             opportunities=oo,
         )
+        s_brand, brand_label = _score_brand(org)
+        s_pitch, pitch_label = _score_pitch_strength(
+            profile_fit=s_profile,
+            reachability=s_reach,
+            team_size=team_size,
+            data_quality_flags=quality_flags,
+        )
+        s_account_hiring = _score_account_hiring(s_role, s_hiring)
 
         # No-domain-data discount: jobs.xlsx imports with empty tags/description
         # get role+hiring credit but we have no idea if they're actually a fit.
@@ -635,6 +835,16 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
 
         fit_score = max(0, s_profile + s_role + s_team + s_reach + s_hiring
                         + s_rel + s_domain_penalty)
+        account_score = _score_account_campaign(
+            profile_fit=s_profile,
+            reachability=s_reach,
+            brand=s_brand,
+            relationship=s_rel,
+            account_hiring=s_account_hiring,
+            pitch_strength=s_pitch,
+            team_gate=s_team,
+            data_quality_flags=quality_flags,
+        )
 
         # Build why_fit
         seen: set[str] = set()
@@ -645,6 +855,10 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
                 seen.add(lbl)
                 labels.append(lbl)
         labels.extend(r_signals)
+        if brand_label:
+            labels.append(brand_label)
+        if pitch_label:
+            labels.append(pitch_label)
         if rel_label:
             labels.insert(0, rel_label)  # relationship depth leads
         if s_hiring > 0:
@@ -655,7 +869,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         accepted = sum(1 for c in company_contacts if c.status in ACCEPTED_STATUSES)
         replies = sum(1 for c in company_contacts if c.status in REPLIED_STATUSES)
 
-        stage, next_action, next_due = _derive_stage(fit_score, company_contacts)
+        stage, next_action, next_due = _derive_stage(account_score, company_contacts)
         row = AccountRow(
             organization_id=org.organization_id,
             company=org.name,
@@ -663,6 +877,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             city=org.city,
             website=org.website,
             fit_score=fit_score,
+            account_score=account_score,
             why_fit=why_fit,
             target_role=best_role or "—",
             hiring_signal=hiring_signal,
@@ -682,6 +897,9 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             score_reachability=s_reach,
             score_hiring=s_hiring,
             score_relationship=s_rel,
+            score_brand=s_brand,
+            score_pitch_strength=s_pitch,
+            score_account_hiring=s_account_hiring,
             data_quality_flags=";".join(quality_flags),
         )
         (
@@ -693,7 +911,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         ) = _campaign_plan_for_account(row)
         rows.append(row)
 
-    rows.sort(key=lambda r: r.fit_score, reverse=True)
+    rows.sort(key=lambda r: (r.account_score, r.fit_score, r.company.lower()), reverse=True)
     for i, r in enumerate(rows):
         r.tier = "A" if i < 20 else ("B" if i < 60 else "C")
         (
@@ -717,6 +935,7 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
         key=lambda row: (
             row.campaign_priority,
             row.tier == "A",
+            row.account_score,
             row.fit_score,
             row.company.lower(),
         ),
@@ -727,6 +946,7 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
             company=row.company,
             tier=row.tier,
             fit_score=row.fit_score,
+            account_score=row.account_score,
             account_stage=row.account_stage,
             campaign_action=row.campaign_action,
             campaign_channel=row.campaign_channel,
@@ -753,6 +973,7 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
 COLUMNS: list[tuple[str, str, int]] = [
     ("Company",         "company",          22),
     ("Tier",            "tier",              6),
+    ("Account Score",   "account_score",    13),
     ("Fit Score",       "fit_score",         10),
     ("Why Fit",         "why_fit",           45),
     ("Account Stage",   "account_stage",     24),
@@ -779,6 +1000,9 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Score: Reach",    "score_reachability",13),
     ("Score: Hiring",   "score_hiring",      13),
     ("Score: Rel",      "score_relationship",11),
+    ("Score: Brand",    "score_brand",       13),
+    ("Score: Pitch",    "score_pitch_strength",13),
+    ("Score: Account Hiring","score_account_hiring",18),
     ("Org Type",        "org_type",          12),
     ("Tags",            "tags",              40),
     ("Data Flags",      "data_quality_flags",30),
@@ -789,6 +1013,7 @@ COLUMNS: list[tuple[str, str, int]] = [
 ACTION_COLS: list[tuple[str, str, int]] = [
     ("Company",       "company",       22),
     ("Tier",          "tier",           6),
+    ("Account Score", "account_score", 13),
     ("Fit Score",     "fit_score",     10),
     ("Why Fit",       "why_fit",       45),
     ("Account Stage", "account_stage", 24),
@@ -810,6 +1035,7 @@ CAMPAIGN_COLS: list[tuple[str, str, int]] = [
     ("Lane 1 Policy",     "lane_1_policy",      18),
     ("Reason",            "campaign_reason",    54),
     ("Why Fit",           "why_fit",            45),
+    ("Account Score",     "account_score",      13),
     ("Fit Score",         "fit_score",          10),
     ("Target Role",       "target_role",        28),
     ("People Mapped",     "people_mapped",      14),
@@ -868,10 +1094,12 @@ def _write_row(ws, ri: int, row: AccountRow, cols: list) -> None:
             c.alignment = LEFT
         elif hdr in ("Why Fit", "Next Action", "Tags", "Campaign Reason", "Reason", "Data Flags"):
             c.alignment = WRAP
-        elif hdr in ("Fit Score", "People Mapped", "Invites Sent", "Accepted",
+        elif hdr in ("Account Score", "Fit Score", "People Mapped", "Invites Sent", "Accepted",
                      "Replies", "Coffee Chats", "Advocates", "Team Size",
                      "Score: Profile", "Score: Role", "Score: Team",
-                     "Score: Reach", "Score: Hiring", "Campaign Priority", "Priority"):
+                     "Score: Reach", "Score: Hiring", "Score: Rel", "Score: Brand",
+                     "Score: Pitch", "Score: Account Hiring",
+                     "Campaign Priority", "Priority"):
             c.alignment = CTR
         else:
             c.alignment = LEFT
@@ -912,7 +1140,7 @@ def generate_excel(rows: list[AccountRow], output_path: Path) -> Path:
     }
     action_rows = sorted(
         [r for r in rows if r.tier in ("A", "B") and r.account_stage in ACTIONABLE],
-        key=lambda r: (STAGE_PRI.get(r.account_stage, 9), r.tier, -r.fit_score),
+        key=lambda r: (STAGE_PRI.get(r.account_stage, 9), r.tier, -r.account_score, -r.fit_score),
     )
     for ri, row in enumerate(action_rows, 2):
         _write_row(ws3, ri, row, ACTION_COLS)

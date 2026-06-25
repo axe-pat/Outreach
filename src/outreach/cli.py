@@ -2706,6 +2706,22 @@ def accepted_followup_draft(
 def reply_followup_draft(*, company: str, contact: ContactRecord, latest_message: str) -> tuple[str, str, str]:
     name = first_name(contact.full_name)
     lower = latest_message.lower()
+    if any(
+        token in lower
+        for token in [
+            "won't be able to help",
+            "wont be able to help",
+            "can't help",
+            "cannot help",
+            "not able to help",
+            "unable to help",
+        ]
+    ):
+        return (
+            "polite_close_reply",
+            "optional",
+            f"No worries at all, thanks for letting me know {name}. Appreciate it.",
+        )
     if "share your profile" in lower or "share your resume" in lower or "hr" in lower:
         return (
             "referral_offer_reply",

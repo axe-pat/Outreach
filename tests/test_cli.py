@@ -810,6 +810,13 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
             contact_type="Engineering",
         ),
         ContactRecord(
+            contact_id="ct-mehak-reply",
+            organization_id="org-snyk",
+            full_name="Mehak Singh",
+            title="Associate Software Engineer at Snyk",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
             contact_id="ct-hamid",
             organization_id="org-snyk",
             full_name="Hamid Example",
@@ -850,6 +857,13 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
                 "latest_message": "I can share your profile to the HR in case that helps ?",
             },
             {
+                "contact_id": "ct-mehak-reply",
+                "organization_id": "org-snyk",
+                "name": "Mehak Singh",
+                "normalized_status": "replied",
+                "latest_message": "I am sorry to say but I won't be able to help you.",
+            },
+            {
                 "contact_id": "ct-hamid",
                 "organization_id": "org-snyk",
                 "name": "Hamid Example",
@@ -881,24 +895,27 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert [item["draft_kind"] for item in drafts] == [
         "accepted_follow_up",
         "referral_offer_reply",
+        "polite_close_reply",
         "accepted_follow_up",
         "accepted_follow_up",
         "accepted_follow_up",
     ]
     assert "referral" in str(drafts[0]["draft_message"]).lower()
     assert "short blurb" in str(drafts[1]["draft_message"]).lower()
+    assert drafts[2]["send_recommendation"] == "optional"
+    assert "thanks for letting me know" in str(drafts[2]["draft_message"]).lower()
     assert drafts[0]["company"] == "Snyk"
     assert drafts[0]["original_invite_note"].startswith("Would really value")
     assert drafts[1]["latest_message"].startswith("I can share your profile")
-    assert "referral path or hiring contact" in str(drafts[2]["draft_message"])
-    assert drafts[3]["followup_audience"] == "product"
-    assert "would love your perspective" in str(drafts[3]["draft_message"]).lower()
-    assert "could translate to the product work there" in str(drafts[3]["draft_message"])
-    assert "product or recruiting person" not in str(drafts[3]["draft_message"]).lower()
-    assert drafts[4]["followup_audience"] == "founder"
-    assert "AI agent analytics work" in str(drafts[4]["draft_message"])
-    assert "could translate to what you're building" in str(drafts[4]["draft_message"])
-    assert "happy to share more context if useful" not in str(drafts[4]["draft_message"])
+    assert "referral path or hiring contact" in str(drafts[3]["draft_message"])
+    assert drafts[4]["followup_audience"] == "product"
+    assert "would love your perspective" in str(drafts[4]["draft_message"]).lower()
+    assert "could translate to the product work there" in str(drafts[4]["draft_message"])
+    assert "product or recruiting person" not in str(drafts[4]["draft_message"]).lower()
+    assert drafts[5]["followup_audience"] == "founder"
+    assert "AI agent analytics work" in str(drafts[5]["draft_message"])
+    assert "could translate to what you're building" in str(drafts[5]["draft_message"])
+    assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

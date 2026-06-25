@@ -20,6 +20,15 @@ outreach enrich-company-context --limit 50
 # Write verified public context for a focused batch
 outreach enrich-company-context --limit 50 --execute
 
+# Verify every company that still has only inferred/unverified context
+outreach enrich-company-context --limit 300 --verify-all --execute
+
+# Force-refresh the selected slice, useful after changing enrichment logic
+outreach enrich-company-context --limit 100 --start-at 0 --verify-all --force --execute --timeout-seconds 6
+
+# Fast source-first cleanup: refresh only companies with known public URLs
+outreach enrich-company-context --limit 300 --verify-all --force --require-direct-url --no-web-search --no-job-fallback --execute --timeout-seconds 2
+
 # Fast all-company preview from local ResumeGenerator fit rationales only
 outreach enrich-company-context --limit 300 --no-network
 ```
@@ -58,6 +67,13 @@ Selection rules:
 - new job-imported companies with no tags/description are selected automatically
 - stale context is selected again after `context_refresh_after`
 - targeted refresh is available with repeated `--company` options
+- `--verify-all` selects companies that still lack `external_verified` context
+- `--force` refreshes selected companies even if they are already
+  `external_verified`, which is useful when the extraction logic changes
+- `--start-at` lets an all-company force refresh run in stable bounded slices
+- `--require-direct-url` is the fast first pass: it skips search-only companies
+- `--no-job-fallback` prevents a failed public fetch from downgrading verified
+  company context into local-only inference
 
 Confidence levels:
 
@@ -65,6 +81,12 @@ Confidence levels:
 |------------|---------|
 | `external_verified` | Context came from a fetched public company/source page |
 | `inferred_from_job` | Context came from ResumeGenerator job fit rationale; useful, but discounted by Account Score |
+
+Funding/prestige signals such as `techcrunch-covered`, `crunchbase-profile`,
+`series-a`, `series-b`, `series-c-plus`, `yc-backed`, and top-investor backing are
+stored as `prestige_signals=...` and feed the Brand component of Account Score.
+Investor tags require funding/backing language near the investor name, so a customer
+or integration mention should not inflate the account score.
 
 Use `--no-network` for a fast local backfill. Use default network mode for verified
 context, preferably in bounded batches because public pages/search can be slower.

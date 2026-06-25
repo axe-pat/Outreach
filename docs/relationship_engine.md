@@ -91,6 +91,11 @@ Signals:
 - team gate/data quality: very tiny teams and missing company context should slow
   the relationship campaign until the account is better understood
 
+Context enrichment should run across the whole company universe, not only current
+top-ranked accounts. A company can be artificially buried when it lacks tags,
+description, website, or funding/prestige signals; verified public context is what
+lets Track 2 promote it into the right tier.
+
 Tiers:
 
 - Tier A: 15-20 companies actively campaigned
@@ -262,6 +267,7 @@ separate enrichment pass:
 ```bash
 outreach enrich-company-context --limit 50
 outreach enrich-company-context --limit 50 --execute
+outreach enrich-company-context --limit 300 --verify-all --execute
 outreach enrich-company-context --limit 300 --no-network
 ```
 
@@ -275,12 +281,19 @@ new companies imported from ResumeGenerator jobs. It writes:
 - `context_source`
 - `context_confidence`
 - `context_evidence_url`
+- `prestige_signals`
+- `prestige_evidence_url`
 
 Confidence matters:
 
 - `external_verified`: public company/source page was fetched; safest for Account Score
 - `inferred_from_job`: ResumeGenerator job rationale was used; helpful, but Account
   Score discounts it so a job rationale does not masquerade as verified company truth
+
+Funding and market-quality evidence is part of enrichment. Signals from company
+pages, TechCrunch, Crunchbase, YC, and investor/funding language feed the Brand /
+Prestige component of Account Score, capped with manual priority and known-brand
+signals so prestige does not double-count.
 
 ### 6. Reply + Conversation Agent
 
@@ -496,8 +509,8 @@ Large companies follow different campaign logic:
 
 - Company enrichment: command exists, but it should be wired into the final daily
   orchestrator as a small new-company pass plus a fortnightly stale-context refresh.
-- Prestige score: automatic list is still lightweight. Crunchbase/funding/investor tier
-  enrichment would make the 0–12 brand component much stronger.
+- Prestige score: enrichment now captures funding/investor/source signals, but the
+  source-quality rubric can still be improved as we see real examples.
 - 2nd-degree density: wired into reachability scoring (≥2 contacts with "2nd degree" in
   notes → +3 pts). Populated automatically by the daily LinkedIn Playwright pipeline.
 - `date_posted` recency decay: jobs.xlsx has the field; bridge to account tracker

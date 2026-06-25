@@ -77,7 +77,7 @@ def test_company_enrichment_prefers_external_website_context(tmp_path: Path) -> 
                 <title>Typeface AI content platform</title>
                 <meta name="description" content="Typeface is a generative AI platform for enterprise content workflows and brand-safe marketing automation.">
               </head>
-              <body><p>Enterprise teams use Typeface to automate AI content workflows.</p></body>
+              <body><p>Enterprise teams use Typeface to automate AI content workflows. Backed by Sequoia and GV.</p></body>
             </html>
             """
         }
@@ -98,3 +98,87 @@ def test_company_enrichment_prefers_external_website_context(tmp_path: Path) -> 
     assert "description=Typeface is a generative AI platform" in enriched.notes
     assert "artificial-intelligence" in enriched.notes
     assert "workflow-automation" in enriched.notes
+    assert "prestige_signals=venture-backed,sequoia-backed,gv-backed" in enriched.notes
+
+
+def test_company_enrichment_does_not_treat_customer_mentions_as_investors(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-workflow",
+            name="WorkflowCo",
+            organization_type=OrganizationType.COMPANY,
+            website="https://www.workflowco.ai",
+            notes="Imported from ResumeGenerator v1 jobs.xlsx",
+        )
+    )
+    fetcher = FakeFetcher(
+        {
+            "https://www.workflowco.ai": """
+            <html>
+              <head>
+                <title>WorkflowCo AI platform</title>
+                <meta name="description" content="WorkflowCo builds AI workflow automation for operations teams.">
+              </head>
+              <body><p>Customers include Microsoft, finance teams, and enterprise operators. Institutional investors also use the product.</p></body>
+            </html>
+            """
+        }
+    )
+
+    results = enrich_company_contexts(
+        tmp_path,
+        execute=True,
+        use_web_search=False,
+        fetcher=fetcher,
+    )
+
+    assert results[0].prestige_signals == []
+    enriched = OutreachWorkbook(tmp_path).list_organizations()[0]
+    assert "prestige_signals=" not in enriched.notes
+
+
+def test_external_refresh_replaces_stale_prestige_signals(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-plain",
+            name="Plain AI",
+            organization_type=OrganizationType.COMPANY,
+            website="https://www.plain.ai",
+            notes=(
+                "tags=artificial-intelligence | description=Old context. | "
+                "prestige_signals=microsoft-backed,venture-backed | "
+                "prestige_evidence_url=https://old.example.com | "
+                "context_confidence=external_verified"
+            ),
+        )
+    )
+    fetcher = FakeFetcher(
+        {
+            "https://www.plain.ai": """
+            <html>
+              <head>
+                <title>Plain AI workflow platform</title>
+                <meta name="description" content="Plain AI builds workflow automation software for internal teams.">
+              </head>
+              <body><p>Plain AI helps teams automate internal operations.</p></body>
+            </html>
+            """
+        }
+    )
+
+    results = enrich_company_contexts(
+        tmp_path,
+        execute=True,
+        use_web_search=False,
+        fetcher=fetcher,
+        force=True,
+    )
+
+    assert results[0].status == "updated"
+    enriched = OutreachWorkbook(tmp_path).list_organizations()[0]
+    assert "prestige_signals=" not in enriched.notes
+    assert "prestige_evidence_url=" not in enriched.notes

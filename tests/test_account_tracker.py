@@ -150,6 +150,27 @@ def test_account_tracker_manual_priority_counts_without_stacking_brand(tmp_path:
     assert row.account_score > row.fit_score
 
 
+def test_account_tracker_prestige_signals_feed_brand_component(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-funded-ai",
+            name="Funded AI",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "tags=artificial-intelligence | description=AI workflow platform. | "
+                "prestige_signals=sequoia-backed,series-b | context_confidence=external_verified"
+            ),
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.score_brand == 10
+    assert "top investor signal" in row.why_fit
+
+
 def test_account_campaign_plan_switches_channel_after_large_dead_linkedin_wave(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path)
     workbook.initialize()

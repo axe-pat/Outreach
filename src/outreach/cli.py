@@ -3092,6 +3092,7 @@ def enrich_company_context_cmd(
         typer.Option(help="Path to the workspace directory containing CSVs"),
     ] = Path("workspace"),
     limit: Annotated[int, typer.Option(help="Maximum companies to enrich")] = 50,
+    start_at: Annotated[int, typer.Option(help="Skip this many selected companies before enriching")] = 0,
     refresh_days: Annotated[int, typer.Option(help="Refresh context older than this many days")] = 14,
     company: Annotated[
         list[str] | None,
@@ -3109,6 +3110,23 @@ def enrich_company_context_cmd(
         bool,
         typer.Option(help="Use public web search when direct company/source URLs are unavailable"),
     ] = True,
+    verify_all: Annotated[
+        bool,
+        typer.Option(help="Include companies that have only inferred or unverified context"),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(help="Refresh selected companies even when existing context is already external_verified"),
+    ] = False,
+    require_direct_url: Annotated[
+        bool,
+        typer.Option(help="Only enrich companies that already have a non-LinkedIn source URL or website"),
+    ] = False,
+    job_fallback: Annotated[
+        bool,
+        typer.Option(help="Fall back to local job-rationale inference when public context cannot be fetched"),
+    ] = True,
+    timeout_seconds: Annotated[int, typer.Option(help="Network fetch timeout per public page")] = 6,
 ) -> None:
     """Fill missing or stale company context used by Track 2 account scoring."""
     from outreach.company_enrichment import enrich_company_contexts
@@ -3116,11 +3134,17 @@ def enrich_company_context_cmd(
     results = enrich_company_contexts(
         workspace,
         limit=limit,
+        start_at=start_at,
         refresh_days=refresh_days,
         companies=set(company or []),
         execute=execute,
         use_network=network,
         use_web_search=web_search,
+        verify_all=verify_all,
+        force=force,
+        require_direct_url=require_direct_url,
+        fallback_to_jobs=job_fallback,
+        fetcher=HttpTextDownloader(timeout_seconds=timeout_seconds),
     )
     summary: dict[str, int] = {}
     confidence_summary: dict[str, int] = {}
@@ -3135,11 +3159,17 @@ def enrich_company_context_cmd(
         {
             "workspace": str(workspace),
             "limit": limit,
+            "start_at": start_at,
             "refresh_days": refresh_days,
             "companies": company or [],
             "execute": execute,
             "network": network,
             "web_search": web_search,
+            "verify_all": verify_all,
+            "force": force,
+            "require_direct_url": require_direct_url,
+            "job_fallback": job_fallback,
+            "timeout_seconds": timeout_seconds,
             "summary": summary,
             "confidence_summary": confidence_summary,
             "results": [row.__dict__ for row in results],
@@ -3157,6 +3187,8 @@ def enrich_company_context_cmd(
             f"- {row.company} | status={row.status} | confidence={row.confidence or '-'} | "
             f"source={row.source or '-'} | tags={tag_text}"
         )
+        if row.prestige_signals:
+            typer.echo(f"  Prestige: {','.join(row.prestige_signals)}")
         if row.description:
             typer.echo(f"  {row.description[:180]}")
         elif row.error:

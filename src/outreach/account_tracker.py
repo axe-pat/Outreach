@@ -367,8 +367,10 @@ def _data_quality_flags(
 
 
 def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
+    parsed = _parse_notes(org.notes)
     text = " ".join([org.name, org.target_lists, org.notes]).lower()
     target_tags = _split_normalized_tags(org.target_lists)
+    prestige_tags = _split_normalized_tags(parsed.get("prestige_signals", ""))
     top_tier = {
         "stripe",
         "scale ai",
@@ -429,8 +431,38 @@ def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
         brand_score = 3
         brand_label = "recognizable company signal"
 
-    if manual_score >= brand_score:
+    top_backer_signals = {
+        "sequoia-backed",
+        "a16z-backed",
+        "gv-backed",
+        "accel-backed",
+        "index-backed",
+        "khosla-backed",
+        "benchmark-backed",
+        "founders-fund-backed",
+    }
+    prestige_score = 0
+    prestige_label = ""
+    if prestige_tags.intersection(top_backer_signals):
+        prestige_score = 10
+        prestige_label = "top investor signal"
+    elif "series-c-plus" in prestige_tags:
+        prestige_score = 8
+        prestige_label = "growth funding signal"
+    elif prestige_tags.intersection({"series-a", "series-b"}):
+        prestige_score = 6
+        prestige_label = "venture funding signal"
+    elif "yc-backed" in prestige_tags:
+        prestige_score = 5
+        prestige_label = "YC signal"
+    elif prestige_tags.intersection({"techcrunch-covered", "crunchbase-profile", "venture-backed", "seed-funded"}):
+        prestige_score = 3
+        prestige_label = "external prestige signal"
+
+    if manual_score >= brand_score and manual_score >= prestige_score:
         return min(BRAND_SCORE_MAX, manual_score), manual_label
+    if prestige_score >= brand_score:
+        return min(BRAND_SCORE_MAX, prestige_score), prestige_label
     return min(BRAND_SCORE_MAX, brand_score), brand_label
 
 

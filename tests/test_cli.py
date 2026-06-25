@@ -892,12 +892,13 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[1]["latest_message"].startswith("I can share your profile")
     assert "referral path or hiring contact" in str(drafts[2]["draft_message"])
     assert drafts[3]["followup_audience"] == "product"
-    assert "do you think a profile like mine could be useful" in str(drafts[3]["draft_message"]).lower()
+    assert "would love your perspective" in str(drafts[3]["draft_message"]).lower()
+    assert "could translate to the product work there" in str(drafts[3]["draft_message"])
     assert "product or recruiting person" not in str(drafts[3]["draft_message"]).lower()
-    assert "on the product side" in str(drafts[3]["draft_message"])
     assert drafts[4]["followup_audience"] == "founder"
     assert "AI agent analytics work" in str(drafts[4]["draft_message"])
-    assert "Do you think a profile like mine could be useful there?" in str(drafts[4]["draft_message"])
+    assert "could translate to what the team is building" in str(drafts[4]["draft_message"])
+    assert "happy to share more context if useful" in str(drafts[4]["draft_message"])
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

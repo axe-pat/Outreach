@@ -2625,7 +2625,7 @@ def founder_context_line(company: str, organization: OrganizationRecord | None) 
     ).lower()
     if "agent analytics" in organization_text or "ai agents" in organization_text:
         return (
-            f"{company}'s AI agent analytics work feels close to my data/platform + applied AI background."
+            f"{company}'s AI agent analytics work feels close to my data/platform + applied AI experience."
         )
     return f"{company} feels like the kind of early team where product, ops, and execution sit close together."
 
@@ -2663,8 +2663,8 @@ def accepted_followup_draft(
             "review",
             (
                 f"Thanks for connecting, {name}. I'm exploring product/operator paths where my engineering + "
-                f"Marshall background can be useful. {context_line} Do you think a profile like mine could be "
-                "useful there?"
+                f"Marshall background can be useful. {context_line} Would love your perspective on whether my "
+                "background could translate to what the team is building, and happy to share more context if useful."
             ),
         )
     if audience == "product":
@@ -2673,8 +2673,8 @@ def accepted_followup_draft(
             "review",
             (
                 f"Thanks for connecting, {name}. I'm exploring PM/product roles at {company} from an engineering + "
-                f"data/platform background. {context_line} Do you think a profile like mine could be useful on "
-                "the product side there?"
+                f"data/platform background. {context_line} Would love your perspective on whether my "
+                "background could translate to the product work there, and happy to share more context if useful."
             ),
         )
     if audience == "recruiter":

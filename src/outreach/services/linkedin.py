@@ -107,6 +107,17 @@ class LinkedInReconcileResult:
     screenshot_path: str | None = None
 
 
+@dataclass
+class LinkedInMessageThread:
+    thread_id: str
+    name: str
+    thread_url: str
+    latest_message: str
+    last_sender: str = ""
+    timestamp_text: str = ""
+    unread: bool = False
+
+
 class InviteCandidateTimeoutError(RuntimeError):
     """Raised when a single invite candidate takes too long to process."""
 
@@ -446,6 +457,92 @@ class LinkedInScraper:
                 return results
             finally:
                 browser.close()
+
+    def snapshot_message_threads(self, limit: int = 50) -> list[LinkedInMessageThread]:
+        self.require_live_cdp_session()
+        with sync_playwright() as playwright:
+            browser = self._connect_over_cdp(playwright)
+            try:
+                context = browser.contexts[0]
+                preflight = self._session_preflight(context, target_url="https://www.linkedin.com/messaging/")
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before message snapshot: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                page = context.new_page()
+                page.set_default_timeout(15000)
+                try:
+                    if not self._safe_goto(page, "https://www.linkedin.com/messaging/"):
+                        raise RuntimeError("Could not load LinkedIn messaging.")
+                    page.wait_for_timeout(2500)
+                    return self._extract_message_threads(page, limit=limit)
+                finally:
+                    self._close_page_safely(page)
+            finally:
+                browser.close()
+
+    def _extract_message_threads(self, page: Page, limit: int = 50) -> list[LinkedInMessageThread]:
+        script = """
+        (limit) => {
+          const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+          const containers = Array.from(document.querySelectorAll(
+            'li.msg-conversation-listitem, .msg-conversation-listitem, [data-view-name="messages-conversation-list-item"]'
+          ));
+          const fallbackAnchors = Array.from(document.querySelectorAll('a[href*="/messaging/thread/"]'));
+          const seen = new Set();
+          const items = [];
+
+          const readContainer = (container) => {
+            const anchor = container.querySelector('a[href*="/messaging/thread/"]') || (
+              container.matches && container.matches('a[href*="/messaging/thread/"]') ? container : null
+            );
+            const href = anchor ? anchor.href : "";
+            if (!href || seen.has(href)) return null;
+            seen.add(href);
+
+            const nameEl = container.querySelector(
+              '.msg-conversation-listitem__participant-names, [data-anonymize="person-name"], h3, .entity-result__title-text'
+            );
+            const snippetEl = container.querySelector(
+              '.msg-conversation-listitem__message-snippet, .msg-conversation-card__message-snippet, p'
+            );
+            const timeEl = container.querySelector(
+              'time, .msg-conversation-listitem__time-stamp, .msg-conversation-card__time-stamp'
+            );
+            const textLines = normalize(container.innerText).split(/ (?=[A-Z][a-z]+\\b)/).map(normalize).filter(Boolean);
+            const name = normalize(nameEl ? nameEl.textContent : "") || textLines[0] || "";
+            const latest = normalize(snippetEl ? snippetEl.textContent : "") || textLines.slice(1).join(" ");
+            const lastSenderMatch = latest.match(/^([^:]{1,60}):\\s+(.+)$/);
+            const unread = /unread/i.test(container.className || "") || container.querySelector('[aria-label*="unread" i]') !== null;
+
+            return {
+              thread_id: href.split('/messaging/thread/')[1]?.split(/[/?#]/)[0] || href,
+              name,
+              thread_url: href,
+              latest_message: lastSenderMatch ? normalize(lastSenderMatch[2]) : latest,
+              last_sender: lastSenderMatch ? normalize(lastSenderMatch[1]) : "",
+              timestamp_text: normalize(timeEl ? timeEl.textContent : ""),
+              unread,
+            };
+          };
+
+          for (const container of containers) {
+            const item = readContainer(container);
+            if (item && item.name) items.push(item);
+            if (items.length >= limit) return items;
+          }
+          for (const anchor of fallbackAnchors) {
+            const container = anchor.closest('li') || anchor.closest('[role="listitem"]') || anchor;
+            const item = readContainer(container);
+            if (item && item.name) items.push(item);
+            if (items.length >= limit) return items;
+          }
+          return items;
+        }
+        """
+        raw_threads = page.evaluate(script, limit)
+        return [LinkedInMessageThread(**item) for item in raw_threads]
 
     def _reconcile_single_connection(self, page: Page, candidate: dict) -> LinkedInReconcileResult:
         contact_id = str(candidate.get("contact_id") or "")

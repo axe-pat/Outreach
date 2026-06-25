@@ -2395,6 +2395,163 @@ def apply_linkedin_reconcile_results(
     }
 
 
+def linkedin_message_state_path(settings: OutreachSettings) -> Path:
+    return settings.resolved_tracking_workspace_dir / "linkedin_message_state.json"
+
+
+def load_linkedin_message_state(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {
+            "seen_thread_ids": [],
+            "last_snapshot_at": "",
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {
+            "seen_thread_ids": [],
+            "last_snapshot_at": "",
+        }
+    seen = payload.get("seen_thread_ids") or []
+    if not isinstance(seen, list):
+        seen = []
+    return {
+        **payload,
+        "seen_thread_ids": [str(item) for item in seen if str(item).strip()],
+    }
+
+
+def save_linkedin_message_state(path: Path, state: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def message_thread_key(thread: dict) -> str:
+    return str(thread.get("thread_id") or thread.get("thread_url") or "").strip()
+
+
+def normalize_person_name(value: str) -> str:
+    return normalize_dedupe_text(re.sub(r"\s+", " ", value or ""))
+
+
+def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]) -> ContactRecord | None:
+    thread_name = normalize_person_name(str(thread.get("name") or ""))
+    if not thread_name:
+        return None
+    for contact in contacts:
+        if normalize_person_name(contact.full_name) == thread_name:
+            return contact
+    for contact in contacts:
+        contact_name = normalize_person_name(contact.full_name)
+        if contact_name and (thread_name in contact_name or contact_name in thread_name):
+            return contact
+    return None
+
+
+def latest_invite_note_for_contact(contact_id: str, touchpoints: list[TouchpointRecord]) -> str:
+    latest = latest_invite_touchpoint_for_contact(
+        [item for item in touchpoints if item.contact_id == contact_id]
+    )
+    return latest.message_text if latest else ""
+
+
+def message_thread_has_reply(thread: dict, original_invite_note: str = "") -> bool:
+    latest_message = str(thread.get("latest_message") or "").strip()
+    last_sender = str(thread.get("last_sender") or "").strip().lower()
+    if not latest_message:
+        return False
+    if last_sender and last_sender not in {"you", "akshat"}:
+        return True
+
+    latest_lower = latest_message.lower()
+    original_lower = original_invite_note.lower().strip()
+    system_fragments = [
+        "you are now connected",
+        "is now a connection",
+        "accepted your invitation",
+        "accepted your invite",
+        "sent an invitation",
+    ]
+    if any(fragment in latest_lower for fragment in system_fragments):
+        return False
+    if original_lower and latest_lower in original_lower:
+        return False
+    if latest_lower.startswith("you:"):
+        return False
+    return bool(thread.get("unread"))
+
+
+def build_linkedin_message_reconcile_results(
+    *,
+    threads: list[dict],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    state: dict[str, object],
+    include_seen: bool = False,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    seen_thread_ids = {str(item) for item in state.get("seen_thread_ids", []) if str(item).strip()}
+    all_thread_ids = set(seen_thread_ids)
+    results: list[dict[str, object]] = []
+
+    for thread in threads:
+        key = message_thread_key(thread)
+        if not key:
+            continue
+        all_thread_ids.add(key)
+        is_new_thread = key not in seen_thread_ids
+        if not include_seen and not is_new_thread:
+            continue
+
+        contact = match_contact_for_message_thread(thread, contacts)
+        if contact is None:
+            results.append(
+                {
+                    "thread_id": key,
+                    "name": thread.get("name", ""),
+                    "status": "unknown",
+                    "detail": "Message thread did not match a workbook contact.",
+                    "thread_url": thread.get("thread_url", ""),
+                    "latest_message": thread.get("latest_message", ""),
+                    "is_new_thread": is_new_thread,
+                }
+            )
+            continue
+
+        original_invite_note = latest_invite_note_for_contact(contact.contact_id, touchpoints)
+        has_reply = message_thread_has_reply(thread, original_invite_note)
+        status = "replied" if has_reply else "connected"
+        detail = (
+            "New LinkedIn message thread has an apparent inbound reply."
+            if has_reply
+            else "New LinkedIn message thread indicates the invite was accepted."
+        )
+        results.append(
+            {
+                "thread_id": key,
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "name": contact.full_name,
+                "linkedin_url": contact.linkedin_url,
+                "status": status,
+                "detail": detail,
+                "thread_url": thread.get("thread_url", ""),
+                "latest_message": thread.get("latest_message", ""),
+                "last_sender": thread.get("last_sender", ""),
+                "timestamp_text": thread.get("timestamp_text", ""),
+                "unread": bool(thread.get("unread")),
+                "is_new_thread": is_new_thread,
+                "original_invite_note": original_invite_note,
+            }
+        )
+
+    next_state = {
+        **state,
+        "seen_thread_ids": sorted(all_thread_ids),
+        "last_snapshot_at": utc_now_iso(),
+    }
+    return results, next_state
+
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -3780,6 +3937,122 @@ def reconcile_linkedin(
         typer.echo(
             f"- {item.get('name') or item.get('contact_id')} | status={item['normalized_status']} | "
             f"action={item['action']} | applied={item['applied']}"
+        )
+
+
+@app.command("reconcile-linkedin-messages")
+def reconcile_linkedin_messages(
+    snapshot_artifact: Annotated[
+        Path | None,
+        typer.Option(help="Optional pre-captured LinkedIn message snapshot artifact"),
+    ] = None,
+    live: Annotated[
+        bool,
+        typer.Option(help="Read LinkedIn messaging threads from the live browser session"),
+    ] = False,
+    bootstrap: Annotated[
+        bool,
+        typer.Option(help="Store the current message thread offset without marking accepts/replies"),
+    ] = False,
+    apply_changes: Annotated[
+        bool,
+        typer.Option("--apply", help="Update contacts/touchpoints and advance the message offset"),
+    ] = False,
+    update_offset: Annotated[
+        bool,
+        typer.Option(help="Advance the stored message offset after this run"),
+    ] = False,
+    include_seen: Annotated[
+        bool,
+        typer.Option(help="Also process threads already present in the stored offset"),
+    ] = False,
+    limit: Annotated[int, typer.Option(help="Maximum message threads to read")] = 50,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    state_path = linkedin_message_state_path(settings)
+    state = load_linkedin_message_state(state_path)
+
+    source_artifact = ""
+    if live:
+        LinkedInScraper(settings).require_live_cdp_session()
+        threads = [
+            item.__dict__
+            for item in LinkedInScraper(settings).snapshot_message_threads(limit=limit)
+        ]
+    elif snapshot_artifact is not None:
+        with snapshot_artifact.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        threads = list(payload.get("results") or payload.get("threads") or [])
+        source_artifact = str(snapshot_artifact)
+    else:
+        typer.echo("Pass --live or --snapshot-artifact to reconcile LinkedIn messages.")
+        raise typer.Exit(code=1)
+
+    message_results, next_state = build_linkedin_message_reconcile_results(
+        threads=threads,
+        contacts=workbook.list_contacts(),
+        touchpoints=workbook.list_touchpoints(),
+        state=state,
+        include_seen=include_seen,
+    )
+
+    if bootstrap:
+        save_linkedin_message_state(state_path, next_state)
+        artifact = write_artifact(
+            settings.artifacts_dir,
+            "linkedin-message-reconcile",
+            {
+                "bootstrap": True,
+                "apply": False,
+                "source_artifact": source_artifact,
+                "state_path": str(state_path),
+                "thread_count": len(threads),
+                "new_result_count": 0,
+                "results": [],
+            },
+        )
+        typer.echo(f"Bootstrapped LinkedIn message offset with {len(threads)} threads.")
+        typer.echo(f"State: {state_path}")
+        typer.echo(f"Artifact: {artifact}")
+        return
+
+    reconcile_result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=message_results,
+        source_artifact=source_artifact,
+        apply_changes=apply_changes,
+    )
+    should_update_offset = update_offset or apply_changes
+    if should_update_offset:
+        save_linkedin_message_state(state_path, next_state)
+
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-message-reconcile",
+        {
+            "bootstrap": False,
+            "live": live,
+            "apply": apply_changes,
+            "offset_updated": should_update_offset,
+            "source_artifact": source_artifact,
+            "state_path": str(state_path),
+            "thread_count": len(threads),
+            "new_result_count": len(message_results),
+            **reconcile_result,
+        },
+    )
+
+    typer.echo(f"Read {len(threads)} LinkedIn message threads.")
+    typer.echo(f"Detected {len(message_results)} new accepted/replied threads.")
+    typer.echo(f"Mode: {'apply' if apply_changes else 'dry run'}")
+    typer.echo(f"Offset updated: {should_update_offset}")
+    typer.echo(f"Summary: {reconcile_result['summary']}")
+    typer.echo(f"Artifact: {artifact}")
+    for item in reconcile_result["results"][: min(12, len(reconcile_result["results"]))]:
+        typer.echo(
+            f"- {item.get('name') or item.get('thread_id')} | status={item['normalized_status']} | "
+            f"action={item['action']} | follow_up={item['needs_follow_up']}"
         )
 
 

@@ -9,6 +9,7 @@ from outreach.cli import (
     apply_raw_candidate,
     build_linkedin_company_queue_items,
     build_linkedin_reconcile_queue_items,
+    build_linkedin_message_reconcile_results,
     build_organization_intel_items,
     build_relationship_loop_items,
     build_target_action_queue_items,
@@ -650,6 +651,85 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
     touchpoints = workbook.list_touchpoints()
     assert {item.status for item in touchpoints} == {"Accepted", "Replied"}
     assert any(item.message_kind == "linkedin_reply" for item in touchpoints)
+
+
+def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
+    contacts = [
+        ContactRecord(
+            contact_id="ct-roshni",
+            organization_id="org-workwhile",
+            full_name="Roshni Ramakrishnan",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/roshni/",
+        ),
+        ContactRecord(
+            contact_id="ct-owen",
+            organization_id="org-workwhile",
+            full_name="Owen Crook",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/owen/",
+        ),
+        ContactRecord(
+            contact_id="ct-old",
+            organization_id="org-workwhile",
+            full_name="Old Thread",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/old/",
+        ),
+    ]
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-roshni",
+            organization_id="org-workwhile",
+            contact_id="ct-roshni",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Roshni, I'd value a pointer on how technical PM candidates can stand out.",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-owen",
+            organization_id="org-workwhile",
+            contact_id="ct-owen",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Owen, would love a quick pointer on how builders work with product there.",
+        ),
+    ]
+    threads = [
+        {
+            "thread_id": "thread-roshni",
+            "name": "Roshni Ramakrishnan",
+            "thread_url": "https://www.linkedin.com/messaging/thread/thread-roshni/",
+            "latest_message": "You are now connected",
+            "last_sender": "",
+        },
+        {
+            "thread_id": "thread-owen",
+            "name": "Owen Crook",
+            "thread_url": "https://www.linkedin.com/messaging/thread/thread-owen/",
+            "latest_message": "Happy to help. What role are you looking at?",
+            "last_sender": "Owen Crook",
+            "unread": True,
+        },
+        {
+            "thread_id": "thread-old",
+            "name": "Old Thread",
+            "thread_url": "https://www.linkedin.com/messaging/thread/thread-old/",
+            "latest_message": "Already seen",
+            "last_sender": "Old Thread",
+        },
+    ]
+
+    results, next_state = build_linkedin_message_reconcile_results(
+        threads=threads,
+        contacts=contacts,
+        touchpoints=touchpoints,
+        state={"seen_thread_ids": ["thread-old"]},
+    )
+
+    assert [item["contact_id"] for item in results] == ["ct-roshni", "ct-owen"]
+    assert [item["status"] for item in results] == ["connected", "replied"]
+    assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old"}
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

@@ -117,11 +117,11 @@ Excel/CSV is the right first visual surface. The account view should include:
 The daily run should be small and action-oriented.
 
 1. Reconcile LinkedIn deltas.
-   - accepted invites
-   - still pending invites
-   - replies
-   - already connected profiles
-   - stale outreach
+   - read the LinkedIn message thread list from the last stored offset
+   - detect newly accepted invites because accepted contacts appear in messages
+   - detect accepted contacts who also sent a reply
+   - use the connections/profile page only as a fallback audit when the message
+     offset looks incomplete
 
 2. Draft and send safe follow-ups.
    - accepted invite with no reply
@@ -185,13 +185,26 @@ This should be read by future note, follow-up, and reply generators.
 
 Highest immediate value. Detect and record what happened after sends:
 
-- invite accepted
-- invite still pending
-- profile already connected
-- reply received
-- no connect path
+- accepted invite with no reply
+- accepted invite with a message/reply
+- existing thread already seen
+- unmatched message thread that needs manual mapping
+- stale pending invite only as a secondary audit
 
 This creates the closed loop. Without this, every next step is guessing.
+
+The primary implementation should maintain a LinkedIn message offset, not poll every
+recently invited profile. The reason is simple: if Akshat sends invites to everyone,
+accepted invites appear in LinkedIn messages. The daily loop should scan new message
+threads since the last offset, match them back to workbook contacts, and classify them
+as `connected` or `replied`.
+
+Profile/connection-page checks are still useful, but only as fallback:
+
+- when a message thread cannot be matched
+- when LinkedIn messages look incomplete
+- when we need to audit old pending invites
+- when a contact's profile state conflicts with the message offset
 
 ### 2. Accepted-Invite Follow-Up Engine
 

@@ -118,6 +118,25 @@ class LinkedInMessageThread:
     unread: bool = False
 
 
+@dataclass
+class LinkedInFollowupSendResult:
+    contact_id: str
+    organization_id: str
+    name: str
+    company: str
+    draft_kind: str
+    send_recommendation: str
+    draft_message: str
+    status: str
+    detail: str
+    latest_message: str = ""
+    live_latest_message: str = ""
+    live_last_sender: str = ""
+    thread_id: str = ""
+    thread_url: str = ""
+    screenshot_path: str | None = None
+
+
 class InviteCandidateTimeoutError(RuntimeError):
     """Raised when a single invite candidate takes too long to process."""
 
@@ -458,7 +477,13 @@ class LinkedInScraper:
             finally:
                 browser.close()
 
-    def snapshot_message_threads(self, limit: int = 50) -> list[LinkedInMessageThread]:
+    def snapshot_message_threads(
+        self,
+        limit: int = 50,
+        *,
+        deep: bool = False,
+        max_scrolls: int = 40,
+    ) -> list[LinkedInMessageThread]:
         self.require_live_cdp_session()
         with sync_playwright() as playwright:
             browser = self._connect_over_cdp(playwright)
@@ -476,11 +501,100 @@ class LinkedInScraper:
                     if not self._safe_goto(page, "https://www.linkedin.com/messaging/"):
                         raise RuntimeError("Could not load LinkedIn messaging.")
                     page.wait_for_timeout(2500)
+                    if deep:
+                        return self._extract_message_threads_deep(page, limit=limit, max_scrolls=max_scrolls)
                     return self._extract_message_threads(page, limit=limit)
                 finally:
                     self._close_page_safely(page)
             finally:
                 browser.close()
+
+    def send_followup_messages(
+        self,
+        drafts: list[dict],
+        *,
+        execute: bool = False,
+        limit: int = 25,
+        start_at: int = 0,
+        include_optional: bool = False,
+        max_scrolls: int = 60,
+        on_result=None,
+    ) -> list[LinkedInFollowupSendResult]:
+        self.require_live_cdp_session()
+        eligible = []
+        for draft in drafts:
+            if str(draft.get("send_recommendation") or "") == "optional" and not include_optional:
+                continue
+            eligible.append(draft)
+        batch = eligible[start_at : start_at + limit]
+
+        with sync_playwright() as playwright:
+            browser = self._connect_over_cdp(playwright)
+            try:
+                context = browser.contexts[0]
+                preflight = self._session_preflight(context, target_url="https://www.linkedin.com/messaging/")
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before follow-up send: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                page = context.new_page()
+                page.set_default_timeout(15000)
+                results: list[LinkedInFollowupSendResult] = []
+                try:
+                    if not self._safe_goto(page, "https://www.linkedin.com/messaging/"):
+                        raise RuntimeError("Could not load LinkedIn messaging.")
+                    page.wait_for_timeout(2500)
+                    for draft in batch:
+                        result = self._send_single_followup_from_messages(
+                            page,
+                            draft=draft,
+                            execute=execute,
+                            max_scrolls=max_scrolls,
+                        )
+                        results.append(result)
+                        if on_result is not None:
+                            on_result(draft, result, results)
+                        page.wait_for_timeout(800)
+                    return results
+                finally:
+                    self._close_page_safely(page)
+            finally:
+                browser.close()
+
+    def _extract_message_threads_deep(
+        self,
+        page: Page,
+        *,
+        limit: int = 50,
+        max_scrolls: int = 40,
+    ) -> list[LinkedInMessageThread]:
+        seen: dict[str, LinkedInMessageThread] = {}
+        stale_scrolls = 0
+        self._scroll_message_list(page, reset=True)
+        page.wait_for_timeout(700)
+
+        for _ in range(max_scrolls + 1):
+            before_count = len(seen)
+            for thread in self._extract_message_threads(page, limit=limit):
+                if thread.thread_id and thread.thread_id not in seen:
+                    seen[thread.thread_id] = thread
+            if len(seen) >= limit:
+                break
+
+            scroll_state = self._scroll_message_list(page)
+            page.wait_for_timeout(900)
+            if len(seen) == before_count:
+                stale_scrolls += 1
+            else:
+                stale_scrolls = 0
+            if stale_scrolls >= 3 or bool(scroll_state.get("at_bottom")):
+                for thread in self._extract_message_threads(page, limit=limit):
+                    if thread.thread_id and thread.thread_id not in seen:
+                        seen[thread.thread_id] = thread
+                break
+
+        return list(seen.values())[:limit]
 
     def _extract_message_threads(self, page: Page, limit: int = 50) -> list[LinkedInMessageThread]:
         script = """
@@ -548,6 +662,196 @@ class LinkedInScraper:
         """
         raw_threads = page.evaluate(script, limit)
         return [LinkedInMessageThread(**item) for item in raw_threads]
+
+    def _scroll_message_list(self, page: Page, *, reset: bool = False) -> dict:
+        script = """
+        (reset) => {
+          const scroller = document.querySelector('ul.msg-conversations-container__conversations-list')
+            || document.querySelector('.msg-conversations-container__conversations-list')
+            || document.querySelector('[data-view-name="messages-conversation-list"]')
+            || document.querySelector('[role="list"][aria-label*="conversation" i]');
+          const target = scroller || document.scrollingElement || document.documentElement;
+          if (!target) return { at_bottom: true, top: 0, height: 0, scroll_height: 0 };
+          if (reset) target.scrollTop = 0;
+          else target.scrollTop += Math.max(500, Math.floor((target.clientHeight || window.innerHeight || 700) * 0.85));
+          return {
+            at_bottom: target.scrollTop + target.clientHeight >= target.scrollHeight - 8,
+            top: target.scrollTop,
+            height: target.clientHeight,
+            scroll_height: target.scrollHeight,
+          };
+        }
+        """
+        return page.evaluate(script, reset)
+
+    def _send_single_followup_from_messages(
+        self,
+        page: Page,
+        *,
+        draft: dict,
+        execute: bool,
+        max_scrolls: int,
+    ) -> LinkedInFollowupSendResult:
+        expected_latest = str(draft.get("latest_message") or "").strip()
+        message = str(draft.get("draft_message") or "").strip()
+        base = {
+            "contact_id": str(draft.get("contact_id") or ""),
+            "organization_id": str(draft.get("organization_id") or ""),
+            "name": str(draft.get("name") or ""),
+            "company": str(draft.get("company") or ""),
+            "draft_kind": str(draft.get("draft_kind") or ""),
+            "send_recommendation": str(draft.get("send_recommendation") or ""),
+            "draft_message": message,
+            "latest_message": expected_latest,
+        }
+        if not message:
+            return LinkedInFollowupSendResult(**base, status="skipped", detail="Missing draft message.")
+
+        if not page.url.startswith("https://www.linkedin.com/messaging"):
+            self._safe_goto(page, "https://www.linkedin.com/messaging/")
+            page.wait_for_timeout(1500)
+
+        live_thread = self._find_message_thread_for_draft(page, draft=draft, max_scrolls=max_scrolls)
+        if live_thread is None:
+            return LinkedInFollowupSendResult(
+                **base,
+                status="skipped",
+                detail="Could not find the LinkedIn message thread in the live inbox.",
+            )
+
+        live_latest = live_thread.latest_message.strip()
+        if expected_latest and self._normalize_message_text(live_latest) != self._normalize_message_text(expected_latest):
+            return LinkedInFollowupSendResult(
+                **base,
+                status="skipped_latest_changed",
+                detail="Live latest message changed since the draft artifact was created.",
+                live_latest_message=live_latest,
+                live_last_sender=live_thread.last_sender,
+                thread_id=live_thread.thread_id,
+                thread_url=live_thread.thread_url,
+            )
+
+        if not execute:
+            return LinkedInFollowupSendResult(
+                **base,
+                status="dry_run_ready",
+                detail="Thread found and latest message matched; dry run only.",
+                live_latest_message=live_latest,
+                live_last_sender=live_thread.last_sender,
+                thread_id=live_thread.thread_id,
+                thread_url=live_thread.thread_url,
+            )
+
+        if not self._click_message_thread(page, live_thread):
+            return LinkedInFollowupSendResult(
+                **base,
+                status="send_error",
+                detail="Could not open the matched LinkedIn message thread.",
+                live_latest_message=live_latest,
+                live_last_sender=live_thread.last_sender,
+                thread_id=live_thread.thread_id,
+                thread_url=live_thread.thread_url,
+                screenshot_path=self._save_screenshot(page, "followup-open-error"),
+            )
+        page.wait_for_timeout(1200)
+
+        try:
+            editor = page.locator(
+                '.msg-form__contenteditable[contenteditable="true"], '
+                'div[role="textbox"][contenteditable="true"]'
+            ).last
+            editor.wait_for(state="visible", timeout=8000)
+            editor.click()
+            editor.fill(message)
+            page.wait_for_timeout(500)
+            send_button = page.locator('button.msg-form__send-button, button[aria-label="Send"]').last
+            send_button.wait_for(state="visible", timeout=8000)
+            send_button.click()
+            page.wait_for_timeout(1800)
+        except Exception as exc:
+            return LinkedInFollowupSendResult(
+                **base,
+                status="send_error",
+                detail=f"LinkedIn send failed: {exc}",
+                live_latest_message=live_latest,
+                live_last_sender=live_thread.last_sender,
+                thread_id=live_thread.thread_id,
+                thread_url=live_thread.thread_url,
+                screenshot_path=self._save_screenshot(page, "followup-send-error"),
+            )
+
+        return LinkedInFollowupSendResult(
+            **base,
+            status="sent",
+            detail="Follow-up sent.",
+            live_latest_message=live_latest,
+            live_last_sender=live_thread.last_sender,
+            thread_id=live_thread.thread_id,
+            thread_url=live_thread.thread_url,
+        )
+
+    def _find_message_thread_for_draft(
+        self,
+        page: Page,
+        *,
+        draft: dict,
+        max_scrolls: int,
+    ) -> LinkedInMessageThread | None:
+        expected_thread_id = str(draft.get("thread_id") or "").strip()
+        expected_name = self._normalize_message_text(str(draft.get("name") or ""))
+        expected_first_name = expected_name.split(" ", maxsplit=1)[0] if expected_name else ""
+
+        self._scroll_message_list(page, reset=True)
+        page.wait_for_timeout(500)
+        for _ in range(max_scrolls + 1):
+            for thread in self._extract_message_threads(page, limit=100):
+                thread_name = self._normalize_message_text(thread.name)
+                if expected_thread_id and thread.thread_id == expected_thread_id:
+                    return thread
+                if expected_name and thread_name == expected_name:
+                    return thread
+                if expected_first_name and thread_name.split(" ", maxsplit=1)[0] == expected_first_name:
+                    return thread
+            state = self._scroll_message_list(page)
+            page.wait_for_timeout(650)
+            if bool(state.get("at_bottom")):
+                break
+        return None
+
+    def _click_message_thread(self, page: Page, thread: LinkedInMessageThread) -> bool:
+        script = """
+        ({ threadId, name }) => {
+          const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+          const containers = Array.from(document.querySelectorAll(
+            'li.msg-conversation-listitem, .msg-conversation-listitem, [data-view-name="messages-conversation-list-item"]'
+          ));
+          for (const container of containers) {
+            const anchor = container.querySelector('a[href*="/messaging/thread/"]') || (
+              container.matches && container.matches('a[href*="/messaging/thread/"]') ? container : null
+            );
+            const href = anchor ? anchor.href : "";
+            const candidateId = href
+              ? (href.split('/messaging/thread/')[1]?.split(/[/?#]/)[0] || href)
+              : "";
+            const nameEl = container.querySelector(
+              '.msg-conversation-listitem__participant-names, [data-anonymize="person-name"], h3, .entity-result__title-text'
+            );
+            const candidateName = normalize(nameEl ? nameEl.textContent : container.innerText.split('\\n')[0]);
+            if ((threadId && candidateId === threadId) || (name && candidateName === normalize(name))) {
+              (anchor || container).click();
+              return true;
+            }
+          }
+          return false;
+        }
+        """
+        try:
+            return bool(page.evaluate(script, {"threadId": thread.thread_id, "name": thread.name}))
+        except PlaywrightError:
+            return False
+
+    def _normalize_message_text(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value or "").strip().lower()
 
     def _reconcile_single_connection(self, page: Page, candidate: dict) -> LinkedInReconcileResult:
         contact_id = str(candidate.get("contact_id") or "")

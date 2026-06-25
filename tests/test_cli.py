@@ -35,10 +35,12 @@ from outreach.cli import (
     parse_batch_year,
     parse_team_size_headcount,
     pass_relevance,
+    persist_linkedin_followup_send_result,
     recommend_auto_send_limit,
     resolve_pass_definitions,
     score_opportunity_relevance,
     select_invite_candidates,
+    summarize_linkedin_followup_actions,
     startup_pool_metadata,
     startup_pool_mode,
     startup_pool_send_min_score,
@@ -48,6 +50,7 @@ from outreach.cli import (
 )
 from outreach.config import OutreachSettings
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
+from outreach.services.linkedin import LinkedInFollowupSendResult
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
 
 
@@ -916,6 +919,77 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert "AI agent analytics work" in str(drafts[5]["draft_message"])
     assert "could translate to what you're building" in str(drafts[5]["draft_message"])
     assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
+
+
+def test_summarize_linkedin_followup_actions_counts_daily_work() -> None:
+    summary = summarize_linkedin_followup_actions(
+        [
+            {
+                "company": "Snyk",
+                "draft_kind": "accepted_follow_up",
+                "send_recommendation": "safe_to_review",
+            },
+            {
+                "company": "Snyk",
+                "draft_kind": "conversation_reply",
+                "send_recommendation": "review",
+            },
+            {
+                "company": "Sortly",
+                "draft_kind": "polite_close_reply",
+                "send_recommendation": "optional",
+            },
+        ],
+        [
+            {"action": "missing_contact"},
+            {"action": "mark_connected"},
+        ],
+    )
+
+    assert summary["follow_up_candidates"] == 1
+    assert summary["reply_candidates"] == 2
+    assert summary["optional_closes"] == 1
+    assert summary["missing_contacts"] == 1
+    assert summary["by_company"] == {"Snyk": 2, "Sortly": 1}
+
+
+def test_persist_linkedin_followup_send_result_records_touchpoint(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-mehak",
+            organization_id="org-snyk",
+            full_name="Mehak Singh",
+            status="Connected",
+        )
+    )
+    result = LinkedInFollowupSendResult(
+        contact_id="ct-mehak",
+        organization_id="org-snyk",
+        name="Mehak Singh",
+        company="Snyk",
+        draft_kind="accepted_follow_up",
+        send_recommendation="safe_to_review",
+        draft_message="Thanks for connecting, Mehak.",
+        status="sent",
+        detail="Follow-up sent.",
+    )
+
+    created = persist_linkedin_followup_send_result(
+        workbook=workbook,
+        result=result,
+        source_artifact=tmp_path / "drafts.json",
+        send_artifact=tmp_path / "send.json",
+    )
+
+    assert created is True
+    touchpoints = workbook.list_touchpoints()
+    assert len(touchpoints) == 1
+    assert touchpoints[0].message_kind == "linkedin_followup"
+    contacts = {item.contact_id: item for item in workbook.list_contacts()}
+    assert contacts["ct-mehak"].status == "Followed up"
+    assert contacts["ct-mehak"].last_contacted_at
 
 
 def test_attach_search_urls_to_candidates_uses_first_matching_pass() -> None:

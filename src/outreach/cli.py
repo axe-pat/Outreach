@@ -15,7 +15,7 @@ from outreach.discovery.adapters import BuiltInCompaniesAdapter, SourceAdapter, 
 from outreach.discovery.http import HttpTextDownloader
 from outreach.discovery.registry import get_source_definition, list_source_definitions
 from outreach.scoring import score_candidate
-from outreach.services.linkedin import FilterRunResult, LinkedInScraper
+from outreach.services.linkedin import FilterRunResult, LinkedInFollowupSendResult, LinkedInScraper
 from outreach.services.notes import NoteGenerator
 from outreach.models import CandidateProfile, LinkedInCompanyQueueItem
 from outreach.resume_jobs_bridge import (
@@ -2818,6 +2818,140 @@ def build_linkedin_followup_drafts(
     return drafts
 
 
+def summarize_linkedin_followup_actions(drafts: list[dict], reconcile_results: list[dict]) -> dict[str, object]:
+    summary = {
+        "follow_up_candidates": 0,
+        "reply_candidates": 0,
+        "optional_closes": 0,
+        "missing_contacts": 0,
+        "by_company": {},
+    }
+    for item in reconcile_results:
+        if str(item.get("action") or "") == "missing_contact":
+            summary["missing_contacts"] = int(summary["missing_contacts"]) + 1
+    by_company: dict[str, int] = {}
+    for draft in drafts:
+        if str(draft.get("draft_kind") or "") == "accepted_follow_up":
+            summary["follow_up_candidates"] = int(summary["follow_up_candidates"]) + 1
+        else:
+            summary["reply_candidates"] = int(summary["reply_candidates"]) + 1
+        if str(draft.get("send_recommendation") or "") == "optional":
+            summary["optional_closes"] = int(summary["optional_closes"]) + 1
+        company = str(draft.get("company") or "(unknown)")
+        by_company[company] = by_company.get(company, 0) + 1
+    summary["by_company"] = dict(sorted(by_company.items(), key=lambda item: (-item[1], item[0].lower())))
+    return summary
+
+
+def persist_linkedin_followup_send_result(
+    *,
+    workbook: OutreachWorkbook,
+    result: LinkedInFollowupSendResult,
+    source_artifact: Path,
+    send_artifact: Path,
+) -> bool:
+    if result.status != "sent":
+        return False
+    sent_at = utc_now_iso()
+    _, created = workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id=workbook.make_touchpoint_id(
+                result.organization_id,
+                result.contact_id,
+                OutreachChannel.LINKEDIN.value,
+                result.draft_message,
+                source_artifact=str(send_artifact),
+            ),
+            organization_id=result.organization_id,
+            contact_id=result.contact_id,
+            channel=OutreachChannel.LINKEDIN,
+            status="Sent",
+            message_kind="linkedin_followup",
+            message_text=result.draft_message,
+            recorded_at=sent_at,
+            sent_at=sent_at,
+            source_artifact=str(source_artifact),
+            notes=f"draft_kind={result.draft_kind} | send_artifact={send_artifact}",
+        )
+    )
+    workbook.update_contact(result.contact_id, status="Followed up", last_contacted_at=sent_at)
+    return created
+
+
+def execute_linkedin_followup_send(
+    *,
+    settings: OutreachSettings,
+    draft_artifact: Path,
+    drafts: list[dict],
+    execute: bool,
+    limit: int,
+    start_at: int,
+    include_optional: bool,
+) -> tuple[Path, Path, dict[str, int], int]:
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    scraper = LinkedInScraper(settings)
+    progress_artifact = settings.artifacts_dir / f"{draft_artifact.stem}-{artifact_timestamp()}-followup-send-progress.json"
+    progress_artifact.parent.mkdir(parents=True, exist_ok=True)
+    status_counts: dict[str, int] = {}
+    touchpoints_added = 0
+
+    def _write_progress(results: list[LinkedInFollowupSendResult]) -> None:
+        progress_artifact.write_text(
+            json.dumps(
+                {
+                    "source_artifact": str(draft_artifact),
+                    "execute": execute,
+                    "limit": limit,
+                    "start_at": start_at,
+                    "include_optional": include_optional,
+                    "count": len(results),
+                    "results": [item.__dict__ for item in results],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def _on_result(_draft: dict, result: LinkedInFollowupSendResult, results: list[LinkedInFollowupSendResult]) -> None:
+        nonlocal touchpoints_added
+        status_counts[result.status] = status_counts.get(result.status, 0) + 1
+        if execute and result.status == "sent":
+            if persist_linkedin_followup_send_result(
+                workbook=workbook,
+                result=result,
+                source_artifact=draft_artifact,
+                send_artifact=progress_artifact,
+            ):
+                touchpoints_added += 1
+        _write_progress(results)
+
+    results = scraper.send_followup_messages(
+        drafts,
+        execute=execute,
+        limit=limit,
+        start_at=start_at,
+        include_optional=include_optional,
+        on_result=_on_result,
+    )
+    artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-followup-send-results",
+        {
+            "source_artifact": str(draft_artifact),
+            "progress_artifact": str(progress_artifact),
+            "execute": execute,
+            "limit": limit,
+            "start_at": start_at,
+            "include_optional": include_optional,
+            "count": len(results),
+            "status_counts": status_counts,
+            "touchpoints_added": touchpoints_added,
+            "results": [item.__dict__ for item in results],
+        },
+    )
+    return artifact, progress_artifact, status_counts, touchpoints_added
+
+
 app = typer.Typer(help="Outreach engine CLI")
 
 
@@ -4232,6 +4366,10 @@ def reconcile_linkedin_messages(
         bool,
         typer.Option(help="Also process threads already present in the stored offset"),
     ] = False,
+    deep: Annotated[
+        bool,
+        typer.Option(help="Scroll the LinkedIn inbox to capture older accepted/replied threads"),
+    ] = False,
     limit: Annotated[int, typer.Option(help="Maximum message threads to read")] = 50,
 ) -> None:
     settings = OutreachSettings()
@@ -4244,7 +4382,7 @@ def reconcile_linkedin_messages(
         LinkedInScraper(settings).require_live_cdp_session()
         threads = [
             item.__dict__
-            for item in LinkedInScraper(settings).snapshot_message_threads(limit=limit)
+            for item in LinkedInScraper(settings).snapshot_message_threads(limit=limit, deep=deep)
         ]
     elif snapshot_artifact is not None:
         with snapshot_artifact.open(encoding="utf-8") as handle:
@@ -4299,6 +4437,7 @@ def reconcile_linkedin_messages(
         {
             "bootstrap": False,
             "live": live,
+            "deep": deep,
             "apply": apply_changes,
             "offset_updated": should_update_offset,
             "source_artifact": source_artifact,
@@ -4320,6 +4459,125 @@ def reconcile_linkedin_messages(
             f"- {item.get('name') or item.get('thread_id')} | status={item['normalized_status']} | "
             f"action={item['action']} | follow_up={item['needs_follow_up']}"
         )
+
+
+@app.command("pull-linkedin-followups")
+def pull_linkedin_followups(
+    snapshot_artifact: Annotated[
+        Path | None,
+        typer.Option(help="Optional pre-captured LinkedIn message snapshot artifact"),
+    ] = None,
+    live: Annotated[
+        bool,
+        typer.Option(help="Read LinkedIn messaging threads from the live browser session"),
+    ] = True,
+    include_seen: Annotated[
+        bool,
+        typer.Option(help="Also process threads already present in the stored message offset"),
+    ] = True,
+    apply_reconcile: Annotated[
+        bool,
+        typer.Option("--apply-reconcile", help="Record accepted/replied statuses before drafting follow-ups"),
+    ] = False,
+    update_offset: Annotated[
+        bool,
+        typer.Option(help="Advance the stored message offset after this pull"),
+    ] = False,
+    limit: Annotated[int, typer.Option(help="Maximum message threads to read")] = 75,
+    draft_limit: Annotated[int, typer.Option(help="Maximum drafts to emit")] = 50,
+    deep: Annotated[
+        bool,
+        typer.Option(help="Scroll the LinkedIn inbox to capture older accepted/replied threads"),
+    ] = True,
+) -> None:
+    settings = OutreachSettings()
+    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
+    state_path = linkedin_message_state_path(settings)
+    state = load_linkedin_message_state(state_path)
+
+    source_artifact = ""
+    if live:
+        LinkedInScraper(settings).require_live_cdp_session()
+        threads = [
+            item.__dict__
+            for item in LinkedInScraper(settings).snapshot_message_threads(limit=limit, deep=deep)
+        ]
+    elif snapshot_artifact is not None:
+        with snapshot_artifact.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        threads = list(payload.get("results") or payload.get("threads") or [])
+        source_artifact = str(snapshot_artifact)
+    else:
+        typer.echo("Pass --live or --snapshot-artifact to pull LinkedIn follow-ups.")
+        raise typer.Exit(code=1)
+
+    message_results, next_state = build_linkedin_message_reconcile_results(
+        threads=threads,
+        contacts=workbook.list_contacts(),
+        touchpoints=workbook.list_touchpoints(),
+        state=state,
+        include_seen=include_seen,
+    )
+    reconcile_result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=message_results,
+        source_artifact=source_artifact,
+        apply_changes=apply_reconcile,
+    )
+    if update_offset or apply_reconcile:
+        save_linkedin_message_state(state_path, next_state)
+
+    reconcile_artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-message-reconcile",
+        {
+            "bootstrap": False,
+            "live": live,
+            "deep": deep,
+            "apply": apply_reconcile,
+            "offset_updated": update_offset or apply_reconcile,
+            "source_artifact": source_artifact,
+            "state_path": str(state_path),
+            "thread_count": len(threads),
+            "new_result_count": len(message_results),
+            **reconcile_result,
+        },
+    )
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=list(reconcile_result.get("results") or []),
+        organizations=workbook.list_organizations(),
+        contacts=workbook.list_contacts(),
+    )[:draft_limit]
+    action_summary = summarize_linkedin_followup_actions(drafts, list(reconcile_result.get("results") or []))
+    draft_artifact = write_artifact(
+        settings.artifacts_dir,
+        "linkedin-followup-drafts",
+        {
+            "source_artifact": str(reconcile_artifact),
+            "count": len(drafts),
+            "summary": action_summary,
+            "results": drafts,
+        },
+    )
+
+    typer.echo("LinkedIn follow-up action list")
+    typer.echo(f"- Follow up with accepted invites: {action_summary['follow_up_candidates']}")
+    typer.echo(f"- Reply to inbound messages: {action_summary['reply_candidates']}")
+    typer.echo(f"- Optional polite closes: {action_summary['optional_closes']}")
+    typer.echo(f"- Missing workbook contacts: {action_summary['missing_contacts']}")
+    company_counts = action_summary.get("by_company") or {}
+    if company_counts:
+        typer.echo("- Top companies to clear:")
+        for company, count in list(company_counts.items())[:8]:
+            typer.echo(f"  {company}: {count}")
+    typer.echo(f"Reconcile artifact: {reconcile_artifact}")
+    typer.echo(f"Draft artifact: {draft_artifact}")
+    for draft in drafts[: min(12, len(drafts))]:
+        typer.echo(
+            f"- {draft['name']} | {draft.get('title') or '(missing title)'} | {draft['company']} | "
+            f"{draft['draft_kind']} | {draft['send_recommendation']}"
+        )
+        typer.echo(f"  {draft['draft_message']}")
 
 
 @app.command("draft-linkedin-followups")
@@ -4374,6 +4632,51 @@ def draft_linkedin_followups(
         if draft.get("latest_message") and draft.get("last_sender") != "You":
             typer.echo(f"  Latest from {draft.get('last_sender') or 'contact'}: {draft['latest_message']}")
         typer.echo(f"  {draft['draft_message']}")
+
+
+@app.command("send-linkedin-followups")
+def send_linkedin_followups(
+    draft_artifact: Annotated[
+        Path,
+        typer.Option(help="Path to a linkedin-followup-drafts artifact"),
+    ],
+    limit: Annotated[int, typer.Option(help="Maximum reviewed drafts to process")] = 25,
+    start_at: Annotated[int, typer.Option(help="Start offset into the reviewed draft list")] = 0,
+    include_optional: Annotated[
+        bool,
+        typer.Option(help="Include optional polite-close drafts"),
+    ] = False,
+    execute: Annotated[
+        bool,
+        typer.Option(help="Actually send follow-ups instead of doing a guarded dry run"),
+    ] = False,
+) -> None:
+    settings = OutreachSettings()
+    if execute:
+        LinkedInScraper(settings).require_live_cdp_session()
+
+    with draft_artifact.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    drafts = list(payload.get("results") or [])
+    if not drafts:
+        typer.echo("No follow-up drafts found in artifact.")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Processing LinkedIn follow-ups from {draft_artifact}")
+    typer.echo(f"Mode: {'execute' if execute else 'dry run'}")
+    artifact, progress_artifact, status_counts, touchpoints_added = execute_linkedin_followup_send(
+        settings=settings,
+        draft_artifact=draft_artifact,
+        drafts=drafts,
+        execute=execute,
+        limit=limit,
+        start_at=start_at,
+        include_optional=include_optional,
+    )
+    typer.echo(f"Status summary: {status_counts}")
+    typer.echo(f"Artifact: {artifact}")
+    typer.echo(f"Progress artifact: {progress_artifact}")
+    typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
 
 
 @app.command("send-invites")

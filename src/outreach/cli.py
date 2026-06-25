@@ -2501,6 +2501,9 @@ def connected_result_needs_follow_up(result: dict) -> bool:
     original_invite_note = str(result.get("original_invite_note") or "").strip()
     if not latest_message:
         return True
+    latest_lower = latest_message.lower()
+    if latest_lower.startswith("you sent"):
+        return False
     if last_sender in {"you", "akshat"}:
         if original_invite_note and normalize_dedupe_text(latest_message) != normalize_dedupe_text(original_invite_note):
             return False

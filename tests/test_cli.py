@@ -619,6 +619,15 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
             linkedin_url="https://www.linkedin.com/in/owen/",
         )
     )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-deepanshu",
+            organization_id="org-workwhile",
+            full_name="Deepanshu Johar",
+            status="Invited",
+            linkedin_url="https://www.linkedin.com/in/deepanshu/",
+        )
+    )
 
     result = apply_linkedin_reconcile_results(
         workbook=workbook,
@@ -637,18 +646,29 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
                 "status": "replied",
                 "message_text": "Happy to help. What role are you looking at?",
             },
+            {
+                "contact_id": "ct-deepanshu",
+                "name": "Deepanshu Johar",
+                "linkedin_url": "https://www.linkedin.com/in/deepanshu/",
+                "status": "connected",
+                "latest_message": "You sent an attachment",
+                "last_sender": "",
+            },
         ],
         source_artifact="artifacts/reconcile.json",
         apply_changes=True,
     )
 
-    assert result["summary"]["connected"] == 1
+    assert result["summary"]["connected"] == 2
     assert result["summary"]["replied"] == 1
-    assert result["summary"]["updated_contacts"] == 2
-    assert result["summary"]["touchpoints_added"] == 2
+    assert result["summary"]["updated_contacts"] == 3
+    assert result["summary"]["touchpoints_added"] == 3
     contacts = {item.contact_id: item for item in workbook.list_contacts()}
     assert contacts["ct-roshni"].status == "Connected"
     assert contacts["ct-owen"].status == "Replied"
+    assert contacts["ct-deepanshu"].status == "Connected"
+    deepanshu_result = next(item for item in result["results"] if item["contact_id"] == "ct-deepanshu")
+    assert deepanshu_result["needs_follow_up"] is False
     touchpoints = workbook.list_touchpoints()
     assert {item.status for item in touchpoints} == {"Accepted", "Replied"}
     assert any(item.message_kind == "linkedin_reply" for item in touchpoints)

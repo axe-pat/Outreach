@@ -513,6 +513,7 @@ class LinkedInScraper:
             const timeText = normalize(timeEl ? timeEl.textContent : "");
             const latest = normalize(snippetEl ? snippetEl.textContent : "") || textLines.slice(1).join(" ");
             const lastSenderMatch = latest.match(/^([^:]{1,60}):\\s+(.+)$/);
+            const inferredLastSender = lastSenderMatch ? normalize(lastSenderMatch[1]) : (/^you sent\\b/i.test(latest) ? "You" : "");
             const unread = /unread/i.test(container.className || "") || container.querySelector('[aria-label*="unread" i]') !== null;
             const threadId = href
               ? (href.split('/messaging/thread/')[1]?.split(/[/?#]/)[0] || href)
@@ -525,7 +526,7 @@ class LinkedInScraper:
               name,
               thread_url: href,
               latest_message: lastSenderMatch ? normalize(lastSenderMatch[2]) : latest,
-              last_sender: lastSenderMatch ? normalize(lastSenderMatch[1]) : "",
+              last_sender: inferredLastSender,
               timestamp_text: timeText,
               unread,
             };

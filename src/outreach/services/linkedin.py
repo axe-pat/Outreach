@@ -137,6 +137,19 @@ class LinkedInFollowupSendResult:
     screenshot_path: str | None = None
 
 
+@dataclass
+class LinkedInContactInfoResult:
+    contact_id: str
+    organization_id: str
+    name: str
+    linkedin_url: str
+    status: str
+    detail: str
+    email: str = ""
+    contact_info_url: str = ""
+    screenshot_path: str | None = None
+
+
 class InviteCandidateTimeoutError(RuntimeError):
     """Raised when a single invite candidate takes too long to process."""
 
@@ -562,6 +575,111 @@ class LinkedInScraper:
             finally:
                 browser.close()
 
+    def extract_contact_info_emails(
+        self,
+        contacts: list[dict],
+        *,
+        limit: int = 10,
+        start_at: int = 0,
+    ) -> list[LinkedInContactInfoResult]:
+        self.require_live_cdp_session()
+        batch = [
+            contact
+            for contact in contacts
+            if str(contact.get("linkedin_url") or "").strip()
+        ][start_at : start_at + limit]
+
+        with sync_playwright() as playwright:
+            browser = self._connect_over_cdp(playwright)
+            try:
+                context = browser.contexts[0]
+                preflight = self._session_preflight(context)
+                if not preflight["ok"]:
+                    raise RuntimeError(
+                        "LinkedIn preflight failed before contact-info extraction: "
+                        f"url={preflight['current_url']} authwall_or_login={preflight['authwall_or_login']}"
+                    )
+                page = context.new_page()
+                page.set_default_timeout(15000)
+                try:
+                    results: list[LinkedInContactInfoResult] = []
+                    for contact in batch:
+                        results.append(self._extract_single_contact_info_email(page, contact))
+                        page.wait_for_timeout(700)
+                    return results
+                finally:
+                    self._close_page_safely(page)
+            finally:
+                browser.close()
+
+    def _extract_single_contact_info_email(self, page: Page, contact: dict) -> LinkedInContactInfoResult:
+        linkedin_url = str(contact.get("linkedin_url") or "").strip()
+        base = {
+            "contact_id": str(contact.get("contact_id") or ""),
+            "organization_id": str(contact.get("organization_id") or ""),
+            "name": str(contact.get("name") or contact.get("full_name") or ""),
+            "linkedin_url": linkedin_url,
+            "contact_info_url": self._contact_info_overlay_url(linkedin_url),
+        }
+        if not linkedin_url:
+            return LinkedInContactInfoResult(**base, status="skipped", detail="Missing LinkedIn URL.")
+
+        target_url = base["contact_info_url"] or linkedin_url
+        if not self._safe_goto(page, target_url, timeout_ms=20000):
+            return LinkedInContactInfoResult(
+                **base,
+                status="navigation_error",
+                detail="Could not load LinkedIn Contact Info overlay.",
+                screenshot_path=self._save_screenshot(page, "contact-info-navigation-error"),
+            )
+        page.wait_for_timeout(1500)
+        emails = self._extract_emails_from_text(self._body_preview(page))
+        if not emails:
+            try:
+                body_text = page.locator("body").inner_text(timeout=5000)
+            except PlaywrightError:
+                body_text = ""
+            emails = self._extract_emails_from_text(body_text)
+
+        if emails:
+            return LinkedInContactInfoResult(
+                **base,
+                status="found",
+                detail="Email found in LinkedIn Contact Info.",
+                email=emails[0],
+            )
+        if self._is_authwall_or_login(page):
+            return LinkedInContactInfoResult(
+                **base,
+                status="authwall_or_login",
+                detail="LinkedIn authwall/login appeared while reading Contact Info.",
+                screenshot_path=self._save_screenshot(page, "contact-info-authwall"),
+            )
+        return LinkedInContactInfoResult(
+            **base,
+            status="not_found",
+            detail="No email was listed in LinkedIn Contact Info.",
+        )
+
+    def _contact_info_overlay_url(self, linkedin_url: str) -> str:
+        normalized = self._normalize_linkedin_profile_url(linkedin_url)
+        if not normalized:
+            return ""
+        return f"{normalized}/overlay/contact-info/"
+
+    def _extract_emails_from_text(self, text: str) -> list[str]:
+        seen: set[str] = set()
+        emails: list[str] = []
+        for match in re.findall(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])", text or "", flags=re.I):
+            email = match.strip(".,;:()[]{}<>").lower()
+            domain = email.rsplit("@", maxsplit=1)[-1]
+            if domain in {"linkedin.com", "mail.linkedin.com"}:
+                continue
+            if email not in seen:
+                seen.add(email)
+                emails.append(email)
+        return emails
+
     def _extract_message_threads_deep(
         self,
         page: Page,
@@ -767,7 +885,17 @@ class LinkedInScraper:
             send_button = page.locator('button.msg-form__send-button, button[aria-label="Send"]').last
             send_button.wait_for(state="visible", timeout=8000)
             send_button.click()
-            page.wait_for_timeout(1800)
+            if not self._wait_for_sent_message_confirmation(page, message):
+                return LinkedInFollowupSendResult(
+                    **base,
+                    status="send_unverified",
+                    detail="Clicked Send, but the outgoing message did not appear in the open LinkedIn thread.",
+                    live_latest_message=live_latest,
+                    live_last_sender=live_thread.last_sender,
+                    thread_id=live_thread.thread_id,
+                    thread_url=live_thread.thread_url,
+                    screenshot_path=self._save_screenshot(page, "followup-send-unverified"),
+                )
         except Exception as exc:
             return LinkedInFollowupSendResult(
                 **base,
@@ -789,6 +917,33 @@ class LinkedInScraper:
             thread_id=live_thread.thread_id,
             thread_url=live_thread.thread_url,
         )
+
+    def _wait_for_sent_message_confirmation(self, page: Page, message: str) -> bool:
+        normalized_message = self._normalize_message_text(message)
+        if not normalized_message:
+            return False
+        script = """
+        ({ expected }) => {
+          const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+          const containers = Array.from(document.querySelectorAll([
+            '.msg-s-message-list',
+            '.msg-s-message-list-content',
+            '.msg-s-event-listitem',
+            '.msg-s-message-group',
+            '[data-event-urn]'
+          ].join(',')));
+          return containers.some((container) => normalize(container.innerText).includes(expected));
+        }
+        """
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                if bool(page.evaluate(script, {"expected": normalized_message})):
+                    return True
+            except PlaywrightError:
+                return False
+            page.wait_for_timeout(500)
+        return False
 
     def _find_message_thread_for_draft(
         self,
@@ -838,17 +993,52 @@ class LinkedInScraper:
             );
             const candidateName = normalize(nameEl ? nameEl.textContent : container.innerText.split('\\n')[0]);
             if ((threadId && candidateId === threadId) || (name && candidateName === normalize(name))) {
-              (anchor || container).click();
-              return true;
+              container.scrollIntoView({ block: 'center' });
+              const rect = container.getBoundingClientRect();
+              const x = rect.left + Math.min(Math.max(rect.width / 2, 40), rect.width - 12);
+              const y = rect.top + Math.min(Math.max(rect.height / 2, 20), rect.height - 12);
+              const target = document.elementFromPoint(x, y) || anchor || container;
+              target.click();
+              return { ok: true, clicked_name: candidateName };
             }
           }
-          return false;
+          return { ok: false, clicked_name: "" };
         }
         """
         try:
-            return bool(page.evaluate(script, {"threadId": thread.thread_id, "name": thread.name}))
+            result = page.evaluate(script, {"threadId": thread.thread_id, "name": thread.name})
+            if not bool(result.get("ok") if isinstance(result, dict) else result):
+                return False
+            page.wait_for_timeout(1000)
+            opened_name = self._active_message_thread_name(page)
+            expected_name = self._normalize_message_text(thread.name)
+            return bool(opened_name and expected_name and opened_name.startswith(expected_name))
         except PlaywrightError:
             return False
+
+    def _active_message_thread_name(self, page: Page) -> str:
+        script = """
+        () => {
+          const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+          const selectors = [
+            '.msg-thread__link-to-profile',
+            '.msg-entity-lockup__entity-title',
+            'main h2',
+            '.msg-overlay-conversation-bubble__title'
+          ];
+          for (const selector of selectors) {
+            for (const el of document.querySelectorAll(selector)) {
+              const text = normalize(el.innerText || el.textContent);
+              if (text) return text.split('\\n')[0];
+            }
+          }
+          return "";
+        }
+        """
+        try:
+            return self._normalize_message_text(str(page.evaluate(script) or ""))
+        except PlaywrightError:
+            return ""
 
     def _normalize_message_text(self, value: str) -> str:
         return re.sub(r"\s+", " ", value or "").strip().lower()

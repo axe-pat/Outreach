@@ -46,6 +46,25 @@ def test_score_typeahead_option_prefers_school_for_school_trigger() -> None:
     assert scu_score > startup_score
 
 
+def test_contact_info_overlay_url_normalizes_profile_url() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    assert (
+        scraper._contact_info_overlay_url("https://www.linkedin.com/in/test-user/?miniProfileUrn=abc")
+        == "https://www.linkedin.com/in/test-user/overlay/contact-info/"
+    )
+
+
+def test_extract_emails_from_text_dedupes_and_skips_linkedin_internal_email() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    emails = scraper._extract_emails_from_text(
+        "Email: Test.User@Gmail.com, test.user@gmail.com, alerts@mail.linkedin.com"
+    )
+
+    assert emails == ["test.user@gmail.com"]
+
+
 class _StubLocator:
     def __init__(self, count: int = 0) -> None:
         self._count = count
@@ -149,6 +168,39 @@ class _StubPage:
 
     def close(self):
         return None
+
+
+class _MessageConfirmationPage:
+    def __init__(self, *, appears_after: int | None = 1) -> None:
+        self.appears_after = appears_after
+        self.evaluate_calls = 0
+        self.waits = 0
+
+    def evaluate(self, _script: str, payload: dict):
+        self.evaluate_calls += 1
+        if self.appears_after is None:
+            return False
+        return payload["expected"] == "thanks for connecting" and self.evaluate_calls >= self.appears_after
+
+    def wait_for_timeout(self, _timeout_ms: int) -> None:
+        self.waits += 1
+
+
+def test_wait_for_sent_message_confirmation_requires_message_list_match() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _MessageConfirmationPage(appears_after=2)
+
+    assert scraper._wait_for_sent_message_confirmation(page, "Thanks   for CONNECTING")
+    assert page.evaluate_calls == 2
+
+
+def test_wait_for_sent_message_confirmation_fails_when_message_never_appears(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _MessageConfirmationPage(appears_after=None)
+    ticks = iter([0, 9])
+    monkeypatch.setattr(linkedin_module.time, "monotonic", lambda: next(ticks))
+
+    assert not scraper._wait_for_sent_message_confirmation(page, "Thanks for connecting")
 
 
 def test_send_single_invite_prefers_connect_over_messageish_connected_signal(monkeypatch) -> None:

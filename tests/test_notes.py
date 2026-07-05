@@ -303,7 +303,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
             },
             {"opportunity_titles": ["Product Owner Internship"]},
             "founder_builder_fit",
-            ["product/operator", "connect"],
+            ["product/operator", "quick read"],
         ),
         (
             "founder_with_specific_company_context",
@@ -422,7 +422,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
                 "description": "Desktop OS and cloud desktop workspace for humans and agents running in the cloud.",
             },
             "founder_builder_fit",
-            ["Endstack's cloud desktop/agent workspace", "connect"],
+            ["Endstack's cloud desktop/agent workspace", "following what you're building"],
         ),
     ],
 )
@@ -542,6 +542,35 @@ def test_batch_generation_adds_qc_payload() -> None:
     assert "note" in annotated[0]
     assert "note_qc" in annotated[0]
     assert annotated[0]["note_qc"]["verdict"] in {"send", "blocked"}
+    assert annotated[0]["style_review"]["verdict"] in {"style_ok", "needs_review"}
+
+
+def test_quality_check_blocks_local_style_banned_phrases() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Alex Doe",
+        "role_bucket": "Product",
+        "usc": False,
+        "usc_marshall": False,
+        "existing_connection": False,
+        "shared_history": False,
+    }
+
+    qc = generator.quality_check(
+        candidate,
+        generated=type(
+            "Generated",
+            (),
+            {
+                "text": "Hi Alex, would love to connect and pick your brain about Product at Snowflake.",
+                "length": 78,
+                "family": "product",
+            },
+        )(),
+    )
+
+    assert qc.verdict == "blocked"
+    assert any("would love to connect" in flag for flag in qc.flags)
 
 
 def test_batch_qc_penalizes_repeated_wording() -> None:

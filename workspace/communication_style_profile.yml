@@ -1,0 +1,60 @@
+preferred_directness: "direct, concrete, and oriented toward the reply we want"
+preferred_casualness: "warm and human, but not deferential or over-polished"
+
+banned_phrases:
+  - "would love to connect"
+  - "pick your brain"
+  - "quick coffee chat"
+  - "your work stood out"
+  - "learn from your experience"
+  - "product/company direction"
+  - "AI product direction"
+
+self_intro_variants:
+  - "I'm a Marshall MBA and former data/platform engineer exploring product/operator paths."
+  - "I'm a Marshall MBA with Intuit/Gojek engineering experience, now targeting technical PM/operator roles."
+  - "I'm building toward technical product roles where data, platforms, and operations meet."
+
+approved_asks_by_recipient_type:
+  founder:
+    - "Ask for a quick read on where a technical MBA/operator background could be useful."
+    - "Ask who owns product, ops, or internship hiring if there is a credible fit."
+  senior_product:
+    - "Ask a specific team-direction or product-scope question tied to Akshat's background."
+    - "Ask how technical PM candidates can be useful to the team."
+  junior_product_apm:
+    - "Ask how to get on the hiring team's radar."
+    - "Ask what signal matters most for APM or early-PM candidates."
+  engineer_india:
+    - "Ask for a referral or hiring-team pointer when the company and role fit are reasonable."
+    - "Ask whether a short blurb would help them decide if a referral makes sense."
+  engineer:
+    - "Ask how builders influence product decisions there."
+    - "Ask how technical PM or operator candidates stand out."
+  recruiter:
+    - "Ask for process or screening guidance for the relevant role path."
+    - "Ask whether there is a better hiring-team contact for PM, product ops, or strategy roles."
+  general:
+    - "Ask for one concrete pointer, routing suggestion, or next person to speak with."
+
+strong_messages:
+  - label: "engineer_referral_pointer"
+    recipient_type: "engineer_india"
+    message: "Hi Mehak, thanks for connecting. I'm targeting technical PM/product ops roles where my data-platform background is useful. If Snyk has a relevant path, would a short blurb help you judge whether a referral or hiring-team pointer makes sense?"
+    notes: "Concrete ask; gives the recipient an easy yes/no next step."
+  - label: "founder_operator_read"
+    recipient_type: "founder"
+    message: "Hi Sean, thanks for connecting. I'm a Marshall MBA and former data/platform engineer exploring product/operator paths at Synphony. Would value your quick read on where someone with my background could actually be useful."
+    notes: "Founder ask is about usefulness, not generic networking."
+
+weak_messages:
+  - label: "generic_connection"
+    recipient_type: "general"
+    message: "Hi Priya, your work stood out and I would love to connect and learn from your experience."
+    notes: "Too generic; gives no reason to reply or route."
+  - label: "soft_coffee"
+    recipient_type: "senior_product"
+    message: "Hi Alex, I'm exploring PM roles and would love a quick coffee chat to pick your brain."
+    notes: "Soft ask and banned phrasing; relationship goal is unclear."
+
+notes: "This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups."

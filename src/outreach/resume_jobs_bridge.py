@@ -5,6 +5,7 @@ from datetime import date, datetime
 import fnmatch
 from pathlib import Path
 import re
+from collections import Counter
 from typing import Iterable
 
 from outreach.tracking import OpportunityType, OrganizationType, SourceKind
@@ -12,6 +13,21 @@ from outreach.tracking import OpportunityType, OrganizationType, SourceKind
 DEFAULT_INCLUDE_STATUSES = ("queued", "generated", "applied")
 DEFAULT_TARGET_LISTS = "jobs;resume_generator;pre_apply"
 DEFAULT_COMPANY_OVERRIDES_FILENAME = "company_overrides.csv"
+DEFAULT_SEASON_FOCUS = "all"
+TRANSITION_SEASON_FOCUS = "fall_ft_transition"
+SEASON_FOCUS_VALUES = {
+    "all",
+    TRANSITION_SEASON_FOCUS,
+    "full_time",
+    "fall",
+    "summer",
+}
+
+FULL_TIME_PATH_BUCKET = "full_time_new_grad_apm"
+FALL_PATH_BUCKET = "fall_spring_coop_offcycle"
+SUMMER_BUCKET = "summer"
+GENERIC_INTERNSHIP_BUCKET = "generic_internship"
+OTHER_BUCKET = "other"
 
 STARTUP_BIAS_SCORES = {
     "high": 2.0,
@@ -58,8 +74,11 @@ class ResumeImportSelection:
     skipped_status: int
     skipped_score: int
     skipped_age: int
+    skipped_season_focus: int
     skipped_blocklist: int
     duplicates_removed: int
+    season_counts_scanned: dict[str, int]
+    season_counts_selected: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -83,6 +102,7 @@ class ResumeOutreachQueueItem:
     company_type: str
     startup_bias: str
     priority_reasons: list[str]
+    season_bucket: str
     source: str
     source_url: str
     url_hash: str
@@ -144,6 +164,7 @@ def select_resume_jobs(
     include_statuses: Iterable[str] = DEFAULT_INCLUDE_STATUSES,
     min_score: float = 7.0,
     max_age_days: int | None = 10,
+    season_focus: str = DEFAULT_SEASON_FOCUS,
     blocklist_patterns: Iterable[str] = (),
     today: date | None = None,
 ) -> ResumeImportSelection:
@@ -152,15 +173,20 @@ def select_resume_jobs(
     skipped_status = 0
     skipped_score = 0
     skipped_age = 0
+    skipped_season_focus = 0
     skipped_blocklist = 0
     duplicates_removed = 0
+    season_counts_scanned: Counter[str] = Counter()
     normalized_requested = tuple(include_statuses)
     allowed_statuses = {
         normalize_resume_status(item) for item in (normalized_requested or DEFAULT_INCLUDE_STATUSES)
     }
     reference_day = today or date.today()
+    normalized_season_focus = normalize_season_focus(season_focus)
 
     for job in jobs:
+        season_bucket = classify_resume_role_season(job)
+        season_counts_scanned[season_bucket] += 1
         if not job.company or not job.role_title:
             skipped_missing_identity += 1
             continue
@@ -180,17 +206,24 @@ def select_resume_jobs(
             if (reference_day - job.date_found).days > max_age_days:
                 skipped_age += 1
                 continue
+        if not season_focus_allows_job(job, normalized_season_focus):
+            skipped_season_focus += 1
+            continue
         filtered.append(job)
 
     selected, duplicates_removed = dedupe_resume_jobs(filtered)
+    season_counts_selected = Counter(classify_resume_role_season(job) for job in selected)
     return ResumeImportSelection(
         jobs=selected,
         skipped_missing_identity=skipped_missing_identity,
         skipped_status=skipped_status,
         skipped_score=skipped_score,
         skipped_age=skipped_age,
+        skipped_season_focus=skipped_season_focus,
         skipped_blocklist=skipped_blocklist,
         duplicates_removed=duplicates_removed,
+        season_counts_scanned=dict(season_counts_scanned),
+        season_counts_selected=dict(season_counts_selected),
     )
 
 
@@ -282,6 +315,88 @@ def infer_opportunity_type(role_title: str) -> OpportunityType:
     if any(keyword in lowered for keyword in ("new grad", "graduate")):
         return OpportunityType.FULL_TIME
     return OpportunityType.OTHER
+
+
+def normalize_season_focus(value: str | None) -> str:
+    normalized = (value or DEFAULT_SEASON_FOCUS).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "transition": TRANSITION_SEASON_FOCUS,
+        "fall_ft": TRANSITION_SEASON_FOCUS,
+        "fall_full_time": TRANSITION_SEASON_FOCUS,
+        "ft": "full_time",
+        "fulltime": "full_time",
+        "full_time_only": "full_time",
+        "new_grad": "full_time",
+        "apm": "full_time",
+        "fall_only": "fall",
+        "offcycle": "fall",
+        "off_cycle": "fall",
+        "none": "all",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in SEASON_FOCUS_VALUES:
+        allowed = ", ".join(sorted(SEASON_FOCUS_VALUES))
+        raise ValueError(f"Unknown resume season focus '{value}'. Expected one of: {allowed}.")
+    return normalized
+
+
+def classify_resume_role_season(job: ResumeJob) -> str:
+    text = " ".join(
+        [
+            job.role_title,
+            job.location,
+            job.date_posted_raw,
+        ]
+    ).lower()
+    return classify_role_season_text(text)
+
+
+def classify_role_season_text(text: str) -> str:
+    lowered = text.lower()
+    full_time_patterns = [
+        r"\bfull[-\s]?time\b",
+        r"\bnew[-\s]?grad\b",
+        r"\bgraduate\s+programme\b",
+        r"\bgraduate\s+program\b",
+        r"\bassociate\s+product\s+manager\b",
+        r"\bapm\b",
+        r"\brotational\b",
+        r"\bleadership\s+development\b",
+    ]
+    if any(re.search(pattern, lowered) for pattern in full_time_patterns):
+        return FULL_TIME_PATH_BUCKET
+    fall_patterns = [
+        r"\bfall\b",
+        r"\bautumn\b",
+        r"\bspring\b",
+        r"\bwinter\b",
+        r"\bco[-\s]?op\b",
+        r"\bcoop\b",
+        r"\boff[-\s]?cycle\b",
+    ]
+    if any(re.search(pattern, lowered) for pattern in fall_patterns):
+        return FALL_PATH_BUCKET
+    if re.search(r"\bsummer\b", lowered):
+        return SUMMER_BUCKET
+    if re.search(r"\bintern(ship)?\b", lowered):
+        return GENERIC_INTERNSHIP_BUCKET
+    return OTHER_BUCKET
+
+
+def season_focus_allows_job(job: ResumeJob, season_focus: str = DEFAULT_SEASON_FOCUS) -> bool:
+    normalized = normalize_season_focus(season_focus)
+    bucket = classify_resume_role_season(job)
+    if normalized == "all":
+        return True
+    if normalized == TRANSITION_SEASON_FOCUS:
+        return bucket in {FULL_TIME_PATH_BUCKET, FALL_PATH_BUCKET}
+    if normalized == "full_time":
+        return bucket == FULL_TIME_PATH_BUCKET
+    if normalized == "fall":
+        return bucket == FALL_PATH_BUCKET
+    if normalized == "summer":
+        return bucket == SUMMER_BUCKET
+    return True
 
 
 def opportunity_status_from_resume_status(status: str) -> str:
@@ -415,10 +530,12 @@ def build_resume_outreach_queue(
         override = company_overrides.get(normalized_company)
         company_type = infer_company_type_for_job(job, company_override=override)
         startup_bias = override.startup_bias if override else "neutral"
+        season_bucket = classify_resume_role_season(job)
         priority_score, reasons = compute_outreach_priority(
             job,
             company_type=company_type,
             startup_bias=startup_bias,
+            season_bucket=season_bucket,
         )
         items.append(
             ResumeOutreachQueueItem(
@@ -432,6 +549,7 @@ def build_resume_outreach_queue(
                 company_type=company_type,
                 startup_bias=startup_bias,
                 priority_reasons=reasons,
+                season_bucket=season_bucket,
                 source=job.source,
                 source_url=job.url,
                 url_hash=job.url_hash,
@@ -456,9 +574,22 @@ def compute_outreach_priority(
     *,
     company_type: str,
     startup_bias: str,
+    season_bucket: str | None = None,
 ) -> tuple[float, list[str]]:
     score = job.fit_score if job.fit_score is not None else 0.0
     reasons = [f"fit_score={score:.1f}"]
+    bucket = season_bucket or classify_resume_role_season(job)
+    if bucket == FULL_TIME_PATH_BUCKET:
+        reasons.append("season=ft/new-grad/apm")
+        score += 1.2
+    elif bucket == FALL_PATH_BUCKET:
+        reasons.append("season=fall/co-op")
+        score += 0.8
+    elif bucket == SUMMER_BUCKET:
+        reasons.append("season=summer")
+        score -= 1.2
+    elif bucket == GENERIC_INTERNSHIP_BUCKET:
+        reasons.append("season=generic-internship")
     company_bonus = COMPANY_TYPE_SCORES.get(company_type, 0.0)
     if company_bonus:
         reasons.append(f"company_type={company_type}")
@@ -495,6 +626,7 @@ def build_resume_opportunity_notes(job: ResumeJob) -> str:
         f"resume_job_id={job.row_id}",
         f"resume_status={job.normalized_status or 'unknown'}",
         f"resume_source={job.source or 'unknown'}",
+        f"season_bucket={classify_resume_role_season(job)}",
     ]
     if job.url_hash:
         parts.append(f"url_hash={job.url_hash}")

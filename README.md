@@ -89,6 +89,9 @@ instead of creating one sheet per avenue.
 - `python main.py workbook-summary`
 - `python main.py build-resume-outreach-queue`
 - `python main.py import-resume-jobs`
+- `python main.py import-story-fit-targets --source-path workspace/story_fit_targets.csv`
+- `python main.py init-relationship-leads`
+- `python main.py import-relationship-leads --source-path workspace/relationship_leads.csv`
 - `python main.py list-discovery-sources`
 - `python main.py discover-source --source-id yc_los_angeles --limit 25`
 - `python main.py discover-source --source-id yc_los_angeles --require-jobs-url --max-team-size 50 --min-batch-year 2024`
@@ -97,6 +100,15 @@ instead of creating one sheet per avenue.
 - `python main.py build-linkedin-company-queue --limit 20 --include-target-list yc --include-target-list built_in --require-hiring-signal`
 - `python main.py dispatch-linkedin-company-queue --limit 5 --include-target-list yc --include-target-list built_in --require-hiring-signal`
 - `python main.py build-target-action-queue --limit 25 --include-target-list yc --include-target-list built_in`
+- `python main.py audit-track-2-core`
+- `python main.py build-track-2-daily-plan`
+- `python main.py run-track-2-daily-plan`
+- `python main.py run-supervised-e2e`
+- `python main.py research-linkedin-contact-info-emails --limit 5`
+- `python main.py research-external-contact-emails --limit 5`
+- `python main.py draft-track-2-emails --max-email-drafts 5`
+- `python main.py review-linkedin-followup-drafts --draft-artifact artifacts/...track-2-linkedin-followup-drafts.json`
+- `python main.py review-track-2-email-drafts --draft-artifact artifacts/...track-2-email-drafts.json`
 - `python main.py add-organization --name "Y Combinator" --organization-type accelerator`
 - `python main.py add-opportunity --organization "Figma" --title "Summer PM Intern"`
 - `python main.py add-contact --organization "Figma" --full-name "Avery Product"`
@@ -110,9 +122,13 @@ fresh, apply-worthy jobs for pre-application outreach.
 
 - upstream file: `../ResumeGenerator v1/discovery/jobs.xlsx`
 - sheet read: `Jobs` only
-- default import filter: `status in {queued, generated}`, `fit_score >= 7.0`,
-  `date_found <= 10 days old`
+- default import filter: `status in {queued, generated, applied}`,
+  `fit_score >= 7.0`, `date_found <= 10 days old`
 - dedupe: `url_hash` first, otherwise normalized `company + role_title`
+- daily supervised E2E default: `--resume-season-focus fall_ft_transition`,
+  which keeps FT/new-grad/APM and fall/co-op/off-cycle roles while suppressing
+  old summer/generic internship rows. Use `--resume-season-focus all` for a
+  broad one-off refresh.
 
 Outreach-specific prioritization lives downstream. Use
 `workspace/company_overrides.csv` to manually bias certain companies toward
@@ -123,6 +139,137 @@ In the combined **Recruiting Engine**, this repo is the **Outreach Lane**:
 relationship targets come from application-plus-outreach jobs, startup org
 discovery, and the relationship buffer; Outreach handles people search, note
 generation, invite sends, and touchpoint logging.
+
+## Story-Fit Targets
+
+`workspace/story_fit_targets.csv` is the curated Track 2 source for companies where
+Akshat has a real pitch even when no role is posted. The importer dedupes against
+`organizations.csv`, enriches existing accounts with `story-fit` tags and story
+metadata, and creates new company rows when needed.
+
+The importer writes operational metadata into organization notes:
+`source=story_fit_targets`, `why_this_company`, `story_angle`,
+`profile_evidence`, `target_roles`, and `priority`. It remains backward-compatible
+with the older `why_you_have_a_case` column.
+
+Preview:
+
+```bash
+python main.py import-story-fit-targets --source-path workspace/story_fit_targets.csv
+```
+
+Write to the tracker:
+
+```bash
+python main.py import-story-fit-targets --source-path workspace/story_fit_targets.csv --execute
+```
+
+## Relationship Leads
+
+`workspace/relationship_leads.csv` is the one-time import lane for high-signal
+people sources: PeopleGrove, Handshake, USC founders/C-suite, recent MBA PMs, and
+manual LinkedIn finds. It writes companies into `organizations.csv`, people into
+`contacts.csv`, and preserves source tags like `peoplegrove`, `recent-mba-pm`, and
+`usc-founder`.
+
+Create/verify the template:
+
+```bash
+python main.py init-relationship-leads
+python main.py init-relationship-leads --source-key peoplegrove_usc
+python main.py init-relationship-leads --source-key recent_mba_pm
+```
+
+Preview or import:
+
+```bash
+python main.py import-relationship-leads --source-path workspace/relationship_leads.csv
+python main.py import-relationship-leads --source-path workspace/relationship_leads.csv --execute
+python main.py import-relationship-leads --source-key peoplegrove_usc --execute
+python main.py import-relationship-leads --source-key recent_mba_pm --execute
+```
+
+The source-key templates create clean one-time capture files and companion guides:
+
+- `workspace/relationship_leads_peoplegrove_usc.csv` for PeopleGrove/Trojan Network/USC founders, operators, product leaders, and recruiters
+- `workspace/relationship_leads_recent_mba_pm.csv` for recent MBA grads who moved into PM/product/product strategy
+
+## Communication Style
+
+`workspace/communication_style_profile.yml` is the local voice/style control file.
+LinkedIn invite notes and Track 2 email drafts now use it for banned phrases,
+recipient-specific asks, and review metadata. Email drafting remains artifact-only:
+the engine can draft reviewed emails, but it does not send them.
+
+For high-stakes emails, use the communication lab loop:
+
+```bash
+python main.py build-communication-lab
+python main.py review-linkedin-followup-drafts --draft-artifact artifacts/...track-2-linkedin-followup-drafts.json
+python main.py draft-track-2-emails --max-email-drafts 5
+python main.py review-track-2-email-drafts --draft-artifact artifacts/...track-2-email-drafts.json
+python main.py import-communication-feedback --feedback-path artifacts/...draft-review.csv --execute
+```
+
+The lab reads the coffee-chat dump, sent touchpoints, and story-bank material, then
+scores LinkedIn follow-ups and email drafts for generic networking language,
+unsupported callbacks, generic company-fit lines, seniority mismatches, missing
+earned background, weak asks, and lack of human/friction lines. Review commands
+also emit a CSV beside the JSON artifact. Fill `user_decision`, `user_reason`,
+`user_edit`, or `user_notes` in that CSV and import it into
+`workspace/communication_feedback.csv` with `import-communication-feedback`.
+
+Story-fit metadata is now used directly in communication drafts. If an account has
+`story_fit_reason` or `profile_evidence` in its organization notes, Track 2 email
+and senior/founder/product LinkedIn drafts prefer that angle over generic company
+fit language.
+
+## Supervised Daily E2E
+
+`run-supervised-e2e` is the guarded daily wrapper for the whole Outreach lane. In
+default mode it previews/import-checks the source lanes, rebuilds the account
+tracker, audits Track 2, builds the campaign plan, and runs the bounded Track 2
+daily plan without sending or writing live LinkedIn updates.
+
+```bash
+python main.py run-supervised-e2e
+```
+
+During the July/August transition this defaults to:
+
+```bash
+python main.py run-supervised-e2e --resume-season-focus fall_ft_transition
+```
+
+Use `--resume-season-focus all` when intentionally rebuilding the broad
+ResumeGenerator account universe.
+
+Safe write mode:
+
+```bash
+python main.py run-supervised-e2e --execute
+```
+
+This is the cron-safe daily mode: it imports source rows, rebuilds the tracker,
+audits/scopes Track 2, runs non-browser enrichment, and queues LinkedIn browser
+work for an attended pass. Live LinkedIn browser phases require an explicit flag:
+
+```bash
+python main.py run-supervised-e2e --execute --live-linkedin
+python main.py run-supervised-e2e --execute --refresh-linkedin
+```
+
+LinkedIn sends stay behind a second explicit flag:
+
+```bash
+python main.py run-supervised-e2e --execute --send-linkedin
+```
+
+The installed cron wrapper for the nightly no-send run is:
+
+```bash
+scripts/run_daily_supervised_e2e.sh
+```
 
 ## Current Status
 

@@ -1,16 +1,26 @@
 from datetime import UTC, date, datetime
+import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from typer.testing import CliRunner
+
 from outreach.cli import (
+    apply_email_finder_results,
+    app,
     attach_search_urls_to_candidates,
     apply_linkedin_reconcile_results,
     apply_raw_candidate,
     build_linkedin_company_queue_items,
+    build_linkedin_contact_info_email_queue,
     build_linkedin_followup_drafts,
+    build_daily_execution_manifest,
+    build_external_email_research_queue,
+    build_track_2_email_drafts,
     build_linkedin_reconcile_queue_items,
     build_linkedin_message_reconcile_results,
+    build_communication_review_csv_rows,
     build_organization_intel_items,
     build_relationship_loop_items,
     build_target_action_queue_items,
@@ -18,8 +28,11 @@ from outreach.cli import (
     classify_opportunity_action,
     company_search_aliases,
     contact_status_from_invite_result,
+    daily_plan_items_by_phase,
     detect_shared_history_signals,
+    draft_track_2_email,
     execute_invite_batch,
+    extract_linkedin_conversation_action_items,
     extract_team_size_from_notes,
     extract_tags_from_notes,
     extract_description_from_notes,
@@ -28,6 +41,7 @@ from outreach.cli import (
     format_team_size_signal,
     infer_role_bucket,
     infer_fit_reasons,
+    import_communication_feedback_rows,
     item_matches_remote,
     item_matches_tags,
     normalize_tag,
@@ -38,6 +52,7 @@ from outreach.cli import (
     persist_linkedin_followup_send_result,
     recommend_auto_send_limit,
     resolve_pass_definitions,
+    run_supervised_e2e_pipeline,
     score_opportunity_relevance,
     select_invite_candidates,
     summarize_linkedin_followup_actions,
@@ -47,11 +62,14 @@ from outreach.cli import (
     effective_send_min_score,
     text_contains_signal,
     touchpoint_status_from_invite_result,
+    write_communication_review_csv,
 )
 from outreach.config import OutreachSettings
+from outreach.services.email_finder import EmailFinderResult
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
 from outreach.services.linkedin import LinkedInFollowupSendResult
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
+from outreach.style_profile import CommunicationStyleProfile
 
 
 def test_tpm_titles_bucket_as_product() -> None:
@@ -105,6 +123,380 @@ def test_founding_mechatronics_engineer_buckets_as_engineering() -> None:
 def test_company_search_aliases_strip_common_startup_suffixes() -> None:
     assert company_search_aliases("Splash Inc.")[:2] == ["Splash Inc.", "Splash"]
     assert "Surtr" in company_search_aliases("Surtr Defense Systems")
+
+
+def test_build_linkedin_contact_info_email_queue_uses_daily_email_research_accounts(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-a",
+            name="Story Fit Co",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-b",
+            name="Other Co",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-needs-email",
+            organization_id="org-a",
+            full_name="Needs Email",
+            title="Product Lead",
+            linkedin_url="https://www.linkedin.com/in/needs-email/",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-has-email",
+            organization_id="org-a",
+            full_name="Has Email",
+            title="Founder",
+            linkedin_url="https://www.linkedin.com/in/has-email/",
+            email="has@example.com",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-other-org",
+            organization_id="org-b",
+            full_name="Other Org",
+            title="PM",
+            linkedin_url="https://www.linkedin.com/in/other-org/",
+        )
+    )
+
+    queue = build_linkedin_contact_info_email_queue(
+        workspace=tmp_path,
+        daily_plan={
+            "selected": [
+                {"organization_id": "org-a", "expected_email_research": 1},
+                {"organization_id": "org-b", "expected_email_research": 0},
+            ]
+        },
+        limit=10,
+    )
+
+    assert queue == [
+        {
+            "contact_id": "ct-needs-email",
+            "organization_id": "org-a",
+            "company": "Story Fit Co",
+            "name": "Needs Email",
+            "title": "Product Lead",
+            "linkedin_url": "https://www.linkedin.com/in/needs-email/",
+            "company_website": "",
+            "company_linkedin_url": "",
+        }
+    ]
+
+
+def test_build_external_email_research_queue_allows_domain_without_linkedin(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-a",
+            name="Story Fit Co",
+            organization_type=OrganizationType.COMPANY,
+            website="https://storyfit.example",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-domain-only",
+            organization_id="org-a",
+            full_name="Domain Only",
+            title="Product Lead",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-excluded",
+            organization_id="org-a",
+            full_name="Excluded Person",
+            title="Founder",
+        )
+    )
+
+    queue = build_external_email_research_queue(
+        workspace=tmp_path,
+        daily_plan={"selected": [{"organization_id": "org-a", "expected_email_research": 2}]},
+        limit=10,
+        exclude_contact_ids={"ct-excluded"},
+    )
+
+    assert queue == [
+        {
+            "contact_id": "ct-domain-only",
+            "organization_id": "org-a",
+            "company": "Story Fit Co",
+            "name": "Domain Only",
+            "title": "Product Lead",
+            "linkedin_url": "",
+            "company_website": "https://storyfit.example",
+            "company_linkedin_url": "",
+        }
+    ]
+
+
+def test_apply_email_finder_results_updates_email_with_provenance(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-a",
+            name="Story Fit Co",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-needs-email",
+            organization_id="org-a",
+            full_name="Needs Email",
+            title="Product Lead",
+            linkedin_url="https://www.linkedin.com/in/needs-email/",
+        )
+    )
+
+    updated = apply_email_finder_results(
+        workbook=workbook,
+        min_confidence=80,
+        results=[
+            EmailFinderResult(
+                contact_id="ct-needs-email",
+                organization_id="org-a",
+                name="Needs Email",
+                company="Story Fit Co",
+                provider="hunter",
+                status="found",
+                detail="ok",
+                email="needs.email@example.com",
+                confidence=92,
+                verification_status="valid",
+            )
+        ],
+    )
+
+    contact = OutreachWorkbook(tmp_path).list_contacts()[0]
+    assert updated == 1
+    assert contact.email == "needs.email@example.com"
+    assert "external_email_found=" in contact.notes
+    assert "provider=hunter" in contact.notes
+
+
+def test_daily_execution_manifest_orders_phases_and_counts_actions() -> None:
+    daily_plan = {
+        "selected": [
+            {
+                "company": "Invite Co",
+                "phase": "5_send_linkedin_invites",
+                "phase_order": 50,
+                "can_parallelize": False,
+                "daily_action_priority": 70,
+                "campaign_action": "send_initial_invites",
+            },
+            {
+                "company": "Reply Co",
+                "phase": "1_continue_live_conversations",
+                "phase_order": 10,
+                "can_parallelize": False,
+                "daily_action_priority": 95,
+                "campaign_action": "continue_conversation",
+            },
+            {
+                "company": "Email Co",
+                "phase": "3_contact_and_email_research",
+                "phase_order": 30,
+                "can_parallelize": True,
+                "daily_action_priority": 80,
+                "campaign_action": "find_email_path",
+            },
+        ]
+    }
+
+    grouped = daily_plan_items_by_phase(daily_plan)
+    manifest = build_daily_execution_manifest(daily_plan)
+
+    assert list(grouped) == [
+        "1_continue_live_conversations",
+        "3_contact_and_email_research",
+        "5_send_linkedin_invites",
+    ]
+    assert manifest[0]["phase"] == "1_continue_live_conversations"
+    assert manifest[1]["parallelizable"] is True
+    assert manifest[2]["actions"] == {"send_initial_invites": 1}
+
+
+def test_build_track_2_email_drafts_uses_email_contacts_and_style_review(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-email",
+            name="Deepgram",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="story-fit",
+            notes="tags=voice ai,developer-tools | description=Voice AI platform for developers.",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-product",
+            organization_id="org-email",
+            full_name="Natalie Product",
+            title="AI Product Leader",
+            contact_type="Product",
+            email="natalie@example.com",
+        )
+    )
+
+    drafts = build_track_2_email_drafts(
+        workspace=tmp_path,
+        daily_plan={
+            "selected": [
+                {
+                    "organization_id": "org-email",
+                    "company": "Deepgram",
+                    "campaign_action": "send_cold_email_followup",
+                    "expected_email_drafts": 1,
+                }
+            ]
+        },
+        limit=3,
+    )
+
+    assert len(drafts) == 1
+    assert drafts[0]["email"] == "natalie@example.com"
+    assert drafts[0]["recipient_type"] == "senior_product"
+    assert "Deepgram" in str(drafts[0]["subject"])
+    assert "would love" not in str(drafts[0]["body"]).lower()
+    assert drafts[0]["style_review"]["verdict"] == "style_ok"
+    assert drafts[0]["craft_review"]["verdict"] in {"strong_send_candidate", "review"}
+    assert drafts[0]["craft_review"]["score"] >= 76
+
+
+def test_run_track_2_daily_plan_send_linkedin_requires_execute() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["run-track-2-daily-plan", "--send-linkedin"])
+
+    assert result.exit_code == 1
+    assert "--send-linkedin requires --execute." in result.output
+
+
+def test_run_track_2_daily_plan_execute_is_cron_safe_without_live_linkedin(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+
+    fake_plan = {
+        "selected_count": 2,
+        "budget": {},
+        "used": {"company_mapping": 1, "linkedin_invites": 1},
+        "summary": {"map_more_contacts": 1, "send_initial_invites": 1},
+        "phase_summary": {
+            "4_contact_mapping": 1,
+            "5_send_linkedin_invites": 1,
+        },
+        "selected": [
+            {
+                "organization_id": "org-map",
+                "company": "Mapping Co",
+                "phase": "4_contact_mapping",
+                "phase_order": 40,
+                "can_parallelize": True,
+                "campaign_action": "map_more_contacts",
+                "daily_action_priority": 70,
+            },
+            {
+                "organization_id": "org-invite",
+                "company": "Invite Co",
+                "phase": "5_send_linkedin_invites",
+                "phase_order": 50,
+                "can_parallelize": False,
+                "campaign_action": "send_initial_invites",
+                "expected_linkedin_invites": 1,
+                "daily_action_priority": 65,
+            },
+        ],
+    }
+    monkeypatch.setattr("outreach.cli._build_daily_plan_for_workspace", lambda **_kwargs: fake_plan)
+
+    def _fail_live_linkedin(**_kwargs):
+        raise AssertionError("live LinkedIn should not run without --live-linkedin")
+
+    monkeypatch.setattr("outreach.cli.execute_linkedin_company_run", _fail_live_linkedin)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "4_contact_mapping | status=queued" in result.output
+    assert "5_send_linkedin_invites | status=queued" in result.output
+
+
+def test_run_supervised_e2e_send_linkedin_requires_execute(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "run-supervised-e2e",
+            "--workspace",
+            str(tmp_path / "workspace"),
+            "--send-linkedin",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--send-linkedin requires --execute." in result.output
+
+
+def test_run_supervised_e2e_dry_pipeline_writes_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+
+    artifact, payload = run_supervised_e2e_pipeline(
+        workspace=workspace,
+        account_tracker_output=workspace / "account_tracker.xlsx",
+        jobs_xlsx=tmp_path / "missing_jobs.xlsx",
+        resume_blocklist=None,
+        resume_jobs=False,
+        resume_outreach_queue=False,
+        strategic_accounts=False,
+        story_fit_targets=False,
+        relationship_leads=False,
+    )
+
+    assert artifact.exists()
+    assert (workspace / "account_tracker.xlsx").exists()
+    assert payload["execute"] is False
+    assert Path(str(payload["latest_daily_report"])).exists()
+    assert "Outreach Daily Run Report" in Path(str(payload["latest_daily_report"])).read_text()
+    stage_statuses = {stage["name"]: stage["status"] for stage in payload["stages"]}
+    assert stage_statuses["account_tracker"] == "built"
+    assert stage_statuses["track_2_daily_run"] == "planned"
+    track_2_stage = next(stage for stage in payload["stages"] if stage["name"] == "track_2_daily_run")
+    assert any("track-2-daily-run" in path for path in track_2_stage["artifacts"])
 
 
 def test_candidate_mentions_company_requires_structured_single_word_match() -> None:
@@ -778,6 +1170,9 @@ def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
     assert set(next_state["seen_thread_ids"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
     assert set(next_state["thread_states"]) == {"thread-roshni", "thread-owen", "thread-old", "thread-shubhankit"}
     assert next_state["thread_states"]["thread-old"]["signature"] == "old thread|already seen"
+    owen = next(item for item in results if item["contact_id"] == "ct-owen")
+    assert [item["sender"] for item in owen["message_window"]] == ["You", "Owen Crook"]
+    assert next_state["thread_states"]["thread-owen"]["message_window"][-1]["message"] == "Happy to help. What role are you looking at?"
 
 
 def test_build_linkedin_message_reconcile_results_detects_changed_seen_thread() -> None:
@@ -923,6 +1318,13 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
             title="CEO @ Voker (YC S24): AI Founder & Operator",
             contact_type="Founder",
         ),
+        ContactRecord(
+            contact_id="ct-shaun",
+            organization_id="org-voker",
+            full_name="Shaun Weiss",
+            title="Co-Founder",
+            contact_type="Founder",
+        ),
     ]
 
     drafts = build_linkedin_followup_drafts(
@@ -973,6 +1375,14 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
                 "needs_follow_up": True,
                 "original_invite_note": "Would love to connect and learn from your experience.",
             },
+            {
+                "contact_id": "ct-shaun",
+                "organization_id": "org-voker",
+                "name": "Shaun Weiss",
+                "normalized_status": "replied",
+                "last_sender": "Shaun",
+                "latest_message": "Hi Akshat - thanks for reaching out. If you could please send your resume to Alessandra@beyondmedplans.com, that would be helpful. Ale runs our product team. Thanks!",
+            },
         ],
         organizations=organizations,
         contacts=contacts,
@@ -985,6 +1395,7 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
         "accepted_follow_up",
         "accepted_follow_up",
         "accepted_follow_up",
+        "conversation_reply",
     ]
     assert "referral" in str(drafts[0]["draft_message"]).lower()
     assert "short blurb" in str(drafts[1]["draft_message"]).lower()
@@ -992,16 +1403,331 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert "thanks for letting me know" in str(drafts[2]["draft_message"]).lower()
     assert drafts[0]["company"] == "Snyk"
     assert drafts[0]["original_invite_note"].startswith("Would really value")
+    assert drafts[0]["communication_review"]["channel"] == "linkedin_followup"
+    assert "communication_recommendation" in drafts[0]
     assert drafts[1]["latest_message"].startswith("I can share your profile")
     assert "referral path or hiring contact" in str(drafts[3]["draft_message"])
     assert drafts[4]["followup_audience"] == "product"
-    assert "would love your perspective" in str(drafts[4]["draft_message"]).lower()
-    assert "could translate to the product work there" in str(drafts[4]["draft_message"])
+    assert "do you think that background maps to product work there" in str(drafts[4]["draft_message"]).lower()
+    assert "could translate to the product work there" not in str(drafts[4]["draft_message"])
     assert "product or recruiting person" not in str(drafts[4]["draft_message"]).lower()
     assert drafts[5]["followup_audience"] == "founder"
     assert "AI agent analytics work" in str(drafts[5]["draft_message"])
-    assert "could translate to what you're building" in str(drafts[5]["draft_message"])
+    assert "could be useful at Voker" in str(drafts[5]["draft_message"])
+    assert "someone on product I should ask" in str(drafts[5]["draft_message"])
     assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
+    assert "Alessandra@beyondmedplans.com" in str(drafts[6]["draft_message"])
+    assert drafts[6]["action_items"][0]["action_type"] == "email_resume"
+    assert drafts[6]["action_items"][0]["email"] == "Alessandra@beyondmedplans.com"
+
+
+def test_followup_draft_uses_context_window_to_hold_repeat_ack() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-ottimate",
+            name="Ottimate",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-midun",
+            organization_id="org-ottimate",
+            full_name="Midun Raju C",
+            title="Senior Software Engineer | Backend & ML",
+            contact_type="Engineering",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-midun",
+                "organization_id": "org-ottimate",
+                "name": "Midun Raju C",
+                "normalized_status": "replied",
+                "last_sender": "Midun Raju",
+                "latest_message": "Absolutely",
+                "message_window": [
+                    {
+                        "sender": "You",
+                        "message": (
+                            "Thanks for connecting, Midun. I'm exploring PM/product roles at Ottimate where my "
+                            "backend/data engineering background could be useful. Would you be open to pointing me "
+                            "toward the best referral path or hiring contact?"
+                        ),
+                    },
+                    {"sender": "Midun Raju", "message": "Absolutely"},
+                ],
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert drafts[0]["draft_kind"] == "already_asked_wait"
+    assert drafts[0]["send_recommendation"] == "hold"
+    assert drafts[0]["communication_recommendation"] == "hold"
+    assert drafts[0]["reply_intent"] == "already_asked_wait"
+
+
+def test_followup_draft_does_not_invent_positive_callback_when_contact_does_not_know() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-tractian",
+            name="TRACTIAN",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-bratee",
+            organization_id="org-tractian",
+            full_name="Bratee Podder",
+            title="SWE @ Tractian",
+            contact_type="Engineering",
+        )
+    ]
+    latest = (
+        "Honestly, I have no idea. I work as a developer for the marketing team, so mostly analysis work. "
+        "I think a lot of engineers work differently to solve customer problems and that there's no unified method."
+    )
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-bratee",
+                "organization_id": "org-tractian",
+                "name": "Bratee Podder",
+                "normalized_status": "replied",
+                "last_sender": "Bratee",
+                "latest_message": latest,
+                "message_window": [{"sender": "Bratee", "message": latest}],
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert drafts[0]["reply_intent"] == "does_not_know"
+    assert "small-team" not in str(drafts[0]["draft_message"]).lower()
+    assert "customer-feedback" not in str(drafts[0]["draft_message"]).lower()
+    assert "Sure, thanks Bratee" in str(drafts[0]["draft_message"])
+
+
+def test_accepted_followup_to_principal_engineer_uses_senior_ask() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-snyk",
+            name="Snyk",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-emiliano",
+            organization_id="org-snyk",
+            full_name="Emiliano Castro",
+            title="Principal Software Engineer at Snyk",
+            contact_type="Engineering",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-emiliano",
+                "organization_id": "org-snyk",
+                "name": "Emiliano Castro",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Hi Emiliano, I'm a Marshall MBA + former engineer exploring Snyk.",
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    message = str(drafts[0]["draft_message"])
+    assert "Do you think that background could fit any product work there" in message
+    assert "If yes, who would be the right person to ask" in message
+    assert "does that angle make sense" not in message
+    assert "route I should understand" not in message
+    assert "tight resume + 3-line blurb" not in message
+
+
+def test_story_fit_metadata_flows_into_senior_followup() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-anam",
+            name="Anam AI",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "Story-fit target | story_fit_reason=FlairX gives a direct recruiting workflow pitch around "
+                "AI interviews and candidate experience. | profile_evidence=FlairX AI PM internship."
+            ),
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-senior",
+            organization_id="org-anam",
+            full_name="Avery Senior",
+            title="Principal Engineer",
+            contact_type="Engineering",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-senior",
+                "organization_id": "org-anam",
+                "name": "Avery Senior",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert "FlairX gives a direct recruiting workflow pitch" in str(drafts[0]["draft_message"])
+    assert "Do you think that background could fit any product work there" in str(drafts[0]["draft_message"])
+
+
+def test_track_2_email_uses_story_fit_reason_before_generic_fit_line() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-anam",
+        name="Anam AI",
+        organization_type=OrganizationType.COMPANY,
+        notes=(
+            "Story-fit target | story_fit_reason=FlairX gives a direct recruiting workflow pitch around AI interviews. | "
+            "profile_evidence=FlairX AI PM internship and recruiting engine work."
+        ),
+    )
+    contact = ContactRecord(
+        contact_id="ct-founder",
+        organization_id="org-anam",
+        full_name="Maya Founder",
+        title="Founder",
+        contact_type="Founder",
+        email="maya@example.com",
+    )
+
+    draft = draft_track_2_email(
+        organization=organization,
+        contact=contact,
+        campaign_action="send_initial_multichannel_outreach",
+        style_profile=CommunicationStyleProfile(),
+    )
+
+    assert "The story-fit is concrete" in str(draft["body"])
+    assert "FlairX gives a direct recruiting workflow pitch" in str(draft["body"])
+    assert "The company looks close" not in str(draft["body"])
+
+
+def test_communication_review_csv_and_feedback_import_round_trip(tmp_path: Path) -> None:
+    review_artifact = tmp_path / "linkedin-review.json"
+    payload = {
+        "source_artifact": "artifacts/source.json",
+        "results": [
+            {
+                "company": "Tessera Labs",
+                "name": "Anirudh",
+                "title": "Founder",
+                "contact_id": "ct-anirudh",
+                "organization_id": "org-tessera",
+                "draft_kind": "accepted_follow_up",
+                "draft_message": "Generic draft",
+                "communication_recommendation": "rewrite_before_send",
+                "communication_review": {
+                    "channel": "linkedin_followup",
+                    "score": 72,
+                    "verdict": "needs_rewrite",
+                    "recommended_action": "rewrite_before_send",
+                    "flags": ["Generic company insight"],
+                    "strengths": ["Concrete low-friction ask"],
+                },
+            }
+        ],
+    }
+    review_artifact.write_text(json.dumps(payload), encoding="utf-8")
+
+    rows = build_communication_review_csv_rows(payload=payload, review_artifact=review_artifact)
+    assert len(rows) == 1
+    assert rows[0]["row_id"]
+    assert rows[0]["user_decision"] == ""
+    assert "Generic company insight" in rows[0]["flags"]
+    assert "generic_insight" in rows[0]["quality_labels"]
+    assert "specific product" in rows[0]["rewrite_guidance"]
+    assert "engineering + MBA background" in rows[0]["suggested_message"]
+    assert "product/operator" not in rows[0]["suggested_message"]
+
+    csv_path = write_communication_review_csv(payload=payload, review_artifact=review_artifact)
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        csv_rows = list(csv.DictReader(handle))
+    csv_rows[0]["user_decision"] = "reject"
+    csv_rows[0]["user_reason"] = "generic_insight"
+    csv_rows[0]["user_edit"] = "Thanks Anirudh. Is there a product path where my recruiting workflow work is relevant?"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=csv_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(csv_rows)
+
+    summary = import_communication_feedback_rows(
+        workspace=tmp_path / "workspace",
+        feedback_path=csv_path,
+        execute=True,
+    )
+    second_summary = import_communication_feedback_rows(
+        workspace=tmp_path / "workspace",
+        feedback_path=csv_path,
+        execute=True,
+    )
+
+    assert summary["new_rows"] == 1
+    assert summary["summary"]["decision_counts"] == {"reject": 1}
+    assert second_summary["new_rows"] == 0
+    assert second_summary["skipped_duplicates"] == 1
+
+
+def test_communication_review_csv_suggests_simple_senior_product_question(tmp_path: Path) -> None:
+    review_artifact = tmp_path / "linkedin-review.json"
+    payload = {
+        "source_artifact": "artifacts/source.json",
+        "results": [
+            {
+                "company": "Snyk",
+                "name": "Emiliano Castro",
+                "title": "Principal Software Engineer at Snyk",
+                "contact_id": "ct-emiliano",
+                "organization_id": "org-snyk",
+                "draft_kind": "accepted_follow_up",
+                "draft_message": (
+                    "Thanks for connecting, Emiliano. I'm trying to get on the radar at Snyk for PM/product roles. "
+                    "If I send a tight resume + 3-line blurb, would you be open to pointing me to the right referral path?"
+                ),
+                "communication_review": {
+                    "channel": "linkedin_followup",
+                    "score": 82,
+                    "verdict": "review",
+                    "recommended_action": "human_review",
+                    "flags": ["Seniority mismatch: tactical referral ask to senior/principal contact"],
+                    "strengths": ["Concrete low-friction ask"],
+                },
+            }
+        ],
+    }
+
+    rows = build_communication_review_csv_rows(payload=payload, review_artifact=review_artifact)
+    suggestion = rows[0]["suggested_message"]
+
+    assert "Do you think that background could fit any product work there" in suggestion
+    assert "If yes, who would be the right person to ask" in suggestion
+    assert "does that angle make sense" not in suggestion
+    assert "route I should understand" not in suggestion
+    assert "tight resume" not in suggestion
 
 
 def test_summarize_linkedin_followup_actions_counts_daily_work() -> None:
@@ -1022,6 +1748,17 @@ def test_summarize_linkedin_followup_actions_counts_daily_work() -> None:
                 "draft_kind": "polite_close_reply",
                 "send_recommendation": "optional",
             },
+            {
+                "company": "Beyond Med",
+                "draft_kind": "conversation_reply",
+                "send_recommendation": "review",
+                "action_items": [
+                    {
+                        "priority": "high",
+                        "description": "Email resume and a short role-fit note to Alessandra@beyondmedplans.com for Beyond Med.",
+                    }
+                ],
+            },
         ],
         [
             {"action": "missing_contact"},
@@ -1030,10 +1767,69 @@ def test_summarize_linkedin_followup_actions_counts_daily_work() -> None:
     )
 
     assert summary["follow_up_candidates"] == 1
-    assert summary["reply_candidates"] == 2
+    assert summary["reply_candidates"] == 3
     assert summary["optional_closes"] == 1
     assert summary["missing_contacts"] == 1
-    assert summary["by_company"] == {"Snyk": 2, "Sortly": 1}
+    assert summary["external_action_items"] == 1
+    assert summary["action_items"][0]["priority"] == "high"
+    assert summary["by_company"] == {"Snyk": 2, "Beyond Med": 1, "Sortly": 1}
+
+
+def test_extract_linkedin_conversation_action_items_detects_resume_email() -> None:
+    actions = extract_linkedin_conversation_action_items(
+        {
+            "name": "Shaun Weiss",
+            "company": "Beyond Med",
+            "last_sender": "Shaun",
+            "latest_message": (
+                "Hi Akshat - thanks for reaching out. If you could please send your resume "
+                "to Alessandra@beyondmedplans.com, that would be helpful. Ale runs our product team."
+            ),
+        }
+    )
+
+    assert actions == [
+        {
+            "action_type": "email_resume",
+            "priority": "high",
+            "contact_name": "Shaun Weiss",
+            "company": "Beyond Med",
+            "email": "Alessandra@beyondmedplans.com",
+            "description": "Email resume and a short role-fit note to Alessandra@beyondmedplans.com for Beyond Med.",
+            "source_message": (
+                "Hi Akshat - thanks for reaching out. If you could please send your resume "
+                "to Alessandra@beyondmedplans.com, that would be helpful. Ale runs our product team."
+            ),
+        }
+    ]
+
+
+def test_summarize_linkedin_followup_actions_surfaces_inbound_opportunities() -> None:
+    summary = summarize_linkedin_followup_actions(
+        [],
+        [
+            {
+                "action": "missing_contact",
+                "name": "Alex M.",
+                "latest_message": (
+                    "Sponsored Remote AI projects for software engineers up to $100/hr. "
+                    "I think your professional experience would make you a great candidate "
+                    "for our Software Engineer position in our fellowship program. You can apply here."
+                ),
+            },
+            {
+                "action": "missing_contact",
+                "name": "Random Sales",
+                "latest_message": "Sponsored webinar for revenue leaders.",
+            },
+        ],
+    )
+
+    assert summary["missing_contacts"] == 2
+    assert summary["external_action_items"] == 1
+    assert summary["action_items"][0]["action_type"] == "review_inbound_opportunity"
+    assert summary["action_items"][0]["contact_name"] == "Alex M."
+    assert summary["action_items"][0]["priority"] == "medium"
 
 
 def test_persist_linkedin_followup_send_result_records_touchpoint(tmp_path: Path) -> None:

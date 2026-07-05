@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 import hashlib
+from pathlib import Path
 import re
 
 import anthropic
+
+from outreach.style_profile import CommunicationStyleProfile, load_style_profile_if_exists, normalize_recipient_type
 
 
 NOTE_CHAR_LIMIT = 300
@@ -30,6 +33,13 @@ class NoteQualityCheck:
 
 class NoteGenerator:
     """Deterministic LinkedIn invite note generator tuned to the 300-char limit."""
+
+    def __init__(
+        self,
+        style_profile: CommunicationStyleProfile | None = None,
+        style_profile_path: Path | None = None,
+    ) -> None:
+        self.style_profile = style_profile or load_style_profile_if_exists(style_profile_path)
 
     def generate(
         self,
@@ -67,6 +77,7 @@ class NoteGenerator:
             if contextual:
                 family, ask_style, variants = contextual
                 note = self._pick_variant(variants, candidate, company_for_note)
+                note = self._apply_style_profile(note, candidate, role_bucket)
                 note = self._tighten_to_limit(note)
                 return GeneratedNote(
                     text=note,
@@ -102,6 +113,7 @@ class NoteGenerator:
             variants = self._general_variants(first_name, company_for_note, ask_style)
 
         note = self._pick_variant(variants, candidate, company_for_note)
+        note = self._apply_style_profile(note, candidate, role_bucket)
         note = self._tighten_to_limit(note)
         return GeneratedNote(
             text=note,
@@ -128,6 +140,8 @@ class NoteGenerator:
                 note_context=note_context,
             )
             quality = self.quality_check(candidate, generated, recent_notes)
+            recipient_type = self._style_recipient_type(candidate, generated.family, candidate.get("role_bucket") or "Other")
+            style_review = self.style_profile.review_message(generated.text, recipient_type)
             enriched = {
                 **candidate,
                 "note": generated.text,
@@ -136,6 +150,8 @@ class NoteGenerator:
                 "note_length": generated.length,
                 "note_within_limit": generated.within_limit,
                 "note_qc": asdict(quality),
+                "style_recipient_type": recipient_type,
+                "style_review": style_review.model_dump(mode="json"),
             }
             annotated.append(enriched)
             recent_notes.append(generated.text)
@@ -206,6 +222,14 @@ class NoteGenerator:
         else:
             strengths.append("Avoids generic outreach phrasing")
 
+        recipient_type = self._style_recipient_type(candidate, generated.family, candidate.get("role_bucket") or "Other")
+        style_review = self.style_profile.review_message(note, recipient_type)
+        for phrase in style_review.banned_phrases:
+            flags.append(f"Style banned phrase: {phrase}")
+            score -= 18
+        if not style_review.banned_phrases:
+            strengths.append("Passes local style profile")
+
         signal_hits = 0
         if candidate.get("existing_connection"):
             signal_hits += 1
@@ -250,6 +274,11 @@ class NoteGenerator:
                 "feels close to",
                 "strong fit",
                 "natural extension",
+                "connects with",
+                "maps well",
+                "maps directly",
+                "quick read on where",
+                "could be useful",
             ]
         ):
             strengths.append("Uses specific hook")
@@ -276,7 +305,12 @@ class NoteGenerator:
             strengths.append("Uses USC-native close naturally")
 
         score = max(0, min(100, score))
-        hard_fail = generated.length > NOTE_CHAR_LIMIT or not ask_is_clear or not note.strip()
+        hard_fail = (
+            generated.length > NOTE_CHAR_LIMIT
+            or not ask_is_clear
+            or not note.strip()
+            or bool(style_review.banned_phrases)
+        )
         verdict = "blocked" if hard_fail else "send"
         return NoteQualityCheck(score=score, verdict=verdict, flags=flags, strengths=strengths)
 
@@ -304,6 +338,13 @@ class NoteGenerator:
             },
             "note_context": candidate.get("note_context") or {},
             "base_note": base_note,
+            "style_guidance": self.style_profile.prompt_guidance(
+                self._style_recipient_type(
+                    candidate,
+                    str(candidate.get("note_family", "general")),
+                    str(candidate.get("role_bucket") or "Other"),
+                )
+            ),
         }
         prompt = (
             "Rewrite this LinkedIn invite note to sound sharper and more natural while preserving the same facts and warmth.\n"
@@ -314,6 +355,7 @@ class NoteGenerator:
             "- Respect the ask_style: conversation, guidance, or direct_help\n"
             "- Only direct_help may ask for more explicit support, and even then keep it light\n"
             "- Keep 'Fight On!' if the candidate has USC or USC Marshall signal\n"
+            "- Follow the style_guidance and avoid all banned phrases\n"
             "- Output JSON only: {\"note\": \"...\"}\n\n"
             f"{json.dumps(payload, ensure_ascii=True)}"
         )
@@ -341,6 +383,75 @@ class NoteGenerator:
             length=len(note),
             within_limit=len(note) <= NOTE_CHAR_LIMIT,
         )
+
+    def _style_recipient_type(self, candidate: dict, family: str, role_bucket: str) -> str:
+        title = str(candidate.get("title") or "").lower()
+        location = str(candidate.get("location") or "").lower()
+        if family == "engineering_referral" or (
+            role_bucket == "Engineering"
+            and any(
+                signal in f"{title} {location}"
+                for signal in ["india", "bengaluru", "bangalore", "delhi", "gurgaon", "gurugram", "mumbai", "hyderabad", "pune", "chennai"]
+            )
+        ):
+            return "engineer_india"
+        if role_bucket == "Founder" or any(signal in title for signal in ["founder", "co-founder", "cofounder", "ceo"]):
+            return "founder"
+        if role_bucket == "University Recruiting" or any(signal in title for signal in ["recruiter", "talent", "campus"]):
+            return "recruiter"
+        if role_bucket == "Product":
+            if any(signal in title for signal in ["apm", "associate product", "product analyst", "product intern"]):
+                return "junior_product_apm"
+            return "senior_product"
+        if role_bucket == "Engineering":
+            return "engineer"
+        return normalize_recipient_type(str(candidate.get("recipient_type") or "general"))
+
+    def _apply_style_profile(self, note: str, candidate: dict, role_bucket: str) -> str:
+        styled = " ".join(note.split())
+        replacements = [
+            ("Would love to connect and understand where a technical MBA could be useful.", "Would value your quick read on where a technical MBA could be useful."),
+            ("Would love to connect and follow what you're building.", "I'd value following what you're building."),
+            ("Would love to connect and understand where someone with my background could contribute.", "Would value your read on where someone with my background could contribute."),
+            ("Would love to connect and understand where my engineering + PM background could be useful.", "Would value your read on where my engineering + PM background could be useful."),
+            ("Would love to connect and hear what project areas the product team is most excited about.", "I'd value hearing what project areas the product team is most focused on."),
+            ("Would love to connect and ask what tends to matter most to the product team.", "I'd value asking what tends to matter most to the product team."),
+            ("Would love to connect and understand the best way to get on the product team's radar.", "Would value a pointer on the best way to get on the product team's radar."),
+            ("Would love to connect and ask what tends to stand out to the product team.", "Would value a pointer on what tends to stand out to the product team."),
+            ("Would love to connect and ask what usually helps candidates stand out to the team.", "Would value a pointer on what usually helps candidates stand out to the team."),
+            ("Would love to connect and hear which project areas the team is most excited about.", "I'd value hearing which project areas the team is most focused on."),
+            ("Would love to connect and understand where someone like me could be useful.", "Would value your quick read on where someone like me could be useful."),
+            ("Would love to connect and ask what tends to matter most to the team.", "I'd value asking what tends to matter most to the team."),
+            ("Would love to connect and learn from your experience there.", "I'd value hearing how builders work with product there."),
+            ("would love to connect and learn from your experience there.", "I'd value hearing how builders work with product there."),
+            ("Would love to connect and learn from your experience.", "I'd value hearing what helped you navigate the path."),
+            ("would love to connect and learn from your experience.", "I'd value hearing what helped you navigate the path."),
+            ("Would love to connect and learn from your journey.", "I'd value hearing what helped you navigate the path."),
+            ("Would love to connect and hear about your experience.", "I'd value hearing about your experience."),
+            ("Would love to connect and hear about your path.", "I'd value hearing about your path."),
+            ("Would love to connect and hear about your experience building there.", "I'd value hearing what builders there learn about the product."),
+            ("I'd love to connect and learn from your experience there.", "I'd value hearing what builders there learn about the product."),
+            ("I'd love to connect and learn from your experience.", "I'd value hearing what helped you navigate the path."),
+            ("I'd love to connect and hear about your experience.", "I'd value hearing about your experience."),
+            ("I'd love to connect and learn what you look for", "I'd value learning what you look for"),
+            ("I'd love to connect and hear what tends to stand out", "I'd value hearing what tends to stand out"),
+            ("Would love your perspective", "I'd value your perspective"),
+            ("Would love your quick thoughts", "I'd value your quick thoughts"),
+            ("Would love to stay in touch", "I'd value staying in touch"),
+            ("Would love to keep in touch", "I'd value keeping in touch"),
+            ("would love to connect", "would value connecting"),
+            ("Would love to connect", "Would value connecting"),
+            ("Your product journey stood out", "Your product path caught my eye"),
+            ("Your path stood out", "Your path caught my eye"),
+            ("Your product path stood out", "Your product path caught my eye"),
+            ("your work stood out", "your work caught my eye"),
+            ("Your work stood out", "Your work caught my eye"),
+            ("most excited about", "most focused on"),
+        ]
+        for source, target in replacements:
+            styled = styled.replace(source, target)
+        styled = re.sub(r"\s+", " ", styled).strip()
+        return styled
 
     def _determine_ask_style(self, candidate: dict, role_bucket: str, company_mode: str) -> str:
         if candidate.get("existing_connection"):

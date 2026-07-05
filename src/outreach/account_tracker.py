@@ -108,6 +108,16 @@ MIN_MAPPED_CONTACTS = 3
 BRAND_SCORE_MAX = 12
 PITCH_SCORE_MAX = 10
 MANUAL_PRIORITY_TAGS = {"priority", "core", "relationship", "target", "dream", "track-2", "tier-a"}
+RELATIONSHIP_TIER_A_TOTAL = 32
+TIER_B_TOTAL = 50
+TIER_A_MIN_SCORE = 30
+TIER_B_MIN_SCORE = 18
+TIER_A_TRACK_QUOTAS = {
+    "Startup / Founder-Led": 20,
+    "Growth / Mid-Market": 12,
+}
+LARGE_COMPANY_L1_TOTAL = 20
+LARGE_COMPANY_L2_TOTAL = 40
 
 # ---------------------------------------------------------------------------
 # Role fit patterns
@@ -135,7 +145,9 @@ ROLE_FIT_PATTERNS: list[tuple[int, list[str]]] = [
 
 SHARED_EMPLOYERS = ["intuit", "gojek", "hevo", "optum"]
 LA_KEYWORDS = ["los angeles", " la,", "santa monica", "culver city", "el segundo",
-               "manhattan beach", "playa vista", "west la", "westwood"]
+               "manhattan beach", "playa vista", "west la", "westwood",
+               "burbank", "glendale", "pasadena", "long beach", "irvine"]
+REMOTE_KEYWORDS = ["remote", "work from home", "wfh", "distributed"]
 
 # ---------------------------------------------------------------------------
 # Account stages
@@ -164,6 +176,7 @@ class AccountRow:
     target_role: str = ""
     hiring_signal: str = "No open roles"
     people_mapped: int = 0
+    email_contacts: int = 0
     invites_sent: int = 0
     accepted: int = 0
     replies: int = 0
@@ -181,6 +194,7 @@ class AccountRow:
     score_reachability: int = 0
     score_hiring: int = 0
     score_relationship: int = 0
+    score_relationship_momentum: int = 0
     score_brand: int = 0
     score_pitch_strength: int = 0
     score_account_hiring: int = 0
@@ -188,8 +202,10 @@ class AccountRow:
     campaign_action: str = ""
     campaign_channel: str = ""
     campaign_priority: int = 0
+    daily_action_priority: int = 0
     campaign_reason: str = ""
     lane_1_policy: str = ""
+    account_track: str = ""
 
 
 @dataclass
@@ -201,17 +217,54 @@ class CampaignPlanRow:
     account_stage: str
     campaign_action: str
     campaign_channel: str
+    account_track: str
     campaign_priority: int
+    daily_action_priority: int
     campaign_reason: str
     lane_1_policy: str
     why_fit: str
     people_mapped: int
+    email_contacts: int
     invites_sent: int
     accepted: int
     replies: int
     target_role: str
     next_due_date: str
     organization_id: str
+
+
+@dataclass(frozen=True)
+class DailyPlanBudget:
+    max_total_actions: int = 24
+    max_companies: int = 18
+    max_linkedin_invites: int = 12
+    max_linkedin_followups: int = 8
+    max_company_mapping: int = 5
+    max_email_research: int = 5
+    max_context_enrichment: int = 8
+    max_email_drafts: int = 0
+
+
+@dataclass
+class DailyPlanItem:
+    company: str
+    tier: str
+    campaign_action: str
+    campaign_channel: str
+    daily_action_priority: int
+    account_score: int
+    phase: str = ""
+    phase_order: int = 0
+    can_parallelize: bool = False
+    expected_linkedin_invites: int = 0
+    expected_linkedin_followups: int = 0
+    expected_company_mapping: int = 0
+    expected_email_research: int = 0
+    expected_context_enrichment: int = 0
+    expected_email_drafts: int = 0
+    reason: str = ""
+    skip_reason: str = ""
+    organization_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +350,94 @@ def _score_profile_fit(org: OrganizationRecord) -> tuple[int, list[str], str, Op
     return min(score, PROFILE_FIT_CAP), matched, parsed.get("tags", ""), team_size
 
 
+def _opportunity_text(opp: OpportunityRecord) -> str:
+    return " ".join(
+        [
+            opp.title,
+            str(opp.opportunity_type),
+            opp.target_lists,
+            opp.location,
+            opp.source_url,
+            opp.notes,
+        ]
+    ).lower()
+
+
+def _opportunity_role_text(opp: OpportunityRecord) -> str:
+    return " ".join([opp.title, opp.target_lists, opp.notes]).lower()
+
+
+def _is_internship_role(opp: OpportunityRecord) -> bool:
+    text = _opportunity_text(opp)
+    return opp.opportunity_type == "internship" or "intern" in text
+
+
+def _is_full_time_path_role(opp: OpportunityRecord) -> bool:
+    text = _opportunity_text(opp)
+    if _is_internship_role(opp):
+        return False
+    if opp.opportunity_type == "full_time":
+        return True
+    return any(
+        pattern in text
+        for pattern in (
+            "full-time",
+            "full time",
+            "new grad",
+            "new-grad",
+            "early career",
+            "rotational",
+            "associate product manager",
+            "technical product manager",
+            "product manager",
+            "product owner",
+            "product operations",
+            "product ops",
+            "apm",
+        )
+    )
+
+
+def _is_fall_or_current_internship(opp: OpportunityRecord) -> bool:
+    if not _is_internship_role(opp):
+        return False
+    text = _opportunity_role_text(opp)
+    return re.search(
+        r"(?<![a-z0-9])(?:fall|autumn|spring|winter|co[-\s]?op|off[-\s]?cycle)(?![a-z0-9])",
+        text,
+    ) is not None
+
+
+def _is_remote_opportunity(opp: OpportunityRecord) -> bool:
+    return any(keyword in _opportunity_text(opp) for keyword in REMOTE_KEYWORDS)
+
+
+def _is_la_compatible_opportunity(opp: OpportunityRecord) -> bool:
+    text = _opportunity_text(opp)
+    return any(keyword in text for keyword in LA_KEYWORDS)
+
+
+def _has_known_location(opp: OpportunityRecord) -> bool:
+    text = " ".join([opp.location, opp.notes]).lower()
+    return bool(opp.location.strip()) or "location=" in text
+
+
+def _is_fall_location_compatible(opp: OpportunityRecord) -> bool:
+    if not _is_fall_or_current_internship(opp):
+        return False
+    return _is_remote_opportunity(opp) or _is_la_compatible_opportunity(opp)
+
+
+def _is_fall_location_incompatible(opp: OpportunityRecord) -> bool:
+    if not _is_fall_or_current_internship(opp):
+        return False
+    return _has_known_location(opp) and not _is_fall_location_compatible(opp)
+
+
+def _is_summer_internship(opp: OpportunityRecord) -> bool:
+    return _is_internship_role(opp) and "summer" in _opportunity_text(opp)
+
+
 def _score_role_fit(opps: list[OpportunityRecord]) -> tuple[int, str, str]:
     if not opps:
         return 0, "", "No open roles"
@@ -313,16 +454,43 @@ def _score_role_fit(opps: list[OpportunityRecord]) -> tuple[int, str, str]:
     if best_score == 0 and opps:
         best_score = 3
         best_title = opps[0].title
-    intern_count = sum(1 for o in opps if o.opportunity_type == "internship")
-    ft_count = sum(1 for o in opps if o.opportunity_type == "full_time")
-    if intern_count >= 2:
-        hiring_signal = f"{intern_count} internships open"
-    elif intern_count == 1:
-        hiring_signal = "Active internship"
-    elif ft_count >= 2:
-        hiring_signal = f"{ft_count} FT roles open"
+    ft_count = sum(1 for o in opps if _is_full_time_path_role(o))
+    fall_count = sum(1 for o in opps if _is_fall_location_compatible(o))
+    fall_unknown_count = sum(
+        1
+        for o in opps
+        if _is_fall_or_current_internship(o)
+        and not _is_fall_location_compatible(o)
+        and not _is_fall_location_incompatible(o)
+    )
+    fall_incompatible_count = sum(1 for o in opps if _is_fall_location_incompatible(o))
+    summer_count = sum(1 for o in opps if _is_summer_internship(o))
+    intern_count = sum(1 for o in opps if _is_internship_role(o))
+    generic_intern_count = max(0, intern_count - fall_count - fall_unknown_count - fall_incompatible_count - summer_count)
+    if ft_count >= 2:
+        hiring_signal = f"{ft_count} FT/product-path roles open"
     elif ft_count == 1:
-        hiring_signal = "FT role open"
+        hiring_signal = "FT/product-path role open"
+    elif fall_count >= 2:
+        hiring_signal = f"{fall_count} fall/co-op internships, LA/remote"
+    elif fall_count == 1:
+        hiring_signal = "Fall/co-op internship, LA/remote"
+    elif fall_unknown_count >= 2:
+        hiring_signal = f"{fall_unknown_count} fall/co-op internships, location unknown"
+    elif fall_unknown_count == 1:
+        hiring_signal = "Fall/co-op internship, location unknown"
+    elif fall_incompatible_count >= 2:
+        hiring_signal = f"{fall_incompatible_count} fall/co-op internships outside LA/remote"
+    elif fall_incompatible_count == 1:
+        hiring_signal = "Fall/co-op internship outside LA/remote"
+    elif generic_intern_count >= 2:
+        hiring_signal = f"{generic_intern_count} internships discovered"
+    elif generic_intern_count == 1:
+        hiring_signal = "Internship discovered"
+    elif summer_count >= 2:
+        hiring_signal = f"{summer_count} summer internships discovered"
+    elif summer_count == 1:
+        hiring_signal = "Summer internship discovered"
     elif opps:
         hiring_signal = f"{len(opps)} role(s) discovered"
     else:
@@ -468,15 +636,39 @@ def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
 
 def _score_pitch_strength(
     *,
+    org: OrganizationRecord,
     profile_fit: int,
     reachability: int,
     team_size: Optional[int],
     data_quality_flags: list[str],
 ) -> tuple[int, str]:
-    if "needs_domain_enrichment" in data_quality_flags or "role_without_domain_context" in data_quality_flags:
+    parsed = _parse_notes(org.notes)
+    target_tags = _split_normalized_tags(org.target_lists)
+    has_explicit_story_fit = bool(
+        parsed.get("why_this_company")
+        or parsed.get("story_fit_reason")
+        or parsed.get("story_angle")
+        or parsed.get("profile_evidence")
+    )
+    if (
+        "needs_domain_enrichment" in data_quality_flags
+        or "role_without_domain_context" in data_quality_flags
+    ) and not has_explicit_story_fit:
         return 0, "needs domain context"
     score = 0
     reasons: list[str] = []
+    if has_explicit_story_fit:
+        if parsed.get("why_this_company") or parsed.get("story_fit_reason"):
+            score += 5
+            reasons.append("explicit story-fit pitch")
+        if parsed.get("profile_evidence"):
+            score += 3
+            reasons.append("profile evidence")
+        if parsed.get("story_angle"):
+            score += 2
+            reasons.append("story angle")
+        if "story-fit" in target_tags:
+            score += 1
     if profile_fit >= 20:
         score += 5
         reasons.append("strong profile story")
@@ -503,12 +695,12 @@ def _score_pitch_strength(
 
 
 def _score_account_hiring(role_score: int, hiring_score: int) -> int:
-    if hiring_score >= 20 and role_score >= 18:
-        return 8
-    if hiring_score >= 10 and role_score >= 12:
+    if hiring_score >= 18 and role_score >= 18:
         return 6
+    if hiring_score >= 12 and role_score >= 12:
+        return 4
     if hiring_score >= 5:
-        return 3
+        return 2
     return 0
 
 
@@ -593,25 +785,35 @@ def _score_reachability(
 
 
 def _score_hiring(opps: list[OpportunityRecord]) -> tuple[int, list[str]]:
-    # TODO(data): recency decay is not yet applied. relationship_engine.md specifies:
-    #   - internship posted ≤45 days ago → 20 pts
-    #   - internship posted 45–90 days ago → 12 pts
-    #   - roles older than 90 days → 0 pts (treat as stale)
-    # To enable this, bridge opportunities.csv with date_posted from
-    # ResumeGenerator v1/jobs.xlsx. Both share company name as a join key.
+    # Track 2 is account-first. Roles are timing/path signals, not the ranking
+    # center. Summer internship listings are weak now; FT/new-grad/APM/fall/co-op
+    # roles are more relevant for the current relationship campaign.
     if not opps:
         return 0, []
-    has_intern = any(o.opportunity_type == "internship" for o in opps)
-    has_ft = any(o.opportunity_type == "full_time" for o in opps)
-    if has_intern:
-        return 20, ["internship listed"]
-    if has_ft:
-        return 10, ["FT role listed"]
+    if any(_is_full_time_path_role(o) for o in opps):
+        return 18, ["FT/product path listed"]
+    if any(o.opportunity_type == "full_time" for o in opps):
+        return 14, ["FT role listed"]
+    if any(_is_fall_location_compatible(o) for o in opps):
+        return 12, ["LA/remote fall/co-op internship listed"]
+    if any(
+        _is_fall_or_current_internship(o)
+        and not _is_fall_location_compatible(o)
+        and not _is_fall_location_incompatible(o)
+        for o in opps
+    ):
+        return 6, ["fall/co-op internship needs location check"]
+    if any(_is_fall_location_incompatible(o) for o in opps):
+        return 1, ["fall/co-op internship outside LA/remote"]
+    if any(_is_internship_role(o) and not _is_summer_internship(o) for o in opps):
+        return 6, ["internship discovered"]
+    if any(_is_summer_internship(o) for o in opps):
+        return 3, ["summer internship discovered"]
     return 5, ["roles discovered"]
 
 
 def _score_relationship_depth(contacts: list[ContactRecord]) -> tuple[int, str]:
-    """Relationship progress bonus. Active conversation >> zero contacts."""
+    """Daily momentum score. Active conversation should jump the action queue."""
     replied = sum(1 for c in contacts if c.status in REPLIED_STATUSES)
     accepted = sum(1 for c in contacts if c.status in ACCEPTED_STATUSES)
 
@@ -623,6 +825,20 @@ def _score_relationship_depth(contacts: list[ContactRecord]) -> tuple[int, str]:
         return 12, f"{accepted} accepted"
     if accepted >= 1:
         return 8, f"{accepted} accepted"
+    return 0, ""
+
+
+def _score_relationship_priority(contacts: list[ContactRecord]) -> tuple[int, str]:
+    """Small strategic score bonus for traction without letting traction dominate tiering."""
+    replied = sum(1 for c in contacts if c.status in REPLIED_STATUSES)
+    accepted = sum(1 for c in contacts if c.status in ACCEPTED_STATUSES)
+
+    if replied >= 1:
+        return 6, f"{replied} warm contact(s)"
+    if accepted >= 3:
+        return 4, f"{accepted} accepted"
+    if accepted >= 1:
+        return 3, f"{accepted} accepted"
     return 0, ""
 
 
@@ -657,7 +873,7 @@ def _derive_stage(
 def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str]:
     flags = {item.strip() for item in row.data_quality_flags.split(";") if item.strip()}
     if "needs_domain_enrichment" in flags or "role_without_domain_context" in flags:
-        if row.fit_score < 25 and row.score_brand == 0:
+        if row.fit_score < 25 and row.score_brand == 0 and row.score_role_fit < 18:
             return (
                 "pause_account",
                 "none",
@@ -672,12 +888,12 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
             "Company/domain fit is under-specified for a relationship campaign; enrich before more touches.",
             "fresh_role_only",
         )
-    if row.tier == "C":
+    if row.tier in {"C", "L3"}:
         return (
             "pause_account",
             "none",
             10,
-            "Not in Tier A/B or not enough current fit to spend relationship-engine budget.",
+            "Not in Relationship A/B or Large L1/L2 priority; do not spend account-campaign budget right now.",
             "lane_1_allowed",
         )
     if row.account_score < 18:
@@ -705,6 +921,14 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
             "track_2_owns",
         )
     if row.account_stage == "people_mapped" and row.invites_sent == 0:
+        if row.email_contacts > 0 and row.tier in {"A", "L1"}:
+            return (
+                "send_initial_multichannel_outreach",
+                "linkedin+email",
+                86 if row.tier == "A" else 76,
+                "Relevant people are mapped and at least one email is available; run LinkedIn and email in parallel.",
+                "track_2_owns",
+            )
         return (
             "send_initial_invites",
             "linkedin",
@@ -715,18 +939,26 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
     if row.people_mapped < MIN_MAPPED_CONTACTS:
         return (
             "map_more_contacts",
-            "linkedin",
+            "linkedin+email_research" if row.tier in {"A", "L1"} else "linkedin",
             75 if row.tier == "A" else 55,
             f"Only {row.people_mapped} relevant contact(s) mapped; build a better account map before sending more.",
             "track_2_owns",
         )
     if row.account_stage == "outreach_active":
         if row.invites_sent >= LINKEDIN_WAVE_SIZE and row.accepted == 0 and row.replies == 0:
+            if row.email_contacts > 0:
+                return (
+                    "send_cold_email_followup",
+                    "email",
+                    92 if row.tier == "A" else 72,
+                    f"{row.invites_sent} LinkedIn invites with no accepts/replies and email exists; switch the next touch to email.",
+                    "track_2_owns",
+                )
             return (
-                "switch_to_email_or_wellfound",
-                "email/wellfound",
+                "find_email_path",
+                "email_research",
                 90 if row.tier == "A" else 70,
-                f"{row.invites_sent} LinkedIn invites with no accepts/replies; add or switch channel instead of another blind wave.",
+                f"{row.invites_sent} LinkedIn invites with no accepts/replies; find an email/contact-info path instead of another blind wave.",
                 "track_2_owns",
             )
         if row.invites_sent < LINKEDIN_WAVE_SIZE:
@@ -747,7 +979,11 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
     if row.account_stage in {"priority_target", "unqualified"}:
         return (
             "map_more_contacts" if row.account_score >= 30 else "enrich_company_context",
-            "linkedin" if row.account_score >= 30 else "research",
+            (
+                "linkedin+email_research"
+                if row.account_score >= 30 and row.tier in {"A", "L1"}
+                else ("linkedin" if row.account_score >= 30 else "research")
+            ),
             70 if row.tier == "A" else 50,
             "Account has enough score to inspect, but is not ready for a campaign touch yet.",
             "fresh_role_only" if row.tier in {"A", "B"} else "lane_1_allowed",
@@ -759,6 +995,124 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
         "No high-leverage campaign action detected.",
         "lane_1_allowed",
     )
+
+
+def _daily_action_priority_for_account(row: AccountRow) -> int:
+    """Execution urgency for today's queue, separate from durable account rank."""
+    action_floor = row.campaign_priority
+    tier_bonus = 5 if row.tier == "A" else (2 if row.tier == "B" else 0)
+    score_bonus = min(5, row.account_score // 12)
+    momentum_bonus = min(6, row.score_relationship_momentum // 3)
+    return max(row.campaign_priority, action_floor + tier_bonus + score_bonus + momentum_bonus)
+
+
+def _account_rank_key(row: AccountRow) -> tuple[int, int, str]:
+    return (row.account_score, row.fit_score, row.company.lower())
+
+
+def _is_tier_a_eligible(row: AccountRow) -> bool:
+    return (
+        row.account_score >= TIER_A_MIN_SCORE
+        and row.account_track in TIER_A_TRACK_QUOTAS
+    )
+
+
+def _assign_segmented_tiers(rows: list[AccountRow]) -> None:
+    """Assign relationship tiers and separate large-company priority labels."""
+    rows.sort(key=_account_rank_key, reverse=True)
+    for row in rows:
+        row.tier = "C"
+
+    selected: set[str] = set()
+    for track, quota in TIER_A_TRACK_QUOTAS.items():
+        candidates = [
+            row
+            for row in rows
+            if row.account_track == track and _is_tier_a_eligible(row)
+        ]
+        for row in candidates[:quota]:
+            row.tier = "A"
+            selected.add(row.organization_id)
+
+    remaining_slots = RELATIONSHIP_TIER_A_TOTAL - len(selected)
+    if remaining_slots > 0:
+        fillers = [
+            row
+            for row in rows
+            if row.organization_id not in selected and _is_tier_a_eligible(row)
+        ]
+        for row in fillers:
+            row.tier = "A"
+            selected.add(row.organization_id)
+            remaining_slots -= 1
+            if remaining_slots <= 0:
+                break
+
+    large_companies = [row for row in rows if row.account_track == "Large Company"]
+    for row in large_companies[:LARGE_COMPANY_L1_TOTAL]:
+        row.tier = "L1"
+    for row in large_companies[LARGE_COMPANY_L1_TOTAL:LARGE_COMPANY_L1_TOTAL + LARGE_COMPANY_L2_TOTAL]:
+        row.tier = "L2"
+    for row in large_companies[LARGE_COMPANY_L1_TOTAL + LARGE_COMPANY_L2_TOTAL:]:
+        row.tier = "L3"
+
+    tier_b_assigned = 0
+    for row in rows:
+        if row.organization_id in selected:
+            continue
+        if row.account_track == "Large Company":
+            continue
+        if row.account_score < TIER_B_MIN_SCORE:
+            continue
+        row.tier = "B"
+        tier_b_assigned += 1
+        if tier_b_assigned >= TIER_B_TOTAL:
+            break
+
+
+def _target_tags(row: AccountRow) -> set[str]:
+    return _split_normalized_tags(" ".join([row.target_lists, row.why_fit, row.tags]))
+
+
+def _is_strategic_wishlist(row: AccountRow) -> bool:
+    tags = _target_tags(row)
+    if tags.intersection(MANUAL_PRIORITY_TAGS):
+        return True
+    text = " ".join([row.target_lists, row.why_fit]).lower()
+    return any(
+        _mentions_domain_term(text, token)
+        for token in ("manual priority", "tier a", "dream company", "priority account")
+    )
+
+
+def _needs_context_enrichment(row: AccountRow) -> bool:
+    flags = {item.strip() for item in row.data_quality_flags.split(";") if item.strip()}
+    return bool(
+        flags.intersection(
+            {
+                "needs_domain_enrichment",
+                "role_without_domain_context",
+                "context_inferred_from_job",
+                "team_size_unparsed",
+            }
+        )
+    )
+
+
+def _account_track_for_row(row: AccountRow) -> str:
+    """Operational account segment. Strategic wishlist and enrichment are workbook views."""
+    if row.team_size is not None and row.team_size >= 1000:
+        return "Large Company"
+    if row.team_size is not None and row.team_size >= 200:
+        return "Growth / Mid-Market"
+    tags = _target_tags(row)
+    if row.org_type.lower() == "startup" or tags.intersection({"yc", "startup", "hiring"}):
+        return "Startup / Founder-Led"
+    if row.team_size is not None and row.team_size < 200:
+        return "Startup / Founder-Led"
+    if _needs_context_enrichment(row):
+        return "Needs Enrichment"
+    return "Growth / Mid-Market"
 
 
 # Human-readable label map for why_fit
@@ -848,7 +1202,8 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         s_team = _score_team_gate(team_size)
         s_reach, r_signals = _score_reachability(org, company_contacts)
         s_hiring, _ = _score_hiring(oo)
-        s_rel, rel_label = _score_relationship_depth(company_contacts)
+        s_rel_momentum, momentum_label = _score_relationship_depth(company_contacts)
+        s_rel_priority, rel_label = _score_relationship_priority(company_contacts)
         quality_flags = _data_quality_flags(
             org=org,
             profile_fit=s_profile,
@@ -857,6 +1212,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         )
         s_brand, brand_label = _score_brand(org)
         s_pitch, pitch_label = _score_pitch_strength(
+            org=org,
             profile_fit=s_profile,
             reachability=s_reach,
             team_size=team_size,
@@ -873,12 +1229,12 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         s_domain_penalty = -8 if no_domain_data else 0
 
         fit_score = max(0, s_profile + s_role + s_team + s_reach + s_hiring
-                        + s_rel + s_domain_penalty)
+                        + s_rel_momentum + s_domain_penalty)
         account_score = _score_account_campaign(
             profile_fit=s_profile,
             reachability=s_reach,
             brand=s_brand,
-            relationship=s_rel,
+            relationship=s_rel_priority,
             account_hiring=s_account_hiring,
             pitch_strength=s_pitch,
             team_gate=s_team,
@@ -899,12 +1255,15 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         if pitch_label:
             labels.append(pitch_label)
         if rel_label:
-            labels.insert(0, rel_label)  # relationship depth leads
+            labels.insert(0, rel_label)
+        elif momentum_label:
+            labels.insert(0, momentum_label)
         if s_hiring > 0:
             labels.append(hiring_signal)
         why_fit = "; ".join(list(dict.fromkeys(labels))[:6])
 
         invites_sent = sum(1 for c in company_contacts if c.status in INVITED_STATUSES)
+        email_contacts = sum(1 for c in company_contacts if c.email.strip())
         accepted = sum(1 for c in company_contacts if c.status in ACCEPTED_STATUSES)
         replies = sum(1 for c in company_contacts if c.status in REPLIED_STATUSES)
 
@@ -921,6 +1280,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             target_role=best_role or "—",
             hiring_signal=hiring_signal,
             people_mapped=len(company_contacts),
+            email_contacts=email_contacts,
             invites_sent=invites_sent,
             accepted=accepted,
             replies=replies,
@@ -935,7 +1295,8 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             score_team_gate=s_team,
             score_reachability=s_reach,
             score_hiring=s_hiring,
-            score_relationship=s_rel,
+            score_relationship=s_rel_priority,
+            score_relationship_momentum=s_rel_momentum,
             score_brand=s_brand,
             score_pitch_strength=s_pitch,
             score_account_hiring=s_account_hiring,
@@ -948,11 +1309,12 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             row.campaign_reason,
             row.lane_1_policy,
         ) = _campaign_plan_for_account(row)
+        row.daily_action_priority = _daily_action_priority_for_account(row)
+        row.account_track = _account_track_for_row(row)
         rows.append(row)
 
-    rows.sort(key=lambda r: (r.account_score, r.fit_score, r.company.lower()), reverse=True)
-    for i, r in enumerate(rows):
-        r.tier = "A" if i < 20 else ("B" if i < 60 else "C")
+    _assign_segmented_tiers(rows)
+    for r in rows:
         (
             r.campaign_action,
             r.campaign_channel,
@@ -960,6 +1322,8 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             r.campaign_reason,
             r.lane_1_policy,
         ) = _campaign_plan_for_account(r)
+        r.daily_action_priority = _daily_action_priority_for_account(r)
+        r.account_track = _account_track_for_row(r)
 
     return rows
 
@@ -972,7 +1336,7 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
     ]
     actionable.sort(
         key=lambda row: (
-            row.campaign_priority,
+            row.daily_action_priority,
             row.tier == "A",
             row.account_score,
             row.fit_score,
@@ -989,11 +1353,14 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
             account_stage=row.account_stage,
             campaign_action=row.campaign_action,
             campaign_channel=row.campaign_channel,
+            account_track=row.account_track,
             campaign_priority=row.campaign_priority,
+            daily_action_priority=row.daily_action_priority,
             campaign_reason=row.campaign_reason,
             lane_1_policy=row.lane_1_policy,
             why_fit=row.why_fit,
             people_mapped=row.people_mapped,
+            email_contacts=row.email_contacts,
             invites_sent=row.invites_sent,
             accepted=row.accepted,
             replies=row.replies,
@@ -1003,6 +1370,260 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
         )
         for row in actionable
     ]
+
+
+def build_track_2_daily_plan(
+    rows: list[AccountRow],
+    *,
+    budget: DailyPlanBudget = DailyPlanBudget(),
+) -> dict[str, object]:
+    campaign_rows = build_campaign_plan_rows(rows)
+    selected: list[DailyPlanItem] = []
+    skipped: list[DailyPlanItem] = []
+    used = {
+        "total_actions": 0,
+        "companies": 0,
+        "linkedin_invites": 0,
+        "linkedin_followups": 0,
+        "company_mapping": 0,
+        "email_research": 0,
+        "context_enrichment": 0,
+        "email_drafts": 0,
+    }
+    seen_companies: set[str] = set()
+
+    for row in campaign_rows:
+        item = _daily_plan_item_for_campaign(row)
+        skip_reason = _daily_plan_skip_reason(item, used, seen_companies, budget)
+        if skip_reason:
+            item.skip_reason = skip_reason
+            skipped.append(item)
+            continue
+        selected.append(item)
+        seen_companies.add(item.organization_id or item.company.lower())
+        used["total_actions"] += 1
+        used["companies"] += 1
+        used["linkedin_invites"] += item.expected_linkedin_invites
+        used["linkedin_followups"] += item.expected_linkedin_followups
+        used["company_mapping"] += item.expected_company_mapping
+        used["email_research"] += item.expected_email_research
+        used["context_enrichment"] += item.expected_context_enrichment
+        used["email_drafts"] += item.expected_email_drafts
+
+    selected.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
+    skipped.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
+    return {
+        "budget": budget.__dict__,
+        "used": used,
+        "selected_count": len(selected),
+        "skipped_count": len(skipped),
+        "selected": [item.__dict__ for item in selected],
+        "skipped": [item.__dict__ for item in skipped],
+        "summary": _daily_plan_summary(selected),
+        "phase_summary": _daily_plan_phase_summary(selected),
+        "execution_order": _daily_plan_execution_order(),
+    }
+
+
+def _daily_plan_item_for_campaign(row: CampaignPlanRow) -> DailyPlanItem:
+    item = DailyPlanItem(
+        company=row.company,
+        tier=row.tier,
+        campaign_action=row.campaign_action,
+        campaign_channel=row.campaign_channel,
+        daily_action_priority=row.daily_action_priority,
+        account_score=row.account_score,
+        reason=row.campaign_reason,
+        organization_id=row.organization_id,
+    )
+    remaining_wave = max(0, LINKEDIN_WAVE_SIZE - row.invites_sent)
+    if row.campaign_action in {"continue_conversation", "follow_up_connected_contact"}:
+        item.expected_linkedin_followups = 1
+    elif row.campaign_action == "send_initial_invites":
+        item.expected_linkedin_invites = min(remaining_wave or 3, 3)
+    elif row.campaign_action == "expand_linkedin_wave":
+        item.expected_linkedin_invites = min(remaining_wave or 1, 3)
+    elif row.campaign_action == "send_initial_multichannel_outreach":
+        item.expected_linkedin_invites = 1
+        item.expected_email_drafts = 1
+    elif row.campaign_action == "send_cold_email_followup":
+        item.expected_email_drafts = 1
+    elif row.campaign_action == "map_more_contacts":
+        item.expected_company_mapping = 1
+        if "email" in row.campaign_channel:
+            item.expected_email_research = 1
+    elif row.campaign_action == "find_email_path":
+        item.expected_email_research = 1
+    elif row.campaign_action == "enrich_company_context":
+        item.expected_context_enrichment = 1
+    item.phase, item.phase_order, item.can_parallelize = _daily_plan_phase(item)
+    return item
+
+
+def _daily_plan_phase(item: DailyPlanItem) -> tuple[str, int, bool]:
+    action = item.campaign_action
+    if action == "continue_conversation":
+        return "1_continue_live_conversations", 10, False
+    if action == "follow_up_connected_contact":
+        return "2_follow_up_warm_accepts", 20, False
+    if action == "find_email_path" and item.expected_email_research:
+        return "3_contact_and_email_research", 30, True
+    if action == "map_more_contacts":
+        return "4_contact_mapping", 40, True
+    if action in {"send_initial_invites", "expand_linkedin_wave", "send_initial_multichannel_outreach"}:
+        return "5_send_linkedin_invites", 50, False
+    if action == "send_cold_email_followup":
+        return "6_draft_email_touch", 60, False
+    if action == "enrich_company_context":
+        return "7_context_enrichment", 70, True
+    return "9_other", 90, False
+
+
+def _daily_plan_skip_reason(
+    item: DailyPlanItem,
+    used: dict[str, int],
+    seen_companies: set[str],
+    budget: DailyPlanBudget,
+) -> str:
+    company_key = item.organization_id or item.company.lower()
+    if company_key in seen_companies:
+        return "company_already_selected"
+    if used["total_actions"] + 1 > budget.max_total_actions:
+        return "daily_action_budget_exhausted"
+    if used["companies"] + 1 > budget.max_companies:
+        return "company_budget_exhausted"
+    checks = [
+        ("linkedin_invites", item.expected_linkedin_invites, budget.max_linkedin_invites),
+        ("linkedin_followups", item.expected_linkedin_followups, budget.max_linkedin_followups),
+        ("company_mapping", item.expected_company_mapping, budget.max_company_mapping),
+        ("email_research", item.expected_email_research, budget.max_email_research),
+        ("context_enrichment", item.expected_context_enrichment, budget.max_context_enrichment),
+        ("email_drafts", item.expected_email_drafts, budget.max_email_drafts),
+    ]
+    for key, increment, cap in checks:
+        if increment and used[key] + increment > cap:
+            return f"{key}_budget_exhausted"
+    return ""
+
+
+def _daily_plan_summary(items: list[DailyPlanItem]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for item in items:
+        summary[item.campaign_action] = summary.get(item.campaign_action, 0) + 1
+    return summary
+
+
+def _daily_plan_phase_summary(items: list[DailyPlanItem]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for item in items:
+        summary[item.phase] = summary.get(item.phase, 0) + 1
+    return summary
+
+
+def _daily_plan_execution_order() -> list[dict[str, object]]:
+    return [
+        {
+            "phase": "1_continue_live_conversations",
+            "order": 10,
+            "parallelizable": False,
+            "notes": "Handle active replies first; do not let fresh outreach bury live conversations.",
+        },
+        {
+            "phase": "2_follow_up_warm_accepts",
+            "order": 20,
+            "parallelizable": False,
+            "notes": "Send accepted-invite follow-ups before starting new waves.",
+        },
+        {
+            "phase": "3_contact_and_email_research",
+            "order": 30,
+            "parallelizable": True,
+            "notes": "Inspect LinkedIn Contact Info and company/contact paths; store emails before drafting email.",
+        },
+        {
+            "phase": "4_contact_mapping",
+            "order": 40,
+            "parallelizable": True,
+            "notes": "Map more relevant people for priority accounts that do not yet have a good account map.",
+        },
+        {
+            "phase": "5_send_linkedin_invites",
+            "order": 50,
+            "parallelizable": False,
+            "notes": "Send bounded LinkedIn invite waves only after warm replies/follow-ups and required research tasks.",
+        },
+        {
+            "phase": "6_draft_email_touch",
+            "order": 60,
+            "parallelizable": False,
+            "notes": "Draft email touches only when the comm engine is ready and daily email budget is nonzero.",
+        },
+        {
+            "phase": "7_context_enrichment",
+            "order": 70,
+            "parallelizable": True,
+            "notes": "Enrich company context in the background; it should not block live relationship work.",
+        },
+    ]
+
+
+def audit_track_2_core(rows: list[AccountRow]) -> dict[str, object]:
+    action_counts: dict[str, int] = {}
+    channel_counts: dict[str, int] = {}
+    issue_counts: dict[str, int] = {}
+    issues: list[dict[str, object]] = []
+    priority_tiers = {"A", "B", "L1", "L2"}
+    actionable_actions = {
+        "continue_conversation",
+        "follow_up_connected_contact",
+        "send_initial_multichannel_outreach",
+        "send_initial_invites",
+        "map_more_contacts",
+        "send_cold_email_followup",
+        "find_email_path",
+        "expand_linkedin_wave",
+        "enrich_company_context",
+    }
+
+    def flag(row: AccountRow, code: str, detail: str) -> None:
+        issue_counts[code] = issue_counts.get(code, 0) + 1
+        issues.append(
+            {
+                "company": row.company,
+                "tier": row.tier,
+                "account_score": row.account_score,
+                "campaign_action": row.campaign_action,
+                "campaign_channel": row.campaign_channel,
+                "code": code,
+                "detail": detail,
+            }
+        )
+
+    for row in rows:
+        action_counts[row.campaign_action] = action_counts.get(row.campaign_action, 0) + 1
+        channel_counts[row.campaign_channel] = channel_counts.get(row.campaign_channel, 0) + 1
+        if row.tier in priority_tiers and not row.campaign_action:
+            flag(row, "missing_action", "Priority account has no campaign action.")
+        if row.campaign_action in actionable_actions and not row.campaign_channel:
+            flag(row, "missing_channel", "Actionable account has no channel.")
+        if row.campaign_action == "send_initial_multichannel_outreach" and row.email_contacts <= 0:
+            flag(row, "parallel_without_email", "Parallel outreach requires at least one email contact.")
+        if row.campaign_action == "send_cold_email_followup" and row.email_contacts <= 0:
+            flag(row, "email_without_email", "Cold email follow-up requires at least one email contact.")
+        if row.campaign_action == "map_more_contacts" and row.people_mapped >= MIN_MAPPED_CONTACTS:
+            flag(row, "mapping_when_enough_contacts", "Account already has enough mapped contacts.")
+        if row.campaign_action == "pause_account" and row.tier in {"A", "B", "L1", "L2"}:
+            flag(row, "priority_paused", "Priority account is paused; verify this is intentional.")
+
+    return {
+        "total_accounts": len(rows),
+        "priority_accounts": sum(1 for row in rows if row.tier in priority_tiers),
+        "action_counts": action_counts,
+        "channel_counts": channel_counts,
+        "issue_counts": issue_counts,
+        "issues": issues,
+        "is_clean": not issues,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1021,6 +1642,7 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Team Size",       "team_size",         10),
     ("City",            "city",              18),
     ("People Mapped",   "people_mapped",     14),
+    ("Email Contacts",  "email_contacts",    14),
     ("Invites Sent",    "invites_sent",      13),
     ("Accepted",        "accepted",          10),
     ("Replies",         "replies",            9),
@@ -1031,14 +1653,17 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Campaign Action", "campaign_action",   26),
     ("Campaign Channel","campaign_channel",  18),
     ("Campaign Priority","campaign_priority",16),
+    ("Daily Action Priority","daily_action_priority",20),
     ("Campaign Reason", "campaign_reason",   50),
     ("Lane 1 Policy",   "lane_1_policy",     18),
+    ("Account Track",   "account_track",     22),
     ("Score: Profile",  "score_profile_fit", 14),
     ("Score: Role",     "score_role_fit",    12),
     ("Score: Team",     "score_team_gate",   12),
     ("Score: Reach",    "score_reachability",13),
     ("Score: Hiring",   "score_hiring",      13),
     ("Score: Rel",      "score_relationship",11),
+    ("Score: Momentum", "score_relationship_momentum",16),
     ("Score: Brand",    "score_brand",       13),
     ("Score: Pitch",    "score_pitch_strength",13),
     ("Score: Account Hiring","score_account_hiring",18),
@@ -1061,15 +1686,18 @@ ACTION_COLS: list[tuple[str, str, int]] = [
     ("Next Action",   "next_action",   40),
     ("Next Due",      "next_due_date", 12),
     ("People Mapped", "people_mapped", 14),
+    ("Email Contacts","email_contacts", 14),
     ("Invites Sent",  "invites_sent",  13),
 ]
 
 CAMPAIGN_COLS: list[tuple[str, str, int]] = [
     ("Company",           "company",            22),
     ("Tier",              "tier",                6),
-    ("Priority",          "campaign_priority",  10),
+    ("Daily Priority",    "daily_action_priority", 14),
+    ("Base Priority",     "campaign_priority",  13),
     ("Campaign Action",   "campaign_action",    26),
     ("Channel",           "campaign_channel",   16),
+    ("Account Track",     "account_track",      22),
     ("Account Stage",     "account_stage",      24),
     ("Lane 1 Policy",     "lane_1_policy",      18),
     ("Reason",            "campaign_reason",    54),
@@ -1078,6 +1706,7 @@ CAMPAIGN_COLS: list[tuple[str, str, int]] = [
     ("Fit Score",         "fit_score",          10),
     ("Target Role",       "target_role",        28),
     ("People Mapped",     "people_mapped",      14),
+    ("Email Contacts",    "email_contacts",     14),
     ("Invites Sent",      "invites_sent",       13),
     ("Accepted",          "accepted",           10),
     ("Replies",           "replies",             9),
@@ -1085,7 +1714,14 @@ CAMPAIGN_COLS: list[tuple[str, str, int]] = [
     ("Organization ID",    "organization_id",    24),
 ]
 
-TIER_COLORS = {"A": "D6F5D6", "B": "FFF9C4", "C": "F5F5F5"}
+TIER_COLORS = {
+    "A": "D6F5D6",
+    "B": "FFF9C4",
+    "C": "F5F5F5",
+    "L1": "D9EAF7",
+    "L2": "EAF3F8",
+    "L3": "F5F5F5",
+}
 STAGE_COLORS = {
     "conversation_started":      "C8E6C9",
     "connected_no_conversation": "B3E0F7",
@@ -1133,12 +1769,13 @@ def _write_row(ws, ri: int, row: AccountRow, cols: list) -> None:
             c.alignment = LEFT
         elif hdr in ("Why Fit", "Next Action", "Tags", "Campaign Reason", "Reason", "Data Flags"):
             c.alignment = WRAP
-        elif hdr in ("Account Score", "Fit Score", "People Mapped", "Invites Sent", "Accepted",
+        elif hdr in ("Account Score", "Fit Score", "People Mapped", "Email Contacts", "Invites Sent", "Accepted",
                      "Replies", "Coffee Chats", "Advocates", "Team Size",
                      "Score: Profile", "Score: Role", "Score: Team",
-                     "Score: Reach", "Score: Hiring", "Score: Rel", "Score: Brand",
+                     "Score: Reach", "Score: Hiring", "Score: Rel", "Score: Momentum", "Score: Brand",
                      "Score: Pitch", "Score: Account Hiring",
-                     "Campaign Priority", "Priority"):
+                     "Campaign Priority", "Daily Action Priority", "Daily Priority",
+                     "Base Priority", "Priority"):
             c.alignment = CTR
         else:
             c.alignment = LEFT
@@ -1178,7 +1815,7 @@ def generate_excel(rows: list[AccountRow], output_path: Path) -> Path:
         "priority_target": 4,
     }
     action_rows = sorted(
-        [r for r in rows if r.tier in ("A", "B") and r.account_stage in ACTIONABLE],
+        [r for r in rows if r.tier in ("A", "B", "L1", "L2") and r.account_stage in ACTIONABLE],
         key=lambda r: (STAGE_PRI.get(r.account_stage, 9), r.tier, -r.account_score, -r.fit_score),
     )
     for ri, row in enumerate(action_rows, 2):
@@ -1191,6 +1828,23 @@ def generate_excel(rows: list[AccountRow], output_path: Path) -> Path:
     for ri, row in enumerate(build_campaign_plan_rows(rows), 2):
         _write_row(ws4, ri, row, CAMPAIGN_COLS)
     ws4.auto_filter.ref = f"A1:{get_column_letter(len(CAMPAIGN_COLS))}1"
+
+    view_specs = [
+        ("Startup Founder-Led", lambda r: r.account_track == "Startup / Founder-Led"),
+        ("Growth Mid-Market", lambda r: r.account_track == "Growth / Mid-Market"),
+        ("Large Company", lambda r: r.account_track == "Large Company"),
+        ("Large Company Priority", lambda r: r.tier in {"L1", "L2"}),
+        ("Strategic Wishlist", _is_strategic_wishlist),
+        ("Needs Enrichment", _needs_context_enrichment),
+    ]
+    for sheet_name, predicate in view_specs:
+        ws = wb.create_sheet(sheet_name)
+        ws.freeze_panes = "C2"
+        _write_header(ws, COLUMNS)
+        view_rows = [row for row in rows if predicate(row)]
+        for ri, row in enumerate(view_rows, 2):
+            _write_row(ws, ri, row, COLUMNS)
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(COLUMNS))}1"
 
     wb.save(output_path)
     return output_path

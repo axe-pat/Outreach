@@ -130,6 +130,11 @@ class OutreachSettings(BaseSettings):
     )
     linkedin_profile_name: str = Field(default="Default", alias="LINKEDIN_PROFILE_NAME")
     linkedin_debug_port: int = Field(default=9222, alias="LINKEDIN_DEBUG_PORT")
+    prospeo_api_key: str | None = Field(default=None, alias="PROSPEO_API_KEY")
+    hunter_api_key: str | None = Field(default=None, alias="HUNTER_API_KEY")
+    email_finder_provider: str = Field(default="auto", alias="EMAIL_FINDER_PROVIDER")
+    email_finder_min_confidence: int = Field(default=80, alias="EMAIL_FINDER_MIN_CONFIDENCE")
+    email_finder_only_verified: bool = Field(default=True, alias="EMAIL_FINDER_ONLY_VERIFIED")
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")
     tracking_workspace_dir: Path = Field(
         default=Path("workspace"),

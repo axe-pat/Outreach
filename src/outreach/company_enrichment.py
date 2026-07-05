@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
@@ -8,7 +10,7 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from outreach.account_tracker import DOMAIN_TAGS
 from outreach.discovery.http import HttpTextDownloader, extract_html_segments
-from outreach.tracking import OpportunityRecord, OrganizationRecord, OutreachWorkbook, SourceKind
+from outreach.tracking import OpportunityRecord, OrganizationRecord, OutreachWorkbook
 
 
 CONTEXT_DATE_KEY = "context_enriched_at"
@@ -16,6 +18,10 @@ CONTEXT_SOURCE_KEY = "context_source"
 CONTEXT_CONFIDENCE_KEY = "context_confidence"
 CONTEXT_REFRESH_AFTER_KEY = "context_refresh_after"
 CONTEXT_EVIDENCE_URL_KEY = "context_evidence_url"
+WEBSITE_RESOLVED_AT_KEY = "website_resolved_at"
+WEBSITE_RESOLUTION_SOURCE_KEY = "website_resolution_source"
+WEBSITE_RESOLUTION_CONFIDENCE_KEY = "website_resolution_confidence"
+WEBSITE_RESOLUTION_EVIDENCE_URL_KEY = "website_resolution_evidence_url"
 INFERRED_FROM_JOB = "inferred_from_job"
 EXTERNAL_VERIFIED = "external_verified"
 
@@ -30,6 +36,38 @@ BLOCKED_SEARCH_DOMAINS = {
     "www.levels.fyi",
     "theorg.com",
     "www.theorg.com",
+}
+
+BLOCKED_WEBSITE_DOMAINS = {
+    *BLOCKED_SEARCH_DOMAINS,
+    "builtin.com",
+    "www.builtin.com",
+    "builtinsf.com",
+    "www.builtinsf.com",
+    "builtinla.com",
+    "www.builtinla.com",
+    "ycombinator.com",
+    "www.ycombinator.com",
+    "wellfound.com",
+    "www.wellfound.com",
+    "techcrunch.com",
+    "www.techcrunch.com",
+    "crunchbase.com",
+    "www.crunchbase.com",
+    "wikipedia.org",
+    "www.wikipedia.org",
+    "facebook.com",
+    "www.facebook.com",
+    "x.com",
+    "www.x.com",
+    "twitter.com",
+    "www.twitter.com",
+    "youtube.com",
+    "www.youtube.com",
+    "github.com",
+    "www.github.com",
+    "bloomberg.com",
+    "www.bloomberg.com",
 }
 
 TAG_SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -85,6 +123,29 @@ class CompanyEnrichmentResult:
     prestige_signals: list[str] = field(default_factory=list)
     prestige_evidence_url: str = ""
     error: str = ""
+
+
+@dataclass
+class CompanyWebsiteResolutionResult:
+    organization_id: str
+    company: str
+    status: str
+    reasons: list[str] = field(default_factory=list)
+    website: str = ""
+    source: str = ""
+    confidence: str = ""
+    evidence_url: str = ""
+    score: int = 0
+    error: str = ""
+
+
+@dataclass
+class CompanyWebsiteCandidate:
+    website: str
+    source: str
+    confidence: str
+    evidence_url: str
+    score: int
 
 
 class _MetaParser(HTMLParser):
@@ -254,6 +315,7 @@ def enrich_company_contexts(
     require_direct_url: bool = False,
     fallback_to_jobs: bool = True,
     fetcher: HttpTextDownloader | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> list[CompanyEnrichmentResult]:
     workbook = OutreachWorkbook(workbook_dir)
     fetcher = fetcher or HttpTextDownloader(timeout_seconds=12)
@@ -266,8 +328,11 @@ def enrich_company_contexts(
         require_direct_url=require_direct_url,
     )[start_at : start_at + limit]
     results: list[CompanyEnrichmentResult] = []
-    for candidate in candidates:
+    total = len(candidates)
+    for index, candidate in enumerate(candidates, 1):
         org = candidate.organization
+        if progress:
+            progress(index, total, org.name)
         try:
             patch = build_company_context_patch(
                 org,
@@ -321,6 +386,194 @@ def enrich_company_contexts(
                 )
             )
     return results
+
+
+def resolve_company_websites(
+    workbook_dir,
+    *,
+    limit: int = 50,
+    start_at: int = 0,
+    companies: set[str] | None = None,
+    execute: bool = False,
+    only_non_verified: bool = True,
+    use_web_search: bool = True,
+    max_search_results: int = 5,
+    min_score: int | None = None,
+    fetcher: HttpTextDownloader | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> list[CompanyWebsiteResolutionResult]:
+    workbook = OutreachWorkbook(workbook_dir)
+    fetcher = fetcher or HttpTextDownloader(timeout_seconds=8)
+    normalized_companies = {_normalize_company(name) for name in companies or set()}
+    candidates: list[tuple[OrganizationRecord, list[str]]] = []
+    for org in workbook.list_organizations():
+        if normalized_companies and _normalize_company(org.name) not in normalized_companies:
+            continue
+        reasons = company_website_gap_reasons(org, only_non_verified=only_non_verified)
+        if reasons:
+            candidates.append((org, reasons))
+
+    candidates.sort(
+        key=lambda item: (
+            "context_not_external_verified" in item[1],
+            item[0].last_updated_at,
+            item[0].name.lower(),
+        ),
+        reverse=True,
+    )
+
+    results: list[CompanyWebsiteResolutionResult] = []
+    selected = candidates[start_at : start_at + limit]
+    total = len(selected)
+    for index, (org, reasons) in enumerate(selected, 1):
+        if progress:
+            progress(index, total, org.name)
+        try:
+            candidate = resolve_company_website(
+                org,
+                fetcher=fetcher,
+                use_web_search=use_web_search,
+                max_search_results=max_search_results,
+                min_score=min_score,
+            )
+            if not candidate:
+                results.append(
+                    CompanyWebsiteResolutionResult(
+                        organization_id=org.organization_id,
+                        company=org.name,
+                        status="no_url_found",
+                        reasons=reasons,
+                    )
+                )
+                continue
+            if execute:
+                apply_company_website_resolution(workbook, org, candidate)
+            results.append(
+                CompanyWebsiteResolutionResult(
+                    organization_id=org.organization_id,
+                    company=org.name,
+                    status="resolved" if execute else "planned",
+                    reasons=reasons,
+                    website=candidate.website,
+                    source=candidate.source,
+                    confidence=candidate.confidence,
+                    evidence_url=candidate.evidence_url,
+                    score=candidate.score,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - public pages/search are flaky
+            results.append(
+                CompanyWebsiteResolutionResult(
+                    organization_id=org.organization_id,
+                    company=org.name,
+                    status="failed",
+                    reasons=reasons,
+                    error=str(exc),
+                )
+            )
+    return results
+
+
+def company_website_gap_reasons(org: OrganizationRecord, *, only_non_verified: bool = True) -> list[str]:
+    _, metadata = parse_notes_parts(org.notes)
+    reasons: list[str] = []
+    if org.website:
+        return []
+    if only_non_verified and metadata.get(CONTEXT_CONFIDENCE_KEY) == EXTERNAL_VERIFIED:
+        return []
+    reasons.append("missing_website")
+    if metadata.get(CONTEXT_CONFIDENCE_KEY) != EXTERNAL_VERIFIED:
+        reasons.append("context_not_external_verified")
+    if _is_blocked_context_url(org.source_url):
+        reasons.append("source_url_not_company_context")
+    return reasons
+
+
+def resolve_company_website(
+    org: OrganizationRecord,
+    *,
+    fetcher: HttpTextDownloader,
+    use_web_search: bool,
+    max_search_results: int = 5,
+    min_score: int | None = None,
+) -> CompanyWebsiteCandidate | None:
+    source_url = (org.source_url or "").strip()
+    direct_website = _official_website_from_url(source_url)
+    if direct_website and not _is_blocked_website_url(direct_website):
+        candidate = _validate_company_website(
+            org.name,
+            direct_website,
+            fetcher=fetcher,
+            source="source_url_host",
+            evidence_url=source_url,
+            source_bonus=3,
+            min_score=min_score,
+        )
+        if candidate:
+            return candidate
+
+    if source_url and not _is_blocked_context_url(source_url):
+        html = _safe_fetch(fetcher, source_url)
+        for url in _extract_external_website_links(source_url, html):
+            candidate = _validate_company_website(
+                org.name,
+                url,
+                fetcher=fetcher,
+                source="source_page_outbound_link",
+                evidence_url=source_url,
+                source_bonus=2,
+                min_score=min_score,
+            )
+            if candidate:
+                return candidate
+
+    for url in _guessed_company_website_urls(org.name):
+        candidate = _validate_company_website(
+            org.name,
+            url,
+            fetcher=fetcher,
+            source="domain_guess",
+            evidence_url=url,
+            source_bonus=0,
+            min_score=min_score,
+        )
+        if candidate:
+            return candidate
+
+    if not use_web_search:
+        return None
+    for url in _search_official_website_urls(org.name, fetcher, max_results=max_search_results):
+        candidate = _validate_company_website(
+            org.name,
+            url,
+            fetcher=fetcher,
+            source="web_search",
+            evidence_url=url,
+            source_bonus=0,
+            min_score=min_score,
+        )
+        if candidate:
+            return candidate
+    return None
+
+
+def apply_company_website_resolution(
+    workbook: OutreachWorkbook,
+    org: OrganizationRecord,
+    candidate: CompanyWebsiteCandidate,
+) -> OrganizationRecord | None:
+    freeform, metadata = parse_notes_parts(org.notes)
+    now = datetime.now(UTC).replace(microsecond=0)
+    metadata[WEBSITE_RESOLVED_AT_KEY] = now.isoformat()
+    metadata[WEBSITE_RESOLUTION_SOURCE_KEY] = candidate.source
+    metadata[WEBSITE_RESOLUTION_CONFIDENCE_KEY] = candidate.confidence
+    metadata[WEBSITE_RESOLUTION_EVIDENCE_URL_KEY] = candidate.evidence_url
+    return workbook.update_organization(
+        org.organization_id,
+        website=candidate.website,
+        notes=format_notes_parts(freeform, metadata),
+        last_updated_at=now.isoformat(),
+    )
 
 
 def build_company_context_patch(
@@ -480,6 +733,302 @@ def _search_company_urls(company: str, fetcher: HttpTextDownloader) -> list[str]
     return candidates
 
 
+def _search_official_website_urls(company: str, fetcher: HttpTextDownloader, *, max_results: int = 5) -> list[str]:
+    urls: list[str] = []
+    query = f'"{company}" official website'
+    search_urls = [
+        f"https://www.bing.com/search?q={quote_plus(query)}",
+        f"https://html.duckduckgo.com/html/?q={quote_plus(query)}",
+        f"https://duckduckgo.com/html/?q={quote_plus(query)}",
+    ]
+    for search_url in search_urls:
+        html = _safe_fetch(fetcher, search_url)
+        if not html:
+            continue
+        for segment in extract_html_segments(html):
+            if segment.get("kind") != "link":
+                continue
+            href = _unwrap_duckduckgo_url(segment.get("href", ""))
+            if not href or _is_blocked_website_url(href):
+                continue
+            urls.append(href)
+            if len(urls) >= max_results:
+                return list(dict.fromkeys(urls))
+    return list(dict.fromkeys(urls))
+
+
+def _extract_external_website_links(source_url: str, html: str) -> list[str]:
+    if not html:
+        return []
+    source_host = urlparse(source_url).netloc.lower().removeprefix("www.")
+    urls: list[str] = []
+    for segment in extract_html_segments(html):
+        if segment.get("kind") != "link":
+            continue
+        href = _unwrap_duckduckgo_url(segment.get("href", ""))
+        if not href or not href.startswith(("http://", "https://")):
+            continue
+        host = urlparse(href).netloc.lower().removeprefix("www.")
+        if not host or host == source_host or _is_blocked_website_url(href):
+            continue
+        link_text = segment.get("text", "").lower()
+        if link_text and any(token in link_text for token in ("website", "homepage", "careers", "company")):
+            urls.insert(0, href)
+        else:
+            urls.append(href)
+    return list(dict.fromkeys(urls))[:8]
+
+
+def _guessed_company_website_urls(company: str) -> list[str]:
+    urls: list[str] = []
+    for match in re.finditer(r"(?<!@)\b[a-zA-Z0-9][a-zA-Z0-9-]*\.(?:com|ai|io|co|org|net)\b", company):
+        urls.append(f"https://{match.group(0).lower()}")
+    tokens = _company_domain_tokens(company)
+    if not tokens:
+        return list(dict.fromkeys(urls))
+    compact = "".join(tokens)
+    hyphenated = "-".join(tokens)
+    for tld in ("com", "ai", "io", "co"):
+        urls.append(f"https://{compact}.{tld}")
+    if hyphenated != compact:
+        for tld in ("com", "ai", "io"):
+            urls.append(f"https://{hyphenated}.{tld}")
+    return list(dict.fromkeys(urls))[:6]
+
+
+def _validate_company_website(
+    company: str,
+    url: str,
+    *,
+    fetcher: HttpTextDownloader,
+    source: str,
+    evidence_url: str,
+    source_bonus: int = 0,
+    min_score: int | None = None,
+) -> CompanyWebsiteCandidate | None:
+    website = _homepage_url(url)
+    if not website or _is_blocked_website_url(website):
+        return None
+    html = _safe_fetch(fetcher, website) or _safe_fetch(fetcher, url)
+    if not html:
+        return None
+    text = _website_validation_text(html)
+    if _is_low_quality_context_page(website, text):
+        return None
+    score = _website_candidate_score(company, website, text) + source_bonus
+    threshold = max(_website_score_threshold(company), min_score or 0)
+    if score < threshold:
+        return None
+    confidence = "high" if score >= threshold + 3 else "medium"
+    return CompanyWebsiteCandidate(
+        website=website,
+        source=source,
+        confidence=confidence,
+        evidence_url=evidence_url,
+        score=score,
+    )
+
+
+def _website_validation_text(html: str) -> str:
+    if not html:
+        return ""
+    meta = _MetaParser()
+    meta.feed(html)
+    text_samples = [
+        segment.get("text", "")
+        for segment in extract_html_segments(html)
+        if segment.get("kind") == "text"
+    ][:12]
+    return " ".join([meta.title, meta.meta_description, *text_samples]).lower()
+
+
+def _is_low_quality_context_page(url: str, text: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    lowered = " ".join((text or "").lower().split())
+    if not lowered:
+        return False
+    parking_hosts = {
+        "afternic.com",
+        "bodis.com",
+        "dan.com",
+        "domainmarket.com",
+        "godaddy.com",
+        "hugedomains.com",
+        "namecheap.com",
+        "sedo.com",
+        "squadhelp.com",
+    }
+    if host in parking_hosts or any(host.endswith(f".{blocked}") for blocked in parking_hosts):
+        return True
+    parking_phrases = (
+        "verified premium domain available for purchase",
+        "this domain is for sale",
+        "domain is for sale",
+        "buy this domain",
+        "buy now or pay in installments",
+        "make an offer for this domain",
+        "get this domain",
+        "this webpage was generated by the domain owner",
+        "first and best source for information about",
+        "topics relating to issues of general interest",
+        "we hope you find what you are looking for",
+        "site is temporarily down",
+        "temporarily down and unavailable",
+        "requires javascript",
+        "enable javascript and reload",
+        "doesn't work properly without javascript",
+        "does not work properly without javascript",
+        "switch to a browser that supports it",
+        "user-agent string appears to be from an automated process",
+        "parked free",
+        "parkingcrew",
+        "related searches",
+    )
+    return any(phrase in lowered for phrase in parking_phrases)
+
+
+def _website_candidate_score(company: str, website: str, text: str) -> int:
+    tokens = _company_signal_tokens(company)
+    domain_tokens = _company_domain_tokens(company)
+    if _requires_strict_compound_identity(domain_tokens) and not _strict_compound_identity_matched(domain_tokens, website, text):
+        return 0
+    generic_identity_tokens = _generic_suffix_identity_tokens(company)
+    if generic_identity_tokens and not _full_identity_matched(generic_identity_tokens, website, text):
+        return 0
+    if not tokens:
+        return 0
+    parsed = urlparse(website)
+    host = parsed.netloc.lower().removeprefix("www.")
+    host_compact = re.sub(r"[^a-z0-9]+", "", host.split(".")[0])
+    company_compact = re.sub(r"[^a-z0-9]+", "", " ".join(tokens))
+    text_words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    score = 0
+    host_compact_matched = bool(company_compact and (company_compact in host_compact or host_compact in company_compact))
+    if host_compact_matched:
+        score += 8
+    host_hits = 0 if host_compact_matched else sum(1 for token in tokens if token in host_compact)
+    if host_hits:
+        score += min(6, host_hits * 3)
+    text_hits = sum(1 for token in tokens if token in text_words)
+    if text_hits >= min(2, len(tokens)):
+        score += 5
+    elif text_hits == 1 and len(tokens) == 1 and len(tokens[0]) >= 5:
+        score += 4
+    if any(phrase in text for phrase in ("official site", "official website", "careers", "about us")):
+        score += 1
+    return score
+
+
+def _website_score_threshold(company: str) -> int:
+    tokens = _company_signal_tokens(company)
+    if len(tokens) <= 1 and (not tokens or len(tokens[0]) <= 4):
+        return 11
+    return 8
+
+
+def _company_domain_tokens(company: str) -> list[str]:
+    corporate_suffixes = {
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "corporation",
+        "company",
+        "co",
+        "group",
+        "global",
+        "technologies",
+        "technology",
+        "systems",
+        "solutions",
+        "labs",
+    }
+    normalized = re.sub(r"[^a-z0-9]+", " ", company.lower()).strip()
+    tokens = [token for token in normalized.split() if token and token not in corporate_suffixes]
+    return tokens[:4]
+
+
+def _requires_strict_compound_identity(tokens: list[str]) -> bool:
+    return len(tokens) >= 2 and any(len(token) <= 2 for token in tokens)
+
+
+def _strict_compound_identity_matched(tokens: list[str], website: str, text: str) -> bool:
+    compact = "".join(tokens)
+    hyphenated = "-".join(tokens)
+    parsed = urlparse(website)
+    host_stem = parsed.netloc.lower().removeprefix("www.").split(".")[0]
+    host_compact = re.sub(r"[^a-z0-9]+", "", host_stem)
+    host_matched = bool(compact and (compact in host_compact or hyphenated in host_stem))
+    text_lower = text.lower()
+    phrase_pattern = r"\b" + r"[\s\-.]+".join(re.escape(token) for token in tokens) + r"\b"
+    text_compact = re.sub(r"[^a-z0-9]+", "", text_lower)
+    text_matched = bool(re.search(phrase_pattern, text_lower) or (compact and compact in text_compact))
+    return host_matched and text_matched
+
+
+def _generic_suffix_identity_tokens(company: str) -> list[str]:
+    normalized = re.sub(r"[^a-z0-9]+", " ", company.lower()).strip()
+    words = normalized.split()
+    generic_suffixes = {"solutions"}
+    if len(words) >= 2 and words[-1] in generic_suffixes:
+        return words[:3]
+    return []
+
+
+
+def _full_identity_matched(tokens: list[str], website: str, text: str) -> bool:
+    compact = "".join(tokens)
+    parsed = urlparse(website)
+    host_stem = parsed.netloc.lower().removeprefix("www.").split(".")[0]
+    host_compact = re.sub(r"[^a-z0-9]+", "", host_stem)
+    text_lower = text.lower()
+    phrase_pattern = r"\b" + r"[\s\-.]+".join(re.escape(token) for token in tokens) + r"\b"
+    text_compact = re.sub(r"[^a-z0-9]+", "", text_lower)
+    return bool(
+        compact
+        and (
+            compact in host_compact
+            or re.search(phrase_pattern, text_lower)
+            or compact in text_compact
+        )
+    )
+
+
+def _company_signal_tokens(company: str) -> list[str]:
+    stopwords = {
+        "ai",
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "corporation",
+        "company",
+        "co",
+        "group",
+        "global",
+        "technologies",
+        "technology",
+        "systems",
+        "solutions",
+        "labs",
+        "formerly",
+        "yc",
+        "x25",
+        "xml",
+    }
+    normalized = _normalize_company(company)
+    tokens = [token for token in normalized.split() if len(token) >= 3 and token not in stopwords]
+    return tokens[:4]
+
+
+def _homepage_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _context_from_html(company: str, url: str, html: str) -> CompanyContextPatch | None:
     meta = _MetaParser()
     meta.feed(html)
@@ -491,6 +1040,9 @@ def _context_from_html(company: str, url: str, html: str) -> CompanyContextPatch
     ][:8]
     body_text = _clean_text(" ".join(text_samples), max_length=900)
     description = meta.meta_description or _first_context_sentence(body_text)
+    validation_text = " ".join([meta.title, meta.meta_description, body_text])
+    if _is_low_quality_context_page(url, validation_text):
+        return None
     tags = infer_context_tags(" ".join([company, meta.title, description, body_text]))
     team_size = _extract_team_size(body_text)
     website = _official_website_from_url(url)
@@ -641,11 +1193,28 @@ def _unwrap_duckduckgo_url(url: str) -> str:
     if not url:
         return ""
     parsed = urlparse(url)
-    if "duckduckgo.com" in parsed.netloc:
+    if "bing.com" in parsed.netloc and parsed.path.startswith("/ck/"):
+        query = parse_qs(parsed.query)
+        decoded = _decode_bing_redirect(query.get("u", [""])[0])
+        if decoded:
+            return decoded
+    if "duckduckgo.com" in parsed.netloc or parsed.path.startswith("/l/"):
         query = parse_qs(parsed.query)
         if query.get("uddg"):
             return unquote(query["uddg"][0])
     return url
+
+
+def _decode_bing_redirect(value: str) -> str:
+    if not value:
+        return ""
+    payload = value[2:] if value.startswith("a1") else value
+    payload += "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    return decoded if decoded.startswith(("http://", "https://")) else ""
 
 
 def _url_company_score(url: str, normalized_company: str) -> int:
@@ -687,6 +1256,14 @@ def _is_blocked_context_url(url: str) -> bool:
     if host in BLOCKED_SEARCH_DOMAINS:
         return True
     return "linkedin.com/jobs" in url or "/jobs/view/" in url
+
+
+def _is_blocked_website_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if not host or host in BLOCKED_WEBSITE_DOMAINS:
+        return True
+    return any(host.endswith(f".{blocked}") for blocked in BLOCKED_WEBSITE_DOMAINS)
 
 
 def _official_website_from_url(url: str) -> str:

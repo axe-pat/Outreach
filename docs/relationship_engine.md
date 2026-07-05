@@ -96,10 +96,24 @@ top-ranked accounts. A company can be artificially buried when it lacks tags,
 description, website, or funding/prestige signals; verified public context is what
 lets Track 2 promote it into the right tier.
 
+The account universe should be intentionally broad:
+
+- strategic seed accounts: MAANG, major SaaS, AI/data/devtool, fintech, and other
+  dream/high-fit companies Akshat wants in the relationship system even before a
+  specific application exists
+- ResumeGenerator job imports: every credible applied/discovered company should flow
+  into Track 2 account state, even when Lane 1 would not send outreach today
+- discovery/referral artifacts: YC, BuiltIn, LinkedIn/referral/imported sources
+
+Lane 1 can stay strict about which people to message today. Track 2 should preserve
+the company universe and let ranking, enrichment confidence, and campaign action
+decide whether it deserves relationship effort.
+
 Tiers:
 
-- Tier A: 15-20 companies actively campaigned
-- Tier B: 30-50 strong-fit companies monitored and touched periodically
+- Relationship Tier A: startup/growth companies actively campaigned
+- Relationship Tier B: startup/growth companies monitored and touched periodically
+- Large Company L1/L2/L3: separate referral/routing priority track
 - Tier C: normal volume apply/outreach
 
 Excel/CSV is the right first visual surface. The account view should include:
@@ -188,6 +202,23 @@ Store:
 
 This should be read by future note, follow-up, and reply generators.
 
+The communication engine now has a separate feedback ledger:
+
+- review commands emit JSON plus a CSV that Akshat can mark up
+- marked rows are imported into `workspace/communication_feedback.csv`
+- imported feedback is deduped by draft identity plus user decision/edit
+- the ledger stores `user_decision`, `user_reason`, `user_edit`, and `user_notes`
+- style-profile changes should be deliberate follow-up work, not an automatic side
+  effect of importing one review CSV
+
+Review metadata should travel with every generated message: score, verdict,
+recommended action, flags, strengths, quality labels, and rewrite guidance.
+
+Story-fit account metadata should also travel into communication. When an
+organization has `story_fit_reason` or `profile_evidence`, generators should use
+that as the first company-fit angle before falling back to generic account or title
+heuristics.
+
 ## Build Order
 
 ### 1. LinkedIn Reconcile
@@ -231,7 +262,7 @@ next actions.
 
 ### 5. Account Campaign Planner
 
-For Tier A/B companies, decide when to:
+For Relationship A/B and Large L1/L2 companies, decide when to:
 
 - send another LinkedIn wave
 - follow up
@@ -250,7 +281,7 @@ actions:
 - `expand_linkedin_wave`
 - `follow_up_connected_contact`
 - `continue_conversation`
-- `switch_to_email_or_wellfound`
+- `find_email_path`
 - `pause_account`
 
 Each action carries a `lane_1_policy`:
@@ -265,6 +296,9 @@ Track 2 scoring depends on company-level context, so the system now includes a
 separate enrichment pass:
 
 ```bash
+outreach import-strategic-accounts --execute
+outreach import-resume-jobs --jobs-xlsx "../ResumeGenerator v1/discovery/jobs.xlsx" --account-universe
+outreach resolve-company-websites --limit 20 --execute
 outreach enrich-company-context --limit 50
 outreach enrich-company-context --limit 50 --execute
 outreach enrich-company-context --limit 300 --verify-all --execute
@@ -287,8 +321,10 @@ new companies imported from ResumeGenerator jobs. It writes:
 Confidence matters:
 
 - `external_verified`: public company/source page was fetched; safest for Account Score
+- `manual_seed`: built-in strategic account context, useful but not externally fetched
 - `inferred_from_job`: ResumeGenerator job rationale was used; helpful, but Account
   Score discounts it so a job rationale does not masquerade as verified company truth
+- `missing`: no reliable company/domain context yet; route to Needs Enrichment
 
 Funding and market-quality evidence is part of enrichment. Signals from company
 pages, TechCrunch, Crunchbase, YC, and investor/funding language feed the Brand /
@@ -339,12 +375,13 @@ The tracker intentionally keeps two different scores:
 | Score | Purpose |
 |-------|---------|
 | Account Campaign Score | Track 2 ranking/tiering. Answers: "Should we persistently build relationships at this company?" |
+| Daily Action Priority | Track 2 execution queue. Answers: "What needs attention today because momentum exists?" |
 | Fit Score | Opportunity context. Answers: "Is there a role/application signal worth preserving or enriching?" |
 
-Campaign actions are a separate layer from score. The score decides durable priority;
-the action decides the next move based on state. A company can have low Account Score
-but still get `enrich_company_context` if it has a strong role signal and missing
-domain data.
+Campaign actions are a separate layer from strategic score. Account Score decides
+durable priority and Tier A/B/C for startup/growth relationship campaigns. Daily
+Action Priority decides today's queue. A company with a reply can top the action
+queue without becoming a better strategic account than Scale AI, Vercel, Stripe, etc.
 
 ### Fit Domains
 
@@ -391,14 +428,19 @@ Track 2 Account Campaign Score is:
 | Profile/domain fit | 0–25 | Earned domains only; token-aware matching |
 | Reachability | 0–12 | Akshat-specific paths only |
 | Brand/prestige/manual priority | 0–12 | Manual priority can override brand inside this cap; it does not stack beyond 12 |
-| Relationship traction | 0–20 | Active/replied relationships beat cold accounts |
-| Account hiring signal | 0–8 | Capped hiring/role nudge, not the center of Track 2 |
+| Relationship traction | 0–6 | Small bonus for accepted/replied contacts; should not dominate strategic rank |
+| Account hiring signal | 0–6 | Capped hiring/path nudge, not the center of Track 2 |
 | Pitch strength | 0–10 | Strong story + warm path + workable team size |
 | Team gate | −10–0 | Penalizes teams too small for meaningful PM/operator path |
 | Missing domain context | −8 or −5 | Prevents role-only imports from becoming priority accounts |
 
 This is deliberately not role-fit-heavy. A PM internship with no company thesis should
 trigger enrichment, not automatically become Tier A.
+
+Relationship momentum is still very important, but it belongs in **Daily Action
+Priority**, not as a heavy Account Score component. A reply/accepted invite should
+make the system act today; it should not make a weaker company look like a better
+long-term target.
 
 ### Team Size — Maturity Gate
 
@@ -451,33 +493,50 @@ account without double-counting.
 
 ### Hiring Likelihood
 
-- Internship posted (recent, within 45 days): +20
-- Internship posted (older, 45–90 days): +12
-- FT role posted: +10
-- Any opportunity discovered: +5
+- FT/product-path role, including new-grad/APM/rotational/product roles: +18
+- Other FT role posted: +14
+- LA-compatible or remote fall/spring/winter/co-op/off-cycle internship: +12
+- Fall/co-op internship with unknown location: +6
+- In-person/hybrid fall/co-op internship outside LA/remote: +1
+- Generic internship with no current-season signal: +6
+- Summer internship: +3
+- Any other opportunity discovered: +5
 - Nothing: 0
 
+Track 2 is role-aware, not role-driven. Roles are timing/path signals for relationship
+work; they should not decide whether a company is strategically worth building into.
+Summer internships are weak Track 2 signals now because the summer cycle is mostly
+over. Fall/co-op/current internships matter only when they are compatible with being
+in LA for school, or clearly remote. In-person/hybrid fall roles outside LA should
+not lift Track 2 priority; they can remain visible for context, but they are not a
+real fall path.
+
 Use `date_posted` from `jobs.xlsx` (via ResumeGenerator bridge) when available.
-Recency decay: roles older than 90 days should not get full hiring signal credit.
+Recency decay for stale roles should still be added, but the core rule is already:
+active relationship priority should not be dominated by old summer internship imports.
+The ResumeGenerator bridge now exposes `--resume-season-focus`; daily supervised
+E2E defaults to `fall_ft_transition`, while broad historical universe refreshes
+should use `--resume-season-focus all` explicitly.
 
 For Account Campaign Score, hiring is deliberately compressed into `Account Hiring`
-(0–8). Raw hiring still appears in Fit Score so active internships remain visible for
+(0–6). Raw hiring still appears in Fit Score so active roles remain visible for
 Lane 1/apply-driven follow-up.
 
 ### Relationship Depth
 
-Relationship progress is a direct score component (not just a sort tiebreaker):
+Relationship progress is split into two components. A small strategic traction bonus
+feeds Account Score, while the larger momentum score drives Daily Action Priority.
 
-| Contact state | Points |
-|--------------|--------|
-| 3+ contacts Warm (replied) | +20 |
-| 1–2 contacts Warm | +15 |
-| 3+ contacts Connected (accepted, no reply) | +12 |
-| 1–2 contacts Connected | +8 |
-| No connections yet | 0 |
+| Contact state | Account Score bonus | Daily momentum |
+|--------------|---------------------|----------------|
+| 1+ replied/warm contact | +6 | +15 to +20 |
+| 3+ accepted contacts | +4 | +12 |
+| 1–2 accepted contacts | +3 | +8 |
+| No connections yet | 0 | 0 |
 
-A company where you have an active conversation outranks a company with better raw fit
-but zero relationship progress.
+A company where you have an active conversation should jump today's action queue, but
+it should not automatically become a better long-term strategic account than a higher
+fit company with no traction yet.
 
 ### No-Domain-Data Penalty
 
@@ -488,15 +547,39 @@ with tags from YC/BuiltIn discovery or `company_overrides.csv`.
 
 ### Tier Assignment
 
-Tier assignment (A/B/C) is based on Account Campaign Score rank. The **Action Queue** sort order
-also weights relationship stage — `conversation_started` and `connected_no_conversation`
-always surface above higher-scoring companies with zero relationship progress.
+Tier assignment is split by operating model.
 
-Tier A is the top 20 by score. Tier B is the next 40. Rank-based, not threshold-based.
+Startup and growth companies compete for relationship-campaign tiers because a
+bespoke company thesis, proof of fit, and founder/product routing can materially
+change outcomes there. Large companies do **not** compete inside the same Tier A.
+At Salesforce/Adobe/Meta-scale, the likely useful outcomes are referral, recruiter
+routing, alumni/internal advocate, or hiring-manager visibility. No one is evaluating
+whether Akshat has a uniquely sharp thesis on Salesforce's future; the pitch mainly
+makes the referral/routing ask feel credible instead of random.
+
+Relationship Tier A is up to 32 active startup/growth campaign accounts:
+
+| Track | Tier A target |
+|-------|---------------|
+| Startup / Founder-Led | 20 |
+| Growth / Mid-Market | 12 |
+
+Relationship Tier B is the next 50 qualified startup/growth accounts. Large companies
+receive separate `L1` / `L2` / `L3` priority labels and remain in the Large Company
+view and Campaign Plan, but they do not consume relationship Tier A slots.
+
+The **Action Queue** sort order also weights relationship stage —
+`conversation_started` and `connected_no_conversation` always surface above
+higher-scoring companies with zero relationship progress.
+
+This keeps large companies in the system without letting them clog the highest-touch
+startup/growth relationship funnel.
 
 ### Large Company Track (1000+ employees)
 
 Large companies follow different campaign logic:
+- Do not optimize for a bespoke company thesis as the primary conversion lever; use
+  the thesis as context for a referral/routing ask
 - Map the org hierarchy first — prioritize PM managers, Directors of Product, and
   recruiters over ICs
 - Target ~5–7 people closest to the hiring decision (PM managers, Dir of Product,
@@ -507,15 +590,27 @@ Large companies follow different campaign logic:
 
 ### Open Decisions / Still To Build
 
-- Company enrichment: command exists, but it should be wired into the final daily
-  orchestrator as a small new-company pass plus a fortnightly stale-context refresh.
+- Strategic account seeds and ResumeGenerator account-universe import are wired.
+  Daily maintenance should use the transition-focused season slice; broad historical
+  refreshes remain available via `import-resume-jobs --account-universe --resume-season-focus all`.
+- Enrichment guardrails and Relationship A/B cleanup are mostly in place: compound-name
+  website resolution now preserves meaningful short prefixes (`d-Matrix` must not
+  collapse to generic `matrix.com`), generic suffixes such as "Solutions" require
+  stronger identity matches, and JavaScript/anti-bot placeholder pages are rejected.
+  Continue running visible batches, use **Needs Enrichment** as the work queue, and
+  regenerate the tracker after each batch to inspect rank/action movement.
+- Company enrichment is wired into the nightly orchestrator as a small bounded
+  resolve/enrich pass plus tracker/campaign-plan rebuild. A separate fortnightly
+  stale-context refresh can still be added once daily operations are stable.
 - Prestige score: enrichment now captures funding/investor/source signals, but the
   source-quality rubric can still be improved as we see real examples.
 - 2nd-degree density: wired into reachability scoring (≥2 contacts with "2nd degree" in
   notes → +3 pts). Populated automatically by the daily LinkedIn Playwright pipeline.
 - `date_posted` recency decay: jobs.xlsx has the field; bridge to account tracker
   not yet built.
-- Large company track: team size now parses correctly, but channel/playbook fork logic
-  is still not fully implemented.
+- Large company track: team size and view generation are wired. The next useful build
+  is contact-mapping strategy per view: PM/recruiter/referral-path mapping for large
+  companies, founder/product routing for startups, and narrower product/recruiting
+  mapping for growth/mid-market accounts.
 - Manual priority currently comes from account target-list/notes tags. A structured
   `company_overrides.csv` priority/brand field would be cleaner.

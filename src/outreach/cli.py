@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import json
 import re
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -4759,6 +4761,71 @@ def _new_artifacts(before: set[Path], artifacts_dir: Path) -> list[str]:
     ]
 
 
+def run_external_stage(
+    *,
+    settings: OutreachSettings,
+    label: str,
+    command: list[str],
+    cwd: Path,
+    timeout_seconds: int,
+) -> dict[str, object]:
+    started_at = utc_now_iso()
+    if not cwd.exists():
+        summary = {
+            "label": label,
+            "status": "skipped",
+            "reason": f"working directory not found: {cwd}",
+            "command": command,
+            "cwd": str(cwd),
+            "started_at": started_at,
+            "finished_at": utc_now_iso(),
+        }
+    else:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            summary = {
+                "label": label,
+                "status": "ran" if result.returncode == 0 else "failed",
+                "returncode": result.returncode,
+                "command": command,
+                "cwd": str(cwd),
+                "started_at": started_at,
+                "finished_at": utc_now_iso(),
+                "stdout_tail": result.stdout[-12000:],
+                "stderr_tail": result.stderr[-12000:],
+            }
+        except subprocess.TimeoutExpired as exc:
+            summary = {
+                "label": label,
+                "status": "timeout",
+                "returncode": None,
+                "command": command,
+                "cwd": str(cwd),
+                "timeout_seconds": timeout_seconds,
+                "started_at": started_at,
+                "finished_at": utc_now_iso(),
+                "stdout_tail": (exc.stdout or "")[-12000:] if isinstance(exc.stdout, str) else "",
+                "stderr_tail": (exc.stderr or "")[-12000:] if isinstance(exc.stderr, str) else "",
+            }
+    artifact = write_artifact(settings.artifacts_dir, label, summary)
+    summary["artifact"] = str(artifact)
+    return summary
+
+
+def resume_generator_python(resume_generator_root: Path) -> str:
+    venv_python = resume_generator_root / "venv" / "bin" / "python"
+    if venv_python.exists():
+        return str(venv_python)
+    return "python3"
+
+
 def _load_first_artifact(paths: list[str], label: str) -> tuple[Path | None, dict]:
     for item in paths:
         path = Path(item)
@@ -4776,7 +4843,7 @@ def write_supervised_e2e_report(
     settings: OutreachSettings,
     payload: dict[str, object],
     summary_artifact: Path,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path, Path]:
     track_stage = next(
         (
             stage
@@ -4789,6 +4856,14 @@ def write_supervised_e2e_report(
         [str(item) for item in list(track_stage.get("artifacts") or [])],
         "track-2-daily-run",
     )
+    plan_artifact_value = str(track_payload.get("plan_artifact") or "") if track_payload else ""
+    plan_artifact = Path(plan_artifact_value) if plan_artifact_value else None
+    plan_payload = {}
+    if plan_artifact is not None and plan_artifact.exists() and plan_artifact.is_file():
+        try:
+            plan_payload = json.loads(plan_artifact.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            plan_payload = {}
     campaign_artifact = next(
         (
             str(stage.get("artifact") or "")
@@ -4797,6 +4872,64 @@ def write_supervised_e2e_report(
         ),
         "",
     )
+    pending_review_items: list[dict] = []
+    for phase in list(track_payload.get("phase_results") or []) if track_payload else []:
+        if not isinstance(phase, dict):
+            continue
+        pending_path_value = str(phase.get("pending_review_artifact") or "")
+        if not pending_path_value:
+            continue
+        pending_path = Path(pending_path_value)
+        if not pending_path.exists() or not pending_path.is_file():
+            continue
+        try:
+            pending_payload = json.loads(pending_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            pending_payload = {}
+        pending_review_items.extend(
+            item for item in list(pending_payload.get("results") or []) if isinstance(item, dict)
+        )
+
+    company_status: dict[str, str] = {}
+    for item in pending_review_items:
+        company = str(item.get("company") or "")
+        recommendation = str(item.get("send_recommendation") or "review")
+        company_status[company] = "needs review" if recommendation != "hold" else "hold"
+    for phase in list(track_payload.get("phase_results") or []) if track_payload else []:
+        if not isinstance(phase, dict):
+            continue
+        if phase.get("queue"):
+            for queued in list(phase.get("queue") or []):
+                if isinstance(queued, dict):
+                    company_status.setdefault(str(queued.get("company") or ""), str(phase.get("status") or "queued"))
+        if phase.get("companies"):
+            for company in list(phase.get("companies") or []):
+                company_status.setdefault(str(company), str(phase.get("status") or "queued"))
+        for run in list(phase.get("runs") or []):
+            if not isinstance(run, dict):
+                continue
+            company = str(run.get("company") or "")
+            if run.get("sent"):
+                status_counts = run.get("status_counts") or {}
+                sent_count = int(status_counts.get("sent") or 0) if isinstance(status_counts, dict) else 0
+                already = int(status_counts.get("already_connected") or 0) if isinstance(status_counts, dict) else 0
+                bits = []
+                if sent_count:
+                    bits.append(f"{sent_count} invite(s) sent")
+                if already:
+                    bits.append(f"{already} already connected/pending")
+                company_status[company] = ", ".join(bits) or "processed"
+            else:
+                company_status.setdefault(company, str(phase.get("status") or "ran"))
+
+    selected_by_tier_phase: dict[tuple[str, str], list[dict]] = {}
+    for item in list(plan_payload.get("selected") or []):
+        if not isinstance(item, dict):
+            continue
+        tier = str(item.get("tier") or "Unscored")
+        phase = str(item.get("phase") or "Other")
+        selected_by_tier_phase.setdefault((tier, phase), []).append(item)
+
     lines = [
         "# Outreach Daily Run Report",
         "",
@@ -4824,11 +4957,19 @@ def write_supervised_e2e_report(
         lines.append(f"- Used: `{track_payload.get('used', {})}`")
         lines.append(f"- Phase summary: `{track_payload.get('phase_summary', {})}`")
         lines.extend(["", "## Company-Level Actions", ""])
-        for item in list(track_payload.get("execution_manifest") or []):
-            if not isinstance(item, dict):
-                continue
-            companies = ", ".join(str(company) for company in list(item.get("companies") or []))
-            lines.append(f"- {item.get('phase', '')}: {companies or 'none'}")
+        if selected_by_tier_phase:
+            for (tier, phase), items in sorted(selected_by_tier_phase.items()):
+                rendered = []
+                for item in items:
+                    company = str(item.get("company") or "")
+                    rendered.append(f"{company} - {company_status.get(company, 'planned')}")
+                lines.append(f"- Tier {tier} / {phase}: {', '.join(rendered)}")
+        else:
+            for item in list(track_payload.get("execution_manifest") or []):
+                if not isinstance(item, dict):
+                    continue
+                companies = ", ".join(str(company) for company in list(item.get("companies") or []))
+                lines.append(f"- {item.get('phase', '')}: {companies or 'none'}")
         lines.extend(["", "## Phase Results", ""])
         for phase in list(track_payload.get("phase_results") or []):
             if not isinstance(phase, dict):
@@ -4880,10 +5021,135 @@ def write_supervised_e2e_report(
             if phase.get("detail"):
                 lines.append(f"- Note: {phase.get('detail')}")
             lines.append("")
+    if pending_review_items:
+        lines.extend(["", "## Messages To Review", ""])
+        for item in pending_review_items:
+            lines.append(
+                f"- {item.get('company', '')} / {item.get('name', '')} "
+                f"(`{item.get('send_recommendation', '')}`): {item.get('draft_message', '')}"
+            )
     report_text = "\n".join(lines).rstrip() + "\n"
     report_path.write_text(report_text, encoding="utf-8")
     latest_path.write_text(report_text, encoding="utf-8")
-    return report_path, latest_path
+
+    def esc(value: object) -> str:
+        return html.escape(str(value))
+
+    report_html_path = report_path.with_suffix(".html")
+    latest_html_path = settings.resolved_tracking_workspace_dir / "daily_run_report.html"
+    stage_cards = "".join(
+        f"<tr><td>{esc(stage.get('name', ''))}</td><td><span class='pill'>{esc(stage.get('status', ''))}</span></td></tr>"
+        for stage in list(payload.get("stages") or [])
+        if isinstance(stage, dict)
+    )
+    company_rows = ""
+    if selected_by_tier_phase:
+        for (tier, phase), items in sorted(selected_by_tier_phase.items()):
+            company_list = "".join(
+                "<li>"
+                f"<strong>{esc(item.get('company', ''))}</strong>"
+                f"<span>{esc(company_status.get(str(item.get('company') or ''), 'planned'))}</span>"
+                f"<small>{esc(item.get('reason', ''))}</small>"
+                "</li>"
+                for item in items
+            )
+            company_rows += (
+                "<section class='card'>"
+                f"<h3>Tier {esc(tier)} · {esc(phase)}</h3>"
+                f"<ul class='company-list'>{company_list}</ul>"
+                "</section>"
+            )
+    review_cards = "".join(
+        "<section class='review-card'>"
+        f"<div class='review-meta'>{esc(item.get('company', ''))} · {esc(item.get('name', ''))} · {esc(item.get('send_recommendation', ''))}</div>"
+        f"<p>{esc(item.get('draft_message', ''))}</p>"
+        f"<small>{esc(item.get('title', ''))}</small>"
+        "</section>"
+        for item in pending_review_items
+    )
+    phase_cards = ""
+    for phase in list(track_payload.get("phase_results") or []) if track_payload else []:
+        if not isinstance(phase, dict):
+            continue
+        details = []
+        for key in ["draft_count", "sendable_count", "pending_review_count", "updated", "touchpoints_added"]:
+            if key in phase:
+                details.append(f"<li>{esc(key)}: <strong>{esc(phase.get(key))}</strong></li>")
+        if phase.get("queue"):
+            details.append("<li>Queued people:<ul>")
+            for queued in list(phase.get("queue") or []):
+                if isinstance(queued, dict):
+                    details.append(
+                        f"<li>{esc(queued.get('company', ''))}: {esc(queued.get('name', ''))} - {esc(queued.get('title', ''))}</li>"
+                    )
+            details.append("</ul></li>")
+        if phase.get("runs"):
+            details.append("<li>Runs:<ul>")
+            for run in list(phase.get("runs") or []):
+                if isinstance(run, dict):
+                    details.append(
+                        f"<li>{esc(run.get('company', ''))}: sent={esc(run.get('sent', False))} "
+                        f"candidates={esc(run.get('candidate_count', ''))} status={esc(run.get('status_counts', ''))}</li>"
+                    )
+            details.append("</ul></li>")
+        phase_cards += (
+            "<section class='card'>"
+            f"<h3>{esc(phase.get('phase', ''))}</h3>"
+            f"<p><span class='pill'>{esc(phase.get('status', ''))}</span></p>"
+            f"<ul>{''.join(details)}</ul>"
+            "</section>"
+        )
+    html_text = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outreach Daily Run Report</title>
+  <style>
+    body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #15171a; }}
+    header {{ background: #111827; color: white; padding: 28px 36px; }}
+    header h1 {{ margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }}
+    header p {{ margin: 0; color: #d1d5db; }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 28px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
+    .card, .review-card {{ background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }}
+    .card h2, .card h3 {{ margin: 0 0 12px; }}
+    .pill {{ display: inline-block; background: #e8f0fe; color: #174ea6; border-radius: 999px; padding: 3px 9px; font-size: 12px; font-weight: 700; }}
+    table {{ width: 100%; border-collapse: collapse; background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }}
+    td, th {{ padding: 10px 12px; border-bottom: 1px solid #edf0f3; text-align: left; vertical-align: top; }}
+    section {{ margin-bottom: 20px; }}
+    .company-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }}
+    .company-list li {{ display: grid; gap: 4px; padding: 10px; border: 1px solid #edf0f3; border-radius: 6px; }}
+    .company-list span {{ color: #0f766e; font-weight: 700; }}
+    .company-list small, .review-card small {{ color: #667085; }}
+    .review-meta {{ font-weight: 800; color: #7c2d12; margin-bottom: 8px; }}
+    .review-card {{ border-left: 4px solid #f97316; }}
+    code {{ background: #eef2f7; padding: 2px 5px; border-radius: 4px; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Outreach Daily Run Report</h1>
+    <p>{esc(payload.get('started_at', ''))} → {esc(payload.get('finished_at', ''))}</p>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="card"><h2>Mode</h2><p>execute=<code>{esc(payload.get('execute'))}</code> live=<code>{esc(payload.get('live_linkedin'))}</code> send=<code>{esc(payload.get('send_linkedin'))}</code></p></div>
+      <div class="card"><h2>Counts</h2><p>Before <code>{esc(payload.get('before_counts', {}))}</code></p><p>After <code>{esc(payload.get('after_counts', {}))}</code></p></div>
+      <div class="card"><h2>Budget Used</h2><p><code>{esc(track_payload.get('used', {}) if track_payload else {})}</code></p></div>
+    </section>
+    <section><h2>Stages</h2><table><tbody>{stage_cards}</tbody></table></section>
+    <section><h2>Company-Level Actions</h2><div class="grid">{company_rows or '<div class="card">No company actions selected.</div>'}</div></section>
+    <section><h2>Messages To Review</h2>{review_cards or '<div class="card">No messages require review.</div>'}</section>
+    <section><h2>Phase Details</h2><div class="grid">{phase_cards}</div></section>
+    <section class="card"><h2>Artifacts</h2><p>Summary: <code>{esc(summary_artifact)}</code></p><p>Track 2: <code>{esc(track_artifact or '')}</code></p><p>Campaign: <code>{esc(campaign_artifact)}</code></p></section>
+  </main>
+</body>
+</html>
+"""
+    report_html_path.write_text(html_text, encoding="utf-8")
+    latest_html_path.write_text(html_text, encoding="utf-8")
+    return report_path, latest_path, report_html_path, latest_html_path
 
 
 @app.command("build-communication-lab")
@@ -6096,6 +6362,14 @@ def run_supervised_e2e_pipeline(
     jobs_xlsx: Path = Path("../ResumeGenerator v1/discovery/jobs.xlsx"),
     sheet_name: str = "Jobs",
     resume_blocklist: Path | None = Path("../ResumeGenerator v1/discovery/blocklist.txt"),
+    resume_generator_root: Path = Path("../ResumeGenerator v1"),
+    run_resume_generator_discovery: bool = False,
+    run_resume_generator_generation: bool = False,
+    resume_generator_discovery_hours_old: int = 24,
+    resume_generator_with_startup_apply: bool = True,
+    resume_generator_min_score: float = 8.0,
+    resume_generator_top: int = 10,
+    resume_generator_budget_mode: bool = True,
     execute: bool = False,
     send_linkedin: bool = False,
     refresh_linkedin: bool = False,
@@ -6146,6 +6420,61 @@ def run_supervised_e2e_pipeline(
         stages.append({"name": name, "status": status, **data})
 
     add_stage("preflight", "ok", workspace=str(workspace), before_counts=before_counts)
+
+    resume_generator_python_path = resume_generator_python(resume_generator_root)
+    if run_resume_generator_discovery:
+        command = [
+            resume_generator_python_path,
+            "discovery/auto/pipeline.py",
+            "--hours-old",
+            str(resume_generator_discovery_hours_old),
+            "--quiet",
+        ]
+        if resume_generator_with_startup_apply:
+            command.append("--with-startup-apply")
+        summary = run_external_stage(
+            settings=settings,
+            label="resume-generator-discovery-run",
+            command=command,
+            cwd=resume_generator_root,
+            timeout_seconds=5400,
+        )
+        add_stage(
+            "resume_generator_discovery",
+            str(summary.get("status") or "unknown"),
+            artifact=str(summary.get("artifact") or ""),
+            returncode=summary.get("returncode"),
+        )
+    else:
+        add_stage("resume_generator_discovery", "skipped", reason="disabled")
+
+    if run_resume_generator_generation:
+        command = [
+            resume_generator_python_path,
+            "jobs.py",
+            "pipeline",
+            "--min-score",
+            str(resume_generator_min_score),
+            "--top",
+            str(resume_generator_top),
+        ]
+        if resume_generator_budget_mode:
+            command.append("--budget-mode")
+        summary = run_external_stage(
+            settings=settings,
+            label="resume-generator-generation-run",
+            command=command,
+            cwd=resume_generator_root,
+            timeout_seconds=7200,
+        )
+        add_stage(
+            "resume_generator_generation",
+            str(summary.get("status") or "unknown"),
+            artifact=str(summary.get("artifact") or ""),
+            returncode=summary.get("returncode"),
+        )
+    else:
+        add_stage("resume_generator_generation", "skipped", reason="disabled")
 
     if resume_jobs:
         resume_summary = run_resume_jobs_import_stage(
@@ -6363,13 +6692,15 @@ def run_supervised_e2e_pipeline(
         ],
     }
     artifact = write_artifact(settings.artifacts_dir, "supervised-e2e-run", payload)
-    report_artifact, latest_report = write_supervised_e2e_report(
+    report_artifact, latest_report, report_html, latest_report_html = write_supervised_e2e_report(
         settings=settings,
         payload=payload,
         summary_artifact=artifact,
     )
     payload["daily_report"] = str(report_artifact)
     payload["latest_daily_report"] = str(latest_report)
+    payload["daily_report_html"] = str(report_html)
+    payload["latest_daily_report_html"] = str(latest_report_html)
     artifact.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return artifact, payload
 
@@ -6388,6 +6719,24 @@ def run_supervised_e2e_cmd(
         Path,
         typer.Option(help="Path to ResumeGenerator v1 discovery/jobs.xlsx"),
     ] = Path("../ResumeGenerator v1/discovery/jobs.xlsx"),
+    resume_generator_root: Annotated[
+        Path,
+        typer.Option(help="Path to the ResumeGenerator v1 checkout"),
+    ] = Path("../ResumeGenerator v1"),
+    run_resume_generator_discovery: Annotated[
+        bool,
+        typer.Option(help="Run ResumeGenerator discovery before importing jobs.xlsx"),
+    ] = False,
+    run_resume_generator_generation: Annotated[
+        bool,
+        typer.Option(help="Run ResumeGenerator jobs.py pipeline before importing jobs.xlsx"),
+    ] = False,
+    resume_generator_top: Annotated[int, typer.Option(help="Max ResumeGenerator jobs to promote/generate")] = 10,
+    resume_generator_min_score: Annotated[float, typer.Option(help="Min ResumeGenerator fit score to promote")] = 8.0,
+    resume_generator_budget_mode: Annotated[
+        bool,
+        typer.Option(help="Use ResumeGenerator budget mode for generation"),
+    ] = True,
     sheet_name: Annotated[str, typer.Option(help="Worksheet name inside jobs.xlsx")] = "Jobs",
     execute: Annotated[
         bool,
@@ -6440,6 +6789,12 @@ def run_supervised_e2e_cmd(
         account_tracker_output=account_tracker_output,
         jobs_xlsx=jobs_xlsx,
         sheet_name=sheet_name,
+        resume_generator_root=resume_generator_root,
+        run_resume_generator_discovery=run_resume_generator_discovery,
+        run_resume_generator_generation=run_resume_generator_generation,
+        resume_generator_top=resume_generator_top,
+        resume_generator_min_score=resume_generator_min_score,
+        resume_generator_budget_mode=resume_generator_budget_mode,
         execute=execute,
         send_linkedin=send_linkedin,
         refresh_linkedin=refresh_linkedin,
@@ -6460,6 +6815,7 @@ def run_supervised_e2e_cmd(
     typer.echo(f"Workspace counts: {payload['before_counts']} -> {payload['after_counts']}")
     typer.echo(f"Summary artifact: {artifact}")
     typer.echo(f"Daily report: {payload.get('latest_daily_report', '')}")
+    typer.echo(f"HTML report: {payload.get('latest_daily_report_html', '')}")
     for stage in payload["stages"]:
         typer.echo(f"- {stage['name']} | {stage['status']}")
 

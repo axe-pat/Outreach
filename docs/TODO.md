@@ -25,3 +25,10 @@
   - General business fallback
 - Remove hardcoded "pivoting into PM" / "exploring PM roles" language for candidates outside true product roles.
 - Keep PM-specific language only for Product / Product Ops / Product-adjacent outreach.
+
+## Email Channel
+
+- Add and validate an email-finder provider key before enabling daily email research:
+  - preferred: `PROSPEO_API_KEY`
+  - fallback: `HUNTER_API_KEY`
+  - keep `--max-email-research 0` in the daily live runner until one provider is configured and a small paid/credit-bounded test passes.

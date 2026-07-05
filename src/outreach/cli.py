@@ -989,8 +989,8 @@ def build_relationship_follow_up_message(company: str, contact: ContactRecord | 
     first_name = relationship_contact_first_name(contact)
     return (
         f"Hi {first_name}, thanks for connecting. I'm a Marshall MBA + former data/platform engineer "
-        f"exploring product/operator paths at {company}. Would value your quick read on where someone "
-        "with my background could be useful or who owns PM/internship hiring."
+        f"exploring product roles at {company}. Does that background fit anything useful there? If yes, "
+        "who should I ask?"
     )
 
 
@@ -2927,7 +2927,7 @@ def founder_context_line(company: str, organization: OrganizationRecord | None) 
     ).lower()
     if "agent analytics" in organization_text or "ai agents" in organization_text:
         return f"{company}'s AI agent analytics work maps well to my data/platform + applied AI experience."
-    return f"{company} feels like an early team where product, ops, and execution sit close."
+    return ""
 
 
 def product_context_line(contact: ContactRecord, organization: OrganizationRecord | None = None) -> str:
@@ -2939,7 +2939,7 @@ def product_context_line(contact: ContactRecord, organization: OrganizationRecor
         return "Your AI/data infrastructure work feels close to problems I've worked around."
     if "security" in title or "developer" in title:
         return "Your developer-facing product work feels close to problems I've worked around."
-    return "Your technically deep product work feels close to problems I've worked around."
+    return ""
 
 
 def accepted_followup_draft(
@@ -2956,27 +2956,29 @@ def accepted_followup_draft(
             "safe_to_review",
             (
                 f"Thanks for connecting, {name}. I'm targeting PM/product roles at {company} where my backend/data "
-                "engineering background is useful. If I send a tight resume + 3-line blurb, would you be open to "
-                "a referral, or pointing me to the right hiring contact?"
+                "engineering background is useful. If there is a relevant opening, would you be open to a referral "
+                "or pointing me to the right hiring contact?"
             ),
         )
     if audience == "founder":
         context_line = founder_context_line(company, organization)
+        context_sentence = f"{context_line} " if context_line else ""
         return (
             "review",
             (
                 f"Thanks for connecting, {name}. I'm exploring product roles where my engineering + MBA background "
-                f"can be useful. {context_line} Do you think that profile could be useful at {company}, or is there "
-                "someone on product I should ask?"
+                f"can be useful. {context_sentence}Does that background fit anything useful at {company}? If yes, who "
+                "should I ask?"
             ),
         )
     if audience == "product":
         context_line = product_context_line(contact, organization)
+        context_sentence = f"{context_line} " if context_line else ""
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I'm exploring PM/product roles at {company} from an engineering + "
-                f"data/platform background. {context_line} Do you think that background maps to product work there?"
+                f"Thanks for connecting, {name}. I'm exploring product roles at {company} from an engineering + "
+                f"data/platform background. {context_sentence}Does that background seem relevant to product work there?"
             ),
         )
     if audience == "recruiter":
@@ -2997,16 +2999,16 @@ def accepted_followup_draft(
                 "review",
                 (
                     f"Thanks for connecting, {name}. I'm exploring technical PM/product paths at {company} from a "
-                    f"backend/data engineering background.{context_sentence} Do you think that background could fit "
-                    "any product work there? If yes, who would be the right person to ask?"
+                    f"backend/data engineering background.{context_sentence} Does that background fit product work "
+                    "there? If yes, who should I ask?"
                 ),
             )
         return (
             "safe_to_review",
             (
                 f"Thanks for connecting, {name}. I'm trying to get on the radar at {company} for PM/product roles "
-                "where my data/platform engineering background helps. If I send a tight resume + 3-line blurb, "
-                "would you be open to pointing me to the right referral path or hiring contact?"
+                "where my data/platform engineering background helps. If there is a relevant opening, would you be "
+                "open to a referral or pointing me to the right hiring contact?"
             ),
         )
     return (
@@ -3071,7 +3073,7 @@ def reply_followup_draft(
             "review",
             (
                 f"Thanks {name}, appreciate it. I'll email {target} with my resume and a short note "
-                f"on where my engineering + Marshall background could be useful for product work at {company}."
+                f"on where my engineering + MBA background could be useful for product work at {company}."
             ),
         )
     if "share your profile" in lower or "share your resume" in lower or "hr" in lower:
@@ -3079,7 +3081,7 @@ def reply_followup_draft(
             "referral_offer_reply",
             "review",
             (
-                f"That would be amazing, thanks {name}. Short blurb if useful: Marshall MBA + 5 yrs backend/data "
+                f"That would be amazing, thanks {name}. Short context if useful: MBA + 5 yrs backend/data "
                 "platform engineering, now targeting PM/product roles where technical depth helps. Happy to send "
                 "resume too if HR wants it."
             ),
@@ -3099,7 +3101,7 @@ def reply_followup_draft(
             "conversation_reply",
             "review",
             (
-                f"This is super helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop "
+                f"This is helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop "
                 f"at {company} is exactly what I'm looking for. Do you think there's a PM/product internship path "
                 "there, or someone on product/recruiting I should ask?"
             ),
@@ -3108,9 +3110,8 @@ def reply_followup_draft(
         "conversation_reply",
         "review",
         (
-            f"Thanks {name}, this is helpful. I'm trying to understand where my engineering + Marshall background "
-            f"could fit at {company}. Would you suggest I speak with someone on product/recruiting, or is there a "
-            "better path to get on the team's radar?"
+            f"Thanks {name}, this is helpful. I'm exploring product roles where my engineering + MBA background "
+            f"could be useful. Does that fit anything at {company}? If yes, who should I ask?"
         ),
     )
 
@@ -3702,10 +3703,7 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
         if match:
             context_line = " " + match.group(1)
     elif "tessera" in company.lower() or "generic company insight" in flag_text:
-        context_line = (
-            f" {company} caught my eye because early product teams need people who can move between "
-            "build, customer context, and execution."
-        )
+        context_line = ""
 
     if draft_kind == "already_asked_wait" or reply_intent == "already_asked_wait":
         return (
@@ -3717,8 +3715,8 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
     if "generic company insight" in flag_text:
         return (
             f"Thanks for connecting, {name}. I'm exploring product roles where my engineering + MBA background "
-            f"can be useful.{context_line} Do you think that profile could be useful at {company}, or is there "
-            "someone on product I should ask?"
+            f"can be useful.{context_line} Does that background fit anything useful at {company}? If yes, who "
+            "should I ask?"
         )
     if "seniority mismatch" in flag_text or any(
         token in title.lower()
@@ -3726,8 +3724,7 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
     ):
         return (
             f"Thanks for connecting, {name}. I'm exploring product roles at {company} from "
-            f"{_simple_story_reference(draft)}. Do you think that background could fit any product work there? "
-            "If yes, who would be the right person to ask?"
+            f"{_simple_story_reference(draft)}. Does that background fit product work there? If yes, who should I ask?"
         )
     if "generic fit framing" in flag_text:
         return (
@@ -4477,7 +4474,7 @@ def _email_company_fit_line(organization: OrganizationRecord) -> str:
         return "The health workflow side connects with my Optum/provider systems experience, where workflow complexity matters as much as the software."
     if any(token in text for token in ["ai", "agent", "automation", "workflow"]):
         return "The applied AI/workflow angle is close to the product systems I'm building now, especially where AI has to turn messy work into a clearer decision."
-    return "The company looks close to the technical product/operator path I'm trying to build toward, not just a generic PM target."
+    return "The company looks close to the technical product path I'm trying to build toward, not just a generic PM target."
 
 
 def draft_track_2_email(
@@ -4491,16 +4488,16 @@ def draft_track_2_email(
     recipient_type = email_recipient_type(contact)
     fit_line = _email_company_fit_line(organization)
     company = organization.name
-    intro = "I'm a Marshall MBA and former data/platform engineer exploring technical PM/operator paths."
+    intro = "I'm a Marshall MBA and former data/platform engineer exploring technical product paths."
     if recipient_type == "founder":
-        subject = f"Product/operator fit at {company}"
+        subject = f"Product fit at {company}"
         body = (
             f"Hi {name},\n\n"
             "I know cold emails from MBA candidates usually blur together, so I'll make the reason specific.\n\n"
             f"{intro} {fit_line}\n\n"
-            f"The thing I'm trying to test is whether {company} has a product, ops, or internship path where "
+            f"The thing I'm trying to test is whether {company} has a product or internship path where "
             "that mix is actually useful, or whether I'm forcing the fit. If it is directionally relevant, "
-            "could I send a tight resume + 4-line blurb? If not, a blunt no is genuinely useful too.\n\n"
+            "who should I ask? If not, a blunt no is genuinely useful too.\n\n"
             "Best,\nAkshat"
         )
     elif recipient_type == "senior_product":
@@ -4509,9 +4506,8 @@ def draft_track_2_email(
             f"Hi {name},\n\n"
             "I am not trying to send a generic admire-your-product note, so here is the actual reason I am reaching out.\n\n"
             f"{intro} {fit_line}\n\n"
-            f"I'm trying to understand whether that profile is useful for product work at {company}, or if there is "
-            "a sharper angle I should be thinking about. If there is a better product or hiring-team contact to route "
-            "this to, a pointer would help.\n\n"
+            f"I'm trying to understand whether that profile is useful for product work at {company}. If yes, "
+            "who should I ask? If not, a blunt no is helpful.\n\n"
             "Best,\nAkshat"
         )
     elif recipient_type == "recruiter":

@@ -194,9 +194,9 @@ def test_senior_product_note_uses_contribution_fit_ending() -> None:
     assert any(
         phrase in note.text
         for phrase in [
-            "where my engineering + PM background could be useful",
-            "project areas the product team is most excited about",
-            "what tends to matter most to the product team",
+            "exploring product roles",
+            "Open to connecting?",
+            "quick read on fit",
         ]
     )
     assert "Deepgram" in note.text.split(".", 1)[0]
@@ -303,7 +303,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
             },
             {"opportunity_titles": ["Product Owner Internship"]},
             "founder_builder_fit",
-            ["product/operator", "quick read"],
+            ["product work", "I'd value a connect"],
         ),
         (
             "founder_with_specific_company_context",
@@ -385,7 +385,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
                 "opportunity_titles": ["Product Management Intern, Summer 2026"],
             },
             "senior_product_contribution",
-            ["product team", "Deepgram"],
+            ["product roles", "Deepgram"],
         ),
         (
             "operator_contribution",
@@ -402,7 +402,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
             },
             {"opportunity_titles": ["Product Owner Internship"]},
             "operator_contribution",
-            ["product/operator", "useful"],
+            ["product/strategy", "quick read on fit"],
         ),
         (
             "cloud_agent_workspace",
@@ -422,7 +422,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
                 "description": "Desktop OS and cloud desktop workspace for humans and agents running in the cloud.",
             },
             "founder_builder_fit",
-            ["Endstack's cloud desktop/agent workspace", "following what you're building"],
+            ["Endstack's cloud desktop/agent workspace", "Open to connecting"],
         ),
     ],
 )

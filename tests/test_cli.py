@@ -1398,7 +1398,7 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
         "conversation_reply",
     ]
     assert "referral" in str(drafts[0]["draft_message"]).lower()
-    assert "short blurb" in str(drafts[1]["draft_message"]).lower()
+    assert "short context" in str(drafts[1]["draft_message"]).lower()
     assert drafts[2]["send_recommendation"] == "optional"
     assert "thanks for letting me know" in str(drafts[2]["draft_message"]).lower()
     assert drafts[0]["company"] == "Snyk"
@@ -1406,15 +1406,15 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[0]["communication_review"]["channel"] == "linkedin_followup"
     assert "communication_recommendation" in drafts[0]
     assert drafts[1]["latest_message"].startswith("I can share your profile")
-    assert "referral path or hiring contact" in str(drafts[3]["draft_message"])
+    assert "hiring contact" in str(drafts[3]["draft_message"])
     assert drafts[4]["followup_audience"] == "product"
-    assert "do you think that background maps to product work there" in str(drafts[4]["draft_message"]).lower()
+    assert "does that background seem relevant to product work there" in str(drafts[4]["draft_message"]).lower()
     assert "could translate to the product work there" not in str(drafts[4]["draft_message"])
     assert "product or recruiting person" not in str(drafts[4]["draft_message"]).lower()
     assert drafts[5]["followup_audience"] == "founder"
     assert "AI agent analytics work" in str(drafts[5]["draft_message"])
-    assert "could be useful at Voker" in str(drafts[5]["draft_message"])
-    assert "someone on product I should ask" in str(drafts[5]["draft_message"])
+    assert "fit anything useful at Voker" in str(drafts[5]["draft_message"])
+    assert "who should I ask" in str(drafts[5]["draft_message"])
     assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
     assert "Alessandra@beyondmedplans.com" in str(drafts[6]["draft_message"])
     assert drafts[6]["action_items"][0]["action_type"] == "email_resume"
@@ -1549,8 +1549,8 @@ def test_accepted_followup_to_principal_engineer_uses_senior_ask() -> None:
     )
 
     message = str(drafts[0]["draft_message"])
-    assert "Do you think that background could fit any product work there" in message
-    assert "If yes, who would be the right person to ask" in message
+    assert "Does that background fit product work there" in message
+    assert "If yes, who should I ask" in message
     assert "does that angle make sense" not in message
     assert "route I should understand" not in message
     assert "tight resume + 3-line blurb" not in message
@@ -1593,7 +1593,7 @@ def test_story_fit_metadata_flows_into_senior_followup() -> None:
     )
 
     assert "FlairX gives a direct recruiting workflow pitch" in str(drafts[0]["draft_message"])
-    assert "Do you think that background could fit any product work there" in str(drafts[0]["draft_message"])
+    assert "Does that background fit product work there" in str(drafts[0]["draft_message"])
 
 
 def test_track_2_email_uses_story_fit_reason_before_generic_fit_line() -> None:
@@ -1723,8 +1723,8 @@ def test_communication_review_csv_suggests_simple_senior_product_question(tmp_pa
     rows = build_communication_review_csv_rows(payload=payload, review_artifact=review_artifact)
     suggestion = rows[0]["suggested_message"]
 
-    assert "Do you think that background could fit any product work there" in suggestion
-    assert "If yes, who would be the right person to ask" in suggestion
+    assert "Does that background fit product work there" in suggestion
+    assert "If yes, who should I ask" in suggestion
     assert "does that angle make sense" not in suggestion
     assert "route I should understand" not in suggestion
     assert "tight resume" not in suggestion

@@ -7,15 +7,15 @@ def test_review_email_craft_rewards_specific_human_email() -> None:
     body = (
         "Hi Sean,\n\n"
         "I know cold emails from MBA candidates usually blur together, so I'll make the reason specific.\n\n"
-        "I'm a Marshall MBA and former data/platform engineer exploring technical PM/operator paths. "
+        "I'm a Marshall MBA and former data/platform engineer exploring technical product paths. "
         "The data/platform side maps cleanly to my Hevo, Gojek, and Intuit engineering background.\n\n"
-        "The thing I'm trying to test is whether Synphony has a product, ops, or internship path where "
+        "The thing I'm trying to test is whether Synphony has a product or internship path where "
         "that mix is actually useful, or whether I'm forcing the fit. If it is directionally relevant, "
-        "could I send a tight resume + 4-line blurb? If not, a blunt no is genuinely useful too.\n\n"
+        "who should I ask? If not, a blunt no is genuinely useful too.\n\n"
         "Best,\nAkshat"
     )
 
-    review = review_email_craft("Product/operator fit at Synphony", body, company="Synphony")
+    review = review_email_craft("Product fit at Synphony", body, company="Synphony")
 
     assert review.verdict in {"strong_send_candidate", "review"}
     assert review.score >= 88
@@ -76,8 +76,8 @@ def test_review_outreach_message_accepts_specific_linkedin_followup() -> None:
         body=(
             "Thanks for connecting, Emiliano. I'm trying to get on the radar at Snyk "
             "for technical PM/product roles where my data/platform background helps. "
-            "If I send a tight resume + 3-line blurb, would you be open to pointing me "
-            "to the right referral path or hiring contact?"
+            "If you see a relevant opening, would you be open to referring me or pointing "
+            "me to the right hiring contact?"
         ),
         channel="linkedin_followup",
         company="Snyk",

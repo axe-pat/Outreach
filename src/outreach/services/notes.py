@@ -251,7 +251,7 @@ class NoteGenerator:
 
         ask_is_clear = bool(
             re.search(
-                r"\b(connect|learn|stay in touch|perspective|guidance|thoughts|hear about|hear more)\b",
+                r"\b(connect|connecting|open to connecting|learn|stay in touch|perspective|guidance|thoughts|take|hear about|hear more)\b",
                 lower,
             )
             or re.search(
@@ -514,9 +514,9 @@ class NoteGenerator:
                 "founder_builder_fit",
                 "builder_fit",
                 [
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer interested in product/operator work at {company}.{fit_sentence} Would love to connect and understand where a technical MBA could be useful.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring product/operator paths at {company}.{fit_sentence} Would love to connect and follow what you're building.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}.{fit_sentence} Would love to connect and understand where someone with my background could contribute.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring product work at {company}.{fit_sentence} If that background could be useful, I'd value a connect.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}.{fit_sentence} Open to connecting?",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}.{fit_sentence} If useful, I'd value a quick read on fit.",
                 ],
             )
 
@@ -527,18 +527,18 @@ class NoteGenerator:
                     "senior_product_contribution",
                     "contribution_fit",
                     [
-                        f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand where my engineering + PM background could be useful.",
-                        f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}. {fit_clause} Would love to connect and hear what project areas the product team is most excited about.",
-                        f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring product roles at {company}. {fit_clause} Would love to connect and ask what tends to matter most to the product team.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Open to connecting? I'd value a quick read on fit.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}. {fit_clause} I'd value a connect and a quick read on what matters to product there.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring product roles at {company}. {fit_clause} Open to connecting?",
                     ],
                 )
             return (
                 "product_hiring_path",
                 "hiring_path",
                 [
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand the best way to get on the product team's radar.",
-                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring {role} at {company}. {fit_clause} Would love to connect and ask what tends to stand out to the product team.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}. Would love to connect and ask what usually helps candidates stand out to the team.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring {role} at {company}. {fit_clause} Open to connecting? I'd value a pointer on the product path.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring {role} at {company}. {fit_clause} Open to connecting?",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}. I'd value a connect and a quick pointer on what helps candidates stand out.",
                 ],
             )
 
@@ -549,7 +549,7 @@ class NoteGenerator:
                 "technical_overlap",
                 [
                     f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring {role} at {company}. Since you're on the engineering side there, I'd value a pointer on how technical PM candidates can stand out.",
-                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring PM/product roles at {company}. {fit_clause} Would love a quick pointer on how builders work with product there.",
+                    f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring PM/product roles at {company}. {fit_clause} I'd value a quick pointer on how builders work with product there.",
                     f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at product roles at {company}. Since you've seen the engineering side, I'd value your take on how to get on the team's radar.",
                 ],
             )
@@ -560,8 +560,8 @@ class NoteGenerator:
                 "operator_contribution",
                 "contribution_fit",
                 [
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring product/operator roles at {company}. {fit_clause} Would love to connect and understand where someone like me could be useful.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product/operator paths at {company}. Would love to connect and hear which project areas the team is most excited about.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring product/strategy roles at {company}. {fit_clause} Open to connecting? I'd value a quick read on fit.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product-adjacent paths at {company}. Open to connecting?",
                 ],
             )
 
@@ -571,8 +571,8 @@ class NoteGenerator:
                 "contextual_general",
                 "contribution_fit",
                 [
-                    f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Would love to connect and understand where someone like me could be useful.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at PM/product roles at {company}. Would love to connect and ask what tends to matter most to the team.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Open to connecting? I'd value a quick read on fit.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at PM/product roles at {company}. I'd value a connect and a quick pointer on what matters to the team.",
                 ],
             )
 
@@ -705,39 +705,39 @@ class NoteGenerator:
         if ask_style == "direct_help":
             return [
                 f"Hi {first_name}, great to reconnect here. I'm at USC Marshall pivoting from engineering into PM and exploring roles at {company}. If you have any quick guidance on where I should focus, I'd really value it.",
-                f"Hi {first_name}, nice to reconnect here. I'm at USC Marshall making the shift from engineering into PM and exploring opportunities at {company}. If you're open to it, I'd love any advice on how to position myself well.",
+                f"Hi {first_name}, nice to reconnect here. I'm at USC Marshall making the shift from engineering into PM and exploring opportunities at {company}. If you're open to it, I'd value any advice on how to position myself well.",
                 f"Hi {first_name}, glad we're connecting here. I'm at USC Marshall transitioning from engineering into PM and currently exploring roles at {company}. Would really value any quick guidance you have on approaching the process.",
             ]
         return [
-            f"Hi {first_name}, great to reconnect here. I'm at USC Marshall pivoting from engineering into PM and exploring roles at {company}. Would love to stay in touch and learn from your experience there.",
-            f"Hi {first_name}, glad we're connecting here. I'm at USC Marshall transitioning from engineering into PM and currently exploring roles at {company}. Would love to stay in touch and learn from your journey.",
-            f"Hi {first_name}, nice to reconnect here. I'm at USC Marshall making the shift from engineering into PM and exploring opportunities at {company}. Would love to keep in touch and learn from your experience.",
+            f"Hi {first_name}, great to reconnect here. I'm at USC Marshall pivoting from engineering into PM and exploring roles at {company}. I'd value staying in touch.",
+            f"Hi {first_name}, glad we're connecting here. I'm at USC Marshall transitioning from engineering into PM and currently exploring roles at {company}. I'd value staying in touch.",
+            f"Hi {first_name}, nice to reconnect here. I'm at USC Marshall making the shift from engineering into PM and exploring opportunities at {company}. I'd value keeping in touch.",
         ]
 
     def _usc_marshall_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. Would love your perspective on how to position myself well. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. I'd value your take on how to position myself well. Fight On!",
                 f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall and exploring PM opportunities at {company} after engineering roles at Intuit/Gojek. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. I'd value your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. Would love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall and exploring PM opportunities at {company} after engineering roles at Intuit/Gojek. Would love to connect and learn from your path. Fight On!",
-            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. Would love to connect and hear about your experience. Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} after engineering work at Intuit/Gojek. Open to connecting? Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm at USC Marshall and exploring PM opportunities at {company} after engineering roles at Intuit/Gojek. Open to connecting? Fight On!",
+            f"Hi {first_name}, fellow Marshall alum here - I'm exploring PM roles at {company} with a background in data platforms and marketplaces. Open to connecting? Fight On!",
         ]
 
     def _usc_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "guidance":
             return [
-                f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} as a Marshall MBA with enterprise software/data platform experience. Would love your perspective on positioning myself well. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} as a Marshall MBA with enterprise software/data platform experience. I'd value your take on positioning myself well. Fight On!",
                 f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall and exploring PM roles at {company} after building data products and enterprise systems. Would value any guidance you're open to sharing. Fight On!",
-                f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} with a data platform and enterprise software background. Would love your quick thoughts on approaching the team. Fight On!",
+                f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} with a data platform and enterprise software background. I'd value your quick thoughts on approaching the team. Fight On!",
             ]
         return [
-            f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} as a Marshall MBA with a data platforms background. Would love to connect and learn from your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall and exploring PM roles at {company} after building data products and enterprise systems. Would love to connect and hear about your experience. Fight On!",
-            f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} with enterprise software/data platform experience. Would love to connect and learn from your path. Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm exploring PM roles at {company} as a Marshall MBA with a data platforms background. Open to connecting? Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm at USC Marshall and exploring PM roles at {company} after building data products and enterprise systems. Open to connecting? Fight On!",
+            f"Hi {first_name}, fellow Trojan here - I'm exploring PM opportunities at {company} with enterprise software/data platform experience. Open to connecting? Fight On!",
         ]
 
     def _shared_history_variants(
@@ -751,25 +751,25 @@ class NoteGenerator:
         if signal:
             if ask_style == "guidance":
                 return [
-                    f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. Would value your perspective.",
+                    f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. I'd value your take.",
                     f"Hi {first_name}, noticed the {signal} overlap. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; I'd value your quick guidance.",
-                    f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. Would value your thoughts.",
+                    f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. I'd value your thoughts.",
                 ]
             return [
-                f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. Would love to connect.",
-                f"Hi {first_name}, noticed the {signal} overlap. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; would love to connect and learn from your path.",
-                f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. Would love to connect.",
+                f"Hi {first_name}, I saw your {signal} background and I'm at USC Marshall after engineering roles at Intuit/Gojek, now exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, noticed the {signal} overlap. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, saw we both have {signal} in our paths. I'm at USC Marshall after engineering roles at Intuit/Gojek and exploring PM opportunities at {company}. Open to connecting?",
             ]
         if ask_style == "guidance":
             return [
                 f"Hi {first_name}, I'm a Marshall MBA and former engineer at Intuit/Gojek, now exploring PM roles at {company}. Given the overlap in our backgrounds, I'd value your perspective on how to approach the process.",
-                f"Hi {first_name}, I'm at USC Marshall after engineering stints at Intuit and Gojek, and I'm now exploring PM opportunities at {company}. We seem to have some shared background, and I'd love your quick guidance.",
+                f"Hi {first_name}, I'm at USC Marshall after engineering stints at Intuit and Gojek, and I'm now exploring PM opportunities at {company}. We seem to have some shared background, and I'd value your quick guidance.",
                 f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience across Intuit and Gojek, currently exploring PM roles at {company}. Given the overlap in our backgrounds, I'd really value your thoughts.",
             ]
         return [
-            f"Hi {first_name}, I'm a 1Y MBA at USC Marshall and former engineer at Intuit/Gojek, now exploring PM roles at {company}. Given the overlap in our backgrounds, I'd love to connect and learn from your experience.",
-            f"Hi {first_name}, I'm at USC Marshall after engineering stints at Intuit and Gojek, and I'm now exploring PM opportunities at {company}. Given the overlap in our backgrounds, I'd love to connect and hear about your path.",
-            f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience across Intuit and Gojek, currently exploring PM roles at {company}. We seem to have some shared background, and I'd love to connect and learn from your experience.",
+            f"Hi {first_name}, I'm a Marshall MBA and former engineer at Intuit/Gojek, now exploring PM roles at {company}. Given the overlap in our backgrounds, open to connecting?",
+            f"Hi {first_name}, I'm at USC Marshall after engineering stints at Intuit and Gojek, and I'm now exploring PM opportunities at {company}. Given the overlap in our backgrounds, open to connecting?",
+            f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience across Intuit and Gojek, currently exploring PM roles at {company}. We seem to have some shared background. Open to connecting?",
         ]
 
     def _shared_history_signal(self, candidate: dict) -> str:
@@ -792,46 +792,46 @@ class NoteGenerator:
     def _product_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "conversation":
             return [
-                f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience in data platforms and marketplaces, now exploring PM opportunities at {company}. Your product journey stood out, and I'd love to connect and hear about your experience.",
-                f"Hi {first_name}, I'm at USC Marshall after building products from the engineering side at Intuit and Gojek, and I'm exploring PM roles at {company}. Your path stood out, and I'd love to connect and learn from your experience.",
-                f"Hi {first_name}, I'm a 1Y MBA at USC Marshall and former engineer at Intuit/Gojek, exploring PM roles at {company}. Your product path stood out, and I'd love to connect and learn from your experience.",
+                f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience in data platforms and marketplaces, now exploring PM opportunities at {company}. Your product journey stood out. Open to connecting?",
+                f"Hi {first_name}, I'm at USC Marshall after building products from the engineering side at Intuit and Gojek, and I'm exploring PM roles at {company}. Your path stood out. Open to connecting?",
+                f"Hi {first_name}, I'm a Marshall MBA and former engineer at Intuit/Gojek, exploring PM roles at {company}. Your product path stood out. Open to connecting?",
             ]
         return [
             f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience in data platforms and marketplaces, now exploring PM opportunities at {company}. Would value your perspective on how to position myself for PM roles there.",
-            f"Hi {first_name}, I'm at USC Marshall after building products from the engineering side at Intuit and Gojek, and I'm exploring PM roles at {company}. Would love your quick thoughts on what strong PM candidates do well.",
+            f"Hi {first_name}, I'm at USC Marshall after building products from the engineering side at Intuit and Gojek, and I'm exploring PM roles at {company}. I'd value your quick thoughts on what strong PM candidates do well.",
             f"Hi {first_name}, I'm a 1Y MBA at USC Marshall and former engineer at Intuit/Gojek, exploring PM roles at {company}. Would really value your perspective on approaching the PM process there.",
         ]
 
     def _engineering_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "conversation":
             return [
-                f"Hi {first_name}, I'm a Marshall MBA with 5 years in engineering across enterprise data and platform systems, now exploring PM opportunities at {company}. Would love to connect and hear about your experience building there.",
-                f"Hi {first_name}, I'm at USC Marshall after 5 years building data and marketplace systems as an engineer. I'm now exploring PM roles at {company}, and I'd love to connect and learn from your experience there.",
-                f"Hi {first_name}, I'm a 1Y MBA at USC Marshall with 5 years in engineering across data platforms and marketplace systems. I'm exploring PM roles at {company}, and I'd love to connect and learn from your experience building there.",
+                f"Hi {first_name}, I'm a Marshall MBA with 5 years in engineering across enterprise data and platform systems, now exploring PM opportunities at {company}. Open to connecting?",
+                f"Hi {first_name}, I'm at USC Marshall after 5 years building data and marketplace systems as an engineer. I'm now exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, I'm a Marshall MBA with 5 years in engineering across data platforms and marketplace systems. I'm exploring PM roles at {company}. Open to connecting?",
             ]
         return [
             f"Hi {first_name}, I'm a Marshall MBA with 5 years in engineering across enterprise data and platform systems, now exploring PM opportunities at {company}. Would value your perspective on making the shift well.",
-            f"Hi {first_name}, I'm at USC Marshall after 5 years building data and marketplace systems as an engineer. I'm now exploring PM roles at {company}, and I'd love your quick guidance on positioning that background well.",
+            f"Hi {first_name}, I'm at USC Marshall after 5 years building data and marketplace systems as an engineer. I'm now exploring PM roles at {company}, and I'd value your quick guidance on positioning that background well.",
             f"Hi {first_name}, I'm a 1Y MBA at USC Marshall with 5 years in engineering across data platforms and marketplace systems. I'm exploring PM roles at {company}, and I'd value your perspective on approaching the transition.",
         ]
 
     def _university_recruiting_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         return [
-            f"Hi {first_name}, I'm a 1Y MBA at USC Marshall with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. I'd love to connect and learn about what stands out in strong MBA PM candidates.",
-            f"Hi {first_name}, I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm currently exploring PM opportunities at {company}. Would love to connect and learn what you look for in strong MBA candidates.",
-            f"Hi {first_name}, I'm a Marshall MBA with a prior engineering background, now exploring PM roles at {company}. I'd love to connect and hear what tends to stand out in strong MBA PM applicants.",
+            f"Hi {first_name}, I'm a Marshall MBA with prior engineering experience at Intuit and Gojek, exploring PM roles at {company}. Open to connecting? I'd value a quick pointer on what stands out.",
+            f"Hi {first_name}, I'm at USC Marshall after engineering roles at Intuit and Gojek, and I'm currently exploring PM opportunities at {company}. Open to connecting?",
+            f"Hi {first_name}, I'm a Marshall MBA with a prior engineering background, now exploring PM roles at {company}. Open to connecting?",
         ]
 
     def _general_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "conversation":
             return [
-                f"Hi {first_name}, I'm at USC Marshall after building enterprise software and data products, and I'm now exploring PM opportunities at {company}. Your path stood out, and I'd love to connect and hear about your experience.",
-                f"Hi {first_name}, I'm a Marshall MBA with prior experience in enterprise software and data platforms, currently exploring PM roles at {company}. I'd love to connect and learn from your path.",
-                f"Hi {first_name}, I'm a 1Y MBA at USC Marshall with a background in enterprise software and data platforms, exploring PM roles at {company}. Your path stood out, and I'd love to connect and learn from your experience.",
+                f"Hi {first_name}, I'm at USC Marshall after building enterprise software and data products, and I'm now exploring PM opportunities at {company}. Your path stood out. Open to connecting?",
+                f"Hi {first_name}, I'm a Marshall MBA with prior experience in enterprise software and data platforms, currently exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, I'm a Marshall MBA with a background in enterprise software and data platforms, exploring PM roles at {company}. Your path stood out. Open to connecting?",
             ]
         return [
             f"Hi {first_name}, I'm at USC Marshall after building enterprise software and data products, and I'm now exploring PM opportunities at {company}. Would value any perspective you're open to sharing.",
-            f"Hi {first_name}, I'm a Marshall MBA with prior experience in enterprise software and data platforms, currently exploring PM roles at {company}. Would love your quick thoughts on approaching the process there.",
+            f"Hi {first_name}, I'm a Marshall MBA with prior experience in enterprise software and data platforms, currently exploring PM roles at {company}. I'd value your quick thoughts on approaching the process there.",
             f"Hi {first_name}, I'm a 1Y MBA at USC Marshall with a background in enterprise software and data platforms, exploring PM roles at {company}. I'd value any guidance you're open to sharing.",
         ]
 
@@ -860,10 +860,10 @@ class NoteGenerator:
             ("I'm a 1Y MBA at USC Marshall with 5 years in engineering across data platforms and marketplace systems. ", "I'm a Marshall MBA with 5 years in engineering. "),
             ("with prior engineering experience at Intuit and Gojek, ", "with prior engineering experience, "),
             ("and learn from your experience there.", "and learn from your experience."),
-            ("Your product path stood out, and I'd love to connect and learn from your experience.", "Your product path stood out. Would love to connect and learn from your experience."),
-            ("I'm a Marshall MBA + former engineer exploring product/operator paths, and this feels close to work I've done. ", "I'm a Marshall MBA + former engineer exploring product/operator paths. "),
-            ("Would love to connect and understand where someone with my builder background could be useful as the team grows.", "Would love to connect and understand where my builder background could be useful."),
-            ("Would love to connect and understand where someone with my engineering + PM background could be most useful.", "Would love to connect and understand where my engineering + PM background could be useful."),
+            ("Your product path stood out, and I'd love to connect and learn from your experience.", "Your product path caught my eye. Open to connecting?"),
+            ("I'm a Marshall MBA + former engineer exploring product/operator paths, and this feels close to work I've done. ", "I'm a Marshall MBA + former engineer exploring product work. "),
+            ("Would love to connect and understand where someone with my builder background could be useful as the team grows.", "I'd value a quick read on where my builder background could be useful."),
+            ("Would love to connect and understand where someone with my engineering + PM background could be most useful.", "I'd value a quick read on where my engineering + PM background could be useful."),
             ("Would be grateful to connect and ask if a referral or hiring-team pointer would make sense.", "Would value a referral or hiring-team pointer if the fit looks reasonable."),
         ]
         for source, target in replacements:

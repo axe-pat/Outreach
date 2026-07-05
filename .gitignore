@@ -8,7 +8,17 @@ playwright/.auth/
 playwright/chrome-data/
 artifacts/
 *.log
+.chrome-linkedin-debug/
 Profile/
 Invitations.csv
 LinkedIn_Outreach_Automation_Plan.docx
 *.Rhistory
+workspace/account_tracker.xlsx
+workspace/daily_run_report.html
+workspace/daily_run_report.md
+workspace/linkedin_followup_pending_review.json
+workspace/linkedin_message_state.json
+workspace/track2_review_queue_*.csv
+workspace/relationship_leads_peoplegrove*.csv
+workspace/USC resources/
+Consulting/

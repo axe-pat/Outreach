@@ -24,6 +24,14 @@ SLOP_PHRASES = [
     "dynamic",
     "innovative company",
     "i believe my background makes me a strong fit",
+    "would love your perspective",
+    "could translate",
+    "product/operator paths",
+    "product/operator work",
+    "tight resume + 3-line blurb",
+    "3-line blurb",
+    "route i should understand",
+    "where my engineering + marshall background",
 ]
 
 HUMAN_MARKERS = [
@@ -233,7 +241,7 @@ def review_outreach_message(
 
     has_earned_background = bool(
         re.search(
-            r"\b(hevo|gojek|intuit|optum|marshall|data/platform|backend|marketplace|workflow|recruiting systems|technical pm|former engineer|product/operator)\b",
+            r"\b(hevo|gojek|intuit|optum|marshall|mba|data/platform|backend|marketplace|workflow|recruiting systems|technical pm|former engineer)\b",
             lower,
         )
     )
@@ -263,7 +271,7 @@ def review_outreach_message(
 
     has_concrete_ask = bool(
         re.search(
-            r"\b(pointer|route|right person|send a .*blurb|resume|quick read|worth|who owns|hiring-team|hiring team|referral|radar|short blurb|would you suggest|could i send|do you think|open to|perspective|next contact|best next contact)\b",
+            r"\b(pointer|route|right person|send a .*blurb|resume|quick read|worth|who owns|who should i ask|hiring-team|hiring team|referral|radar|short blurb|would you suggest|could i send|do you think|does that background|open to|perspective|next contact|best next contact)\b",
             lower,
         )
     )
@@ -284,6 +292,19 @@ def review_outreach_message(
     if normalized_channel == "linkedin_followup" and senior_title and tactical_referral_ask:
         flags.append("Seniority mismatch: tactical referral ask to senior/principal contact")
         score -= 18
+
+    if "product/operator" in lower:
+        flags.append("Blurry path framing: use product unless operator is the actual target")
+        score -= 12
+    if "engineering + marshall" in lower:
+        flags.append("Credential phrasing: use engineering + MBA unless USC/Marshall warmth is the actual reason")
+        score -= 8
+    if "would love your perspective" in lower or "could translate" in lower:
+        flags.append("Soft translation ask: make the yes/no ask obvious on first read")
+        score -= 10
+    if re.search(r"\b(angle|route)\b.*\b(understand|make sense)\b", lower):
+        flags.append("High-cognitive-load ask: replace angle/route wording with does this fit and who should I ask")
+        score -= 10
 
     if lower.count("i ") + lower.count("i'm") > 12:
         flags.append("Too self-centered")
@@ -320,6 +341,14 @@ def review_outreach_message(
         (
             r"trying to understand where my engineering \+ marshall background could fit",
             "Generic fit framing: asks where the background fits without naming the company-specific angle",
+        ),
+        (
+            r"exploring product/operator paths",
+            "Blurry path framing: product/operator should collapse to product unless operator is intentional",
+        ),
+        (
+            r"would love your perspective on whether my background could translate",
+            "Soft translation ask: recipient has to decode the ask",
         ),
     ]
     for pattern, flag in generic_insight_patterns:

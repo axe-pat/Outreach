@@ -11,7 +11,7 @@ def test_review_email_craft_rewards_specific_human_email() -> None:
         "The data/platform side maps cleanly to my Hevo, Gojek, and Intuit engineering background.\n\n"
         "The thing I'm trying to test is whether Synphony has a product or internship path where "
         "that mix is actually useful, or whether I'm forcing the fit. If it is directionally relevant, "
-        "who should I ask? If not, a blunt no is genuinely useful too.\n\n"
+        "any recs on who I should talk to about that? If not, a blunt no is genuinely useful too.\n\n"
         "Best,\nAkshat"
     )
 

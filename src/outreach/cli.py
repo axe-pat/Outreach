@@ -990,7 +990,7 @@ def build_relationship_follow_up_message(company: str, contact: ContactRecord | 
     return (
         f"Hi {first_name}, thanks for connecting. I'm a Marshall MBA + former data/platform engineer "
         f"exploring product roles at {company}. Does that background fit anything useful there? If yes, "
-        "who should I ask?"
+        "any recs on who I should talk to about that?"
     )
 
 
@@ -2967,8 +2967,8 @@ def accepted_followup_draft(
             "review",
             (
                 f"Thanks for connecting, {name}. I'm exploring product roles where my engineering + MBA background "
-                f"can be useful. {context_sentence}Does that background fit anything useful at {company}? If yes, who "
-                "should I ask?"
+                f"can be useful. {context_sentence}Does that background fit anything useful at {company}? Any recs "
+                "on who I should talk to about that?"
             ),
         )
     if audience == "product":
@@ -3000,7 +3000,7 @@ def accepted_followup_draft(
                 (
                     f"Thanks for connecting, {name}. I'm exploring technical PM/product paths at {company} from a "
                     f"backend/data engineering background.{context_sentence} Does that background fit product work "
-                    "there? If yes, who should I ask?"
+                    "there? Any recs on who I should talk to about that?"
                 ),
             )
         return (
@@ -3037,8 +3037,8 @@ def reply_followup_draft(
             "conversation_reply",
             "review",
             (
-                f"Sure, thanks {name}. Is there a PM/product internship path at {company}, or someone on "
-                "product/recruiting I should ask?"
+                f"Sure, thanks {name}. Is there a PM/product internship path at {company}? Any recs on who "
+                "I should talk to about that?"
             ),
         )
     if intent == "already_asked_wait":
@@ -3093,7 +3093,7 @@ def reply_followup_draft(
             (
                 f"Thanks {name}, this is helpful. I'm focused on PM/product paths for now, so I'd really "
                 f"appreciate being kept in mind if something opens up at {company}. In the meantime, is there "
-                "someone on product/recruiting you'd suggest I get on the radar of?"
+                "someone on product you'd suggest I get on the radar of?"
             ),
         )
     if any(token in lower for token in ["small team", "high-impact", "high ownership", "feedback loop"]):
@@ -3103,7 +3103,7 @@ def reply_followup_draft(
             (
                 f"This is helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop "
                 f"at {company} is exactly what I'm looking for. Do you think there's a PM/product internship path "
-                "there, or someone on product/recruiting I should ask?"
+                "there? Any recs on who I should talk to about that?"
             ),
         )
     return (
@@ -3111,7 +3111,7 @@ def reply_followup_draft(
         "review",
         (
             f"Thanks {name}, this is helpful. I'm exploring product roles where my engineering + MBA background "
-            f"could be useful. Does that fit anything at {company}? If yes, who should I ask?"
+            f"could be useful. Does that fit anything at {company}? Any recs on who I should talk to about that?"
         ),
     )
 
@@ -3711,12 +3711,15 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
             f"{company} PM/product fit to share."
         )
     if reply_intent == "does_not_know":
-        return f"Sure, thanks {name}. Is there a PM/product internship path at {company}, or someone on product/recruiting I should ask?"
+        return (
+            f"Sure, thanks {name}. Is there a PM/product internship path at {company}? Any recs on who I should "
+            "talk to about that?"
+        )
     if "generic company insight" in flag_text:
         return (
             f"Thanks for connecting, {name}. I'm exploring product roles where my engineering + MBA background "
-            f"can be useful.{context_line} Does that background fit anything useful at {company}? If yes, who "
-            "should I ask?"
+            f"can be useful.{context_line} Does that background fit anything useful at {company}? Any recs on who "
+            "I should talk to about that?"
         )
     if "seniority mismatch" in flag_text or any(
         token in title.lower()
@@ -3724,7 +3727,8 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
     ):
         return (
             f"Thanks for connecting, {name}. I'm exploring product roles at {company} from "
-            f"{_simple_story_reference(draft)}. Does that background fit product work there? If yes, who should I ask?"
+            f"{_simple_story_reference(draft)}. Does that background fit product work there? Any recs on who I "
+            "should talk to about that?"
         )
     if "generic fit framing" in flag_text:
         return (
@@ -4497,7 +4501,7 @@ def draft_track_2_email(
             f"{intro} {fit_line}\n\n"
             f"The thing I'm trying to test is whether {company} has a product or internship path where "
             "that mix is actually useful, or whether I'm forcing the fit. If it is directionally relevant, "
-            "who should I ask? If not, a blunt no is genuinely useful too.\n\n"
+            "any recs on who I should talk to about that? If not, a blunt no is genuinely useful too.\n\n"
             "Best,\nAkshat"
         )
     elif recipient_type == "senior_product":
@@ -4507,7 +4511,7 @@ def draft_track_2_email(
             "I am not trying to send a generic admire-your-product note, so here is the actual reason I am reaching out.\n\n"
             f"{intro} {fit_line}\n\n"
             f"I'm trying to understand whether that profile is useful for product work at {company}. If yes, "
-            "who should I ask? If not, a blunt no is helpful.\n\n"
+            "any recs on who I should talk to about that? If not, a blunt no is helpful.\n\n"
             "Best,\nAkshat"
         )
     elif recipient_type == "recruiter":
@@ -4997,6 +5001,10 @@ def write_supervised_e2e_report(
                         progress.append(f"touchpoints_added={run.get('touchpoints_added')}")
                     if run.get("status_counts"):
                         progress.append(f"status_counts={run.get('status_counts')}")
+                    if run.get("status"):
+                        progress.append(f"status={run.get('status')}")
+                    if run.get("error"):
+                        progress.append(f"error={run.get('error')}")
                     suffix = f" ({'; '.join(progress)})" if progress else ""
                     lines.append(f"  - {run.get('company', '')}: sent=`{run.get('sent', False)}`{suffix}")
             for key in [
@@ -5020,10 +5028,13 @@ def write_supervised_e2e_report(
     if pending_review_items:
         lines.extend(["", "## Messages To Review", ""])
         for item in pending_review_items:
+            latest_message = str(item.get("latest_message") or item.get("last_message") or "").strip()
             lines.append(
                 f"- {item.get('company', '')} / {item.get('name', '')} "
                 f"(`{item.get('send_recommendation', '')}`): {item.get('draft_message', '')}"
             )
+            if latest_message:
+                lines.append(f"  - Last message: {latest_message}")
     report_text = "\n".join(lines).rstrip() + "\n"
     report_path.write_text(report_text, encoding="utf-8")
     latest_path.write_text(report_text, encoding="utf-8")
@@ -5056,11 +5067,18 @@ def write_supervised_e2e_report(
                 "</section>"
             )
     review_cards = "".join(
-        "<section class='review-card'>"
-        f"<div class='review-meta'>{esc(item.get('company', ''))} · {esc(item.get('name', ''))} · {esc(item.get('send_recommendation', ''))}</div>"
-        f"<p>{esc(item.get('draft_message', ''))}</p>"
-        f"<small>{esc(item.get('title', ''))}</small>"
-        "</section>"
+        (
+            "<section class='review-card'>"
+            f"<div class='review-meta'>{esc(item.get('company', ''))} · {esc(item.get('name', ''))} · {esc(item.get('send_recommendation', ''))}</div>"
+        )
+        + (
+            f"<div class='last-message'><strong>Last msg</strong><span>{esc(item.get('latest_message') or item.get('last_message') or '')}</span></div>"
+            if str(item.get("latest_message") or item.get("last_message") or "").strip()
+            else ""
+        )
+        + f"<p>{esc(item.get('draft_message', ''))}</p>"
+        + f"<small>{esc(item.get('title', ''))}</small>"
+        + "</section>"
         for item in pending_review_items
     )
     phase_cards = ""
@@ -5085,7 +5103,9 @@ def write_supervised_e2e_report(
                 if isinstance(run, dict):
                     details.append(
                         f"<li>{esc(run.get('company', ''))}: sent={esc(run.get('sent', False))} "
-                        f"candidates={esc(run.get('candidate_count', ''))} status={esc(run.get('status_counts', ''))}</li>"
+                        f"candidates={esc(run.get('candidate_count', ''))} status={esc(run.get('status') or run.get('status_counts', ''))}"
+                        + (f"<br><small>{esc(run.get('error'))}</small>" if run.get("error") else "")
+                        + "</li>"
                     )
             details.append("</ul></li>")
         phase_cards += (
@@ -5120,6 +5140,9 @@ def write_supervised_e2e_report(
     .company-list small, .review-card small {{ color: #667085; }}
     .review-meta {{ font-weight: 800; color: #7c2d12; margin-bottom: 8px; }}
     .review-card {{ border-left: 4px solid #f97316; }}
+    .last-message {{ background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 10px; margin: 10px 0; display: grid; gap: 4px; }}
+    .last-message strong {{ color: #9a3412; font-size: 12px; text-transform: uppercase; letter-spacing: 0; }}
+    .last-message span {{ color: #431407; }}
     code {{ background: #eef2f7; padding: 2px 5px; border-radius: 4px; }}
   </style>
 </head>
@@ -5954,28 +5977,40 @@ def run_track_2_daily_plan_cmd(
                     "sent": False,
                 }
                 if send_linkedin and batch:
-                    send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = execute_invite_batch(
-                        settings=settings,
-                        company=company,
-                        source_artifact_path=pipeline_artifact,
-                        batch=batch,
-                        execute=True,
-                        limit=per_company_limit,
-                        start_at=0,
-                        verdict=invite_verdict,
-                        min_score=effective_min_score_value,
-                    )
-                    run_entry.update(
-                        {
-                            "sent": True,
-                            "send_artifact": str(send_artifact),
-                            "progress_artifact": str(progress_artifact),
-                            "status_counts": status_counts,
-                            "contacts_added": contacts_added,
-                            "touchpoints_added": touchpoints_added,
-                        }
-                    )
-                    remaining_invites -= len(batch)
+                    try:
+                        send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = (
+                            execute_invite_batch(
+                                settings=settings,
+                                company=company,
+                                source_artifact_path=pipeline_artifact,
+                                batch=batch,
+                                execute=True,
+                                limit=per_company_limit,
+                                start_at=0,
+                                verdict=invite_verdict,
+                                min_score=effective_min_score_value,
+                            )
+                        )
+                    except Exception as exc:
+                        run_entry.update(
+                            {
+                                "sent": False,
+                                "status": "send_failed",
+                                "error": str(exc),
+                            }
+                        )
+                    else:
+                        run_entry.update(
+                            {
+                                "sent": True,
+                                "send_artifact": str(send_artifact),
+                                "progress_artifact": str(progress_artifact),
+                                "status_counts": status_counts,
+                                "contacts_added": contacts_added,
+                                "touchpoints_added": touchpoints_added,
+                            }
+                        )
+                        remaining_invites -= len(batch)
                 else:
                     candidate_artifact = write_artifact(
                         settings.artifacts_dir,
@@ -5992,7 +6027,25 @@ def run_track_2_daily_plan_cmd(
                     run_entry["candidate_artifact"] = str(candidate_artifact)
                     remaining_invites -= len(batch)
                 invite_result["runs"].append(run_entry)
-            invite_result["status"] = "sent" if send_linkedin else "prepared"
+            if send_linkedin:
+                failed_runs = [
+                    run
+                    for run in list(invite_result.get("runs") or [])
+                    if isinstance(run, dict) and run.get("status") == "send_failed"
+                ]
+                sent_runs = [
+                    run
+                    for run in list(invite_result.get("runs") or [])
+                    if isinstance(run, dict) and run.get("sent")
+                ]
+                if failed_runs and sent_runs:
+                    invite_result["status"] = "partial_send_failed"
+                elif failed_runs:
+                    invite_result["status"] = "send_failed"
+                else:
+                    invite_result["status"] = "sent"
+            else:
+                invite_result["status"] = "prepared"
         elif execute:
             invite_result["status"] = "queued"
             invite_result["detail"] = "Live LinkedIn is disabled; invite candidate prep is queued for an attended run."
@@ -6362,6 +6415,8 @@ def run_supervised_e2e_pipeline(
     run_resume_generator_discovery: bool = False,
     run_resume_generator_generation: bool = False,
     resume_generator_discovery_hours_old: int = 24,
+    resume_generator_discovery_timeout_seconds: int = 600,
+    resume_generator_generation_timeout_seconds: int = 1800,
     resume_generator_with_startup_apply: bool = True,
     resume_generator_min_score: float = 8.0,
     resume_generator_top: int = 10,
@@ -6433,7 +6488,7 @@ def run_supervised_e2e_pipeline(
             label="resume-generator-discovery-run",
             command=command,
             cwd=resume_generator_root,
-            timeout_seconds=5400,
+            timeout_seconds=resume_generator_discovery_timeout_seconds,
         )
         add_stage(
             "resume_generator_discovery",
@@ -6461,7 +6516,7 @@ def run_supervised_e2e_pipeline(
             label="resume-generator-generation-run",
             command=command,
             cwd=resume_generator_root,
-            timeout_seconds=7200,
+            timeout_seconds=resume_generator_generation_timeout_seconds,
         )
         add_stage(
             "resume_generator_generation",
@@ -6727,6 +6782,14 @@ def run_supervised_e2e_cmd(
         bool,
         typer.Option(help="Run ResumeGenerator jobs.py pipeline before importing jobs.xlsx"),
     ] = False,
+    resume_generator_discovery_timeout_seconds: Annotated[
+        int,
+        typer.Option(help="Max seconds to wait for ResumeGenerator discovery before continuing"),
+    ] = 600,
+    resume_generator_generation_timeout_seconds: Annotated[
+        int,
+        typer.Option(help="Max seconds to wait for ResumeGenerator generation before continuing"),
+    ] = 1800,
     resume_generator_top: Annotated[int, typer.Option(help="Max ResumeGenerator jobs to promote/generate")] = 10,
     resume_generator_min_score: Annotated[float, typer.Option(help="Min ResumeGenerator fit score to promote")] = 8.0,
     resume_generator_budget_mode: Annotated[
@@ -6788,6 +6851,8 @@ def run_supervised_e2e_cmd(
         resume_generator_root=resume_generator_root,
         run_resume_generator_discovery=run_resume_generator_discovery,
         run_resume_generator_generation=run_resume_generator_generation,
+        resume_generator_discovery_timeout_seconds=resume_generator_discovery_timeout_seconds,
+        resume_generator_generation_timeout_seconds=resume_generator_generation_timeout_seconds,
         resume_generator_top=resume_generator_top,
         resume_generator_min_score=resume_generator_min_score,
         resume_generator_budget_mode=resume_generator_budget_mode,

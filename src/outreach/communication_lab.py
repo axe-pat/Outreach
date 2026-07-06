@@ -271,7 +271,7 @@ def review_outreach_message(
 
     has_concrete_ask = bool(
         re.search(
-            r"\b(pointer|route|right person|send a .*blurb|resume|quick read|worth|who owns|who should i ask|hiring-team|hiring team|referral|radar|short blurb|would you suggest|could i send|do you think|does that background|open to|perspective|next contact|best next contact)\b",
+            r"\b(pointer|route|right person|send a .*blurb|resume|quick read|worth|who owns|who should i ask|any recs on who|hiring-team|hiring team|referral|radar|short blurb|would you suggest|could i send|do you think|does that background|open to|perspective|next contact|best next contact)\b",
             lower,
         )
     )
@@ -303,7 +303,7 @@ def review_outreach_message(
         flags.append("Soft translation ask: make the yes/no ask obvious on first read")
         score -= 10
     if re.search(r"\b(angle|route)\b.*\b(understand|make sense)\b", lower):
-        flags.append("High-cognitive-load ask: replace angle/route wording with does this fit and who should I ask")
+        flags.append("High-cognitive-load ask: replace angle/route wording with does this fit and any recs on who to talk to")
         score -= 10
 
     if lower.count("i ") + lower.count("i'm") > 12:

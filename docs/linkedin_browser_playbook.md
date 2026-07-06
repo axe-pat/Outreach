@@ -19,6 +19,7 @@ The point of this document is simple: do not rediscover the same browser-profile
 3. Always launch that profile with:
    - `--remote-debugging-port=9222`
    - `--enable-automation`
+   - `--disable-extensions`
 4. Verify `9222` before running any LinkedIn automation.
 5. Prefer CDP attach flows once Chrome is already live on `9222`.
 6. Do not rely on repo-relative `playwright/chrome-data` defaults.
@@ -45,6 +46,17 @@ Protocol error (Browser.setDownloadBehavior): Browser context management is not 
 
 That error is not a mystery anymore. It means the running Chrome session is not in the launch mode Playwright expects for this workflow.
 
+5. Extension service workers
+Chrome extensions can attach service workers to the CDP session and crash
+Playwright with an error shaped like:
+
+```text
+targetInfo: { "type": "service_worker", "url": "chrome-extension://..." }
+BrowserType.connect_over_cdp: Connection closed while reading from the driver
+```
+
+For automation runs, relaunch the Outreach browser with `--disable-extensions`.
+
 ## Verified Launch Pattern
 
 Use this exact shape when launching manually:
@@ -54,6 +66,7 @@ Use this exact shape when launching manually:
   --user-data-dir="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data" \
   --remote-debugging-port=9222 \
   --enable-automation \
+  --disable-extensions \
   https://www.linkedin.com/feed/
 ```
 
@@ -139,6 +152,7 @@ ps -p "$(lsof -tiTCP:9222 -sTCP:LISTEN)" -o command=
    - the canonical profile path
    - `--remote-debugging-port=9222`
    - `--enable-automation`
+   - `--disable-extensions`
 5. Re-run the project-specific live check.
 
 ## If You See These Symptoms
@@ -169,6 +183,18 @@ Chrome was launched on `9222` without the automation-compatible mode that this w
 
 ### Fix
 Relaunch with `--enable-automation`.
+
+### Symptom
+Playwright fails with a `targetInfo` service-worker assertion for a
+`chrome-extension://...` URL.
+
+### Meaning
+An extension in the Chrome profile attached a service worker to CDP and broke
+Playwright's attach flow.
+
+### Fix
+Stop the dedicated `9222` Chrome and relaunch through
+`scripts/launch_outreach_browser.sh`, which disables extensions.
 
 ## Permanent Team Rule
 

@@ -41,4 +41,5 @@ open -na "Google Chrome" --args \
   --user-data-dir="${USER_DATA_DIR}" \
   --remote-debugging-port="${DEBUG_PORT}" \
   --enable-automation \
+  --disable-extensions \
   "${TARGET_URL}"

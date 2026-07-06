@@ -32,3 +32,19 @@
   - preferred: `PROSPEO_API_KEY`
   - fallback: `HUNTER_API_KEY`
   - keep `--max-email-research 0` in the daily live runner until one provider is configured and a small paid/credit-bounded test passes.
+
+## Track 2 Daily Runner
+
+- Tune live daily breadth after the July 6 supervised run:
+  - current caps are functional but slow because `max-company-mapping=5` and `max-linkedin-invites=12` trigger many LinkedIn search passes.
+  - consider reducing nightly mapping to 2-3 companies while keeping invite/follow-up caps high enough for momentum.
+  - keep ResumeGenerator discovery bounded; it timed out once and should not block Track 2.
+- Keep the HTML report as the review surface:
+  - include last inbound LinkedIn message for each review item.
+  - show review/hold drafts without requiring the raw JSON payload.
+  - keep company-level actions grouped by tier/phase.
+
+## Relationship Sources
+
+- Populate `workspace/relationship_leads.csv` from manual PeopleGrove/USC/recent-MBA-PM pulls when ready.
+- Keep these as one-time or low-frequency source imports, not daily scrapers.

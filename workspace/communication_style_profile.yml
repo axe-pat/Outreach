@@ -44,7 +44,7 @@ strong_messages:
     notes: "Concrete ask; gives the recipient an easy yes/no next step."
   - label: "founder_product_read"
     recipient_type: "founder"
-    message: "Hi Sean, thanks for connecting. I'm a Marshall MBA and former data/platform engineer exploring product roles at Synphony. Does that background fit anything useful there? If yes, who should I ask?"
+    message: "Hi Sean, thanks for connecting. I'm a Marshall MBA and former data/platform engineer exploring product roles at Synphony. Does that background fit anything useful there? Any recs on who I should talk to about that?"
     notes: "Founder ask is about usefulness, not generic networking."
 
 weak_messages:

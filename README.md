@@ -250,9 +250,9 @@ Safe write mode:
 python main.py run-supervised-e2e --execute
 ```
 
-This is the cron-safe daily mode: it imports source rows, rebuilds the tracker,
-audits/scopes Track 2, runs non-browser enrichment, and queues LinkedIn browser
-work for an attended pass. Live LinkedIn browser phases require an explicit flag:
+Safe write mode imports source rows, rebuilds the tracker, audits/scopes Track 2,
+runs non-browser enrichment, and queues LinkedIn browser work unless live flags
+are explicitly enabled:
 
 ```bash
 python main.py run-supervised-e2e --execute --live-linkedin
@@ -265,10 +265,25 @@ LinkedIn sends stay behind a second explicit flag:
 python main.py run-supervised-e2e --execute --send-linkedin
 ```
 
-The installed cron wrapper for the nightly no-send run is:
+The installed/manual one-command supervised runner is:
 
 ```bash
 scripts/run_daily_supervised_e2e.sh
+```
+
+That script is also what cron calls at `1am`. It currently runs the live
+supervised path: ResumeGenerator discovery/generation, source imports, account
+tracker rebuild, Track 2 audit/campaign planning, live LinkedIn refresh,
+approved follow-up sends, bounded invite sends, and the HTML daily report. It
+loads approved keys/profile settings from `.env`, launches the Outreach Chrome
+profile on port `9222` if needed, disables Chrome extensions for automation
+stability, keeps email research at `0`, and caps ResumeGenerator discovery at
+240 seconds so a job-source stall cannot block Track 2.
+
+Latest user-facing report:
+
+```text
+workspace/daily_run_report.html
 ```
 
 ## Current Status

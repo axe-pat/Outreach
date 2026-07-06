@@ -1414,7 +1414,7 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[5]["followup_audience"] == "founder"
     assert "AI agent analytics work" in str(drafts[5]["draft_message"])
     assert "fit anything useful at Voker" in str(drafts[5]["draft_message"])
-    assert "who should I ask" in str(drafts[5]["draft_message"])
+    assert "any recs on who i should talk to" in str(drafts[5]["draft_message"]).lower()
     assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
     assert "Alessandra@beyondmedplans.com" in str(drafts[6]["draft_message"])
     assert drafts[6]["action_items"][0]["action_type"] == "email_resume"
@@ -1550,7 +1550,7 @@ def test_accepted_followup_to_principal_engineer_uses_senior_ask() -> None:
 
     message = str(drafts[0]["draft_message"])
     assert "Does that background fit product work there" in message
-    assert "If yes, who should I ask" in message
+    assert "Any recs on who I should talk to" in message
     assert "does that angle make sense" not in message
     assert "route I should understand" not in message
     assert "tight resume + 3-line blurb" not in message
@@ -1724,7 +1724,7 @@ def test_communication_review_csv_suggests_simple_senior_product_question(tmp_pa
     suggestion = rows[0]["suggested_message"]
 
     assert "Does that background fit product work there" in suggestion
-    assert "If yes, who should I ask" in suggestion
+    assert "Any recs on who I should talk to" in suggestion
     assert "does that angle make sense" not in suggestion
     assert "route I should understand" not in suggestion
     assert "tight resume" not in suggestion

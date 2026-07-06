@@ -277,8 +277,9 @@ tracker rebuild, Track 2 audit/campaign planning, live LinkedIn refresh,
 approved follow-up sends, bounded invite sends, and the HTML daily report. It
 loads approved keys/profile settings from `.env`, launches the Outreach Chrome
 profile on port `9222` if needed, disables Chrome extensions for automation
-stability, keeps email research at `0`, and caps ResumeGenerator discovery at
-240 seconds so a job-source stall cannot block Track 2.
+stability, and keeps email research at `0`. ResumeGenerator discovery uses the
+normal long discovery budget in daily mode; shorter timeout flags are only for
+explicit supervised debugging runs.
 
 Latest user-facing report:
 

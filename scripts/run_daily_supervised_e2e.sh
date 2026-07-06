@@ -40,8 +40,6 @@ run_log="logs/daily-supervised-e2e-${timestamp}.log"
     --send-linkedin \
     --run-resume-generator-discovery \
     --run-resume-generator-generation \
-    --resume-generator-discovery-timeout-seconds 240 \
-    --resume-generator-generation-timeout-seconds 1800 \
     --resume-generator-top 10 \
     --resume-generator-min-score 8.0 \
     --resume-generator-budget-mode \

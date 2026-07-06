@@ -6415,8 +6415,8 @@ def run_supervised_e2e_pipeline(
     run_resume_generator_discovery: bool = False,
     run_resume_generator_generation: bool = False,
     resume_generator_discovery_hours_old: int = 24,
-    resume_generator_discovery_timeout_seconds: int = 600,
-    resume_generator_generation_timeout_seconds: int = 1800,
+    resume_generator_discovery_timeout_seconds: int = 5400,
+    resume_generator_generation_timeout_seconds: int = 7200,
     resume_generator_with_startup_apply: bool = True,
     resume_generator_min_score: float = 8.0,
     resume_generator_top: int = 10,
@@ -6785,11 +6785,11 @@ def run_supervised_e2e_cmd(
     resume_generator_discovery_timeout_seconds: Annotated[
         int,
         typer.Option(help="Max seconds to wait for ResumeGenerator discovery before continuing"),
-    ] = 600,
+    ] = 5400,
     resume_generator_generation_timeout_seconds: Annotated[
         int,
         typer.Option(help="Max seconds to wait for ResumeGenerator generation before continuing"),
-    ] = 1800,
+    ] = 7200,
     resume_generator_top: Annotated[int, typer.Option(help="Max ResumeGenerator jobs to promote/generate")] = 10,
     resume_generator_min_score: Annotated[float, typer.Option(help="Min ResumeGenerator fit score to promote")] = 8.0,
     resume_generator_budget_mode: Annotated[

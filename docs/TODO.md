@@ -38,7 +38,7 @@
 - Tune live daily breadth after the July 6 supervised run:
   - current caps are functional but slow because `max-company-mapping=5` and `max-linkedin-invites=12` trigger many LinkedIn search passes.
   - consider reducing nightly mapping to 2-3 companies while keeping invite/follow-up caps high enough for momentum.
-  - keep ResumeGenerator discovery bounded; it timed out once and should not block Track 2.
+  - keep ResumeGenerator discovery on its normal daily budget; if it hangs again, fix per-source timeouts inside ResumeGenerator rather than shrinking the whole discovery lane.
 - Keep the HTML report as the review surface:
   - include last inbound LinkedIn message for each review item.
   - show review/hold drafts without requiring the raw JSON payload.

@@ -462,6 +462,71 @@ def test_track_2_daily_plan_enforces_budgets(tmp_path: Path) -> None:
     assert any(item["expected_email_research"] == 1 for item in mapping_items)
 
 
+def test_track_2_daily_plan_degrades_mapping_to_linkedin_only_when_email_research_capped(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-story-fit",
+            name="StoryFit",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="story-fit;track-2;relationship;priority;tier-a",
+            notes=(
+                "team_size=40 | tags=artificial-intelligence,data-platform,workflow-automation | "
+                "description=AI workflow platform for recruiting teams. | "
+                "why_this_company=Direct story fit | profile_evidence=Engineering plus MBA | "
+                "story_angle=AI workflow/productivity"
+            ),
+        )
+    )
+
+    plan = build_track_2_daily_plan(
+        build_account_rows(tmp_path),
+        budget=DailyPlanBudget(
+            max_total_actions=2,
+            max_companies=2,
+            max_linkedin_invites=0,
+            max_linkedin_followups=0,
+            max_company_mapping=2,
+            max_email_research=0,
+            max_context_enrichment=0,
+            max_email_drafts=0,
+        ),
+    )
+
+    item = plan["selected"][0]
+    assert item["campaign_action"] == "map_more_contacts"
+    assert item["campaign_channel"] == "linkedin"
+    assert item["expected_company_mapping"] == 1
+    assert item["expected_email_research"] == 0
+    assert plan["used"]["company_mapping"] == 1
+    assert plan["used"]["email_research"] == 0
+
+
+def test_identity_conflict_account_is_paused(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-conflict",
+            name="ConflictCo",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="story-fit;track-2;relationship;priority;tier-a",
+            notes=(
+                "identity_conflict=true | tags=artificial-intelligence,data-platform | "
+                "description=Conflicting company source data."
+            ),
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert "identity_conflict" in row.data_quality_flags
+    assert row.campaign_action == "pause_account"
+    assert row.campaign_channel == "none"
+    assert build_campaign_plan_rows([row]) == []
+
+
 def test_account_campaign_plan_flags_role_without_domain_context(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path)
     workbook.initialize()

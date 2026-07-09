@@ -633,13 +633,12 @@ class LinkedInScraper:
                 screenshot_path=self._save_screenshot(page, "contact-info-navigation-error"),
             )
         page.wait_for_timeout(1500)
-        emails = self._extract_emails_from_text(self._body_preview(page))
+        self._ensure_contact_info_overlay_open(page)
+        emails = self._extract_emails_from_contact_info_scope(page)
         if not emails:
-            try:
-                body_text = page.locator("body").inner_text(timeout=5000)
-            except PlaywrightError:
-                body_text = ""
-            emails = self._extract_emails_from_text(body_text)
+            emails = self._extract_emails_from_contact_info_scope_text(page)
+        if not emails:
+            emails = self._extract_emails_from_text(self._body_preview(page))
 
         if emails:
             return LinkedInContactInfoResult(
@@ -665,7 +664,79 @@ class LinkedInScraper:
         normalized = self._normalize_linkedin_profile_url(linkedin_url)
         if not normalized:
             return ""
+        if normalized.endswith("/overlay/contact-info"):
+            return f"{normalized}/"
         return f"{normalized}/overlay/contact-info/"
+
+    def _extract_emails_from_contact_info_scope(self, page: Page) -> list[str]:
+        for scope in self._contact_info_scope_candidates(page):
+            emails = self._extract_emails_from_text(" ".join(scope["hrefs"]))
+            if emails:
+                return emails
+        return []
+
+    def _extract_emails_from_contact_info_scope_text(self, page: Page) -> list[str]:
+        for scope in self._contact_info_scope_candidates(page):
+            emails = self._extract_emails_from_text(scope["text"])
+            if emails:
+                return emails
+        return []
+
+    def _ensure_contact_info_overlay_open(self, page: Page) -> None:
+        if self._contact_info_scope_candidates(page):
+            return
+        for selector in ("a:has-text('Contact info')", "button:has-text('Contact info')"):
+            try:
+                trigger = page.locator(selector).first
+                if trigger.count() == 0:
+                    continue
+                trigger.click(timeout=5000)
+                page.wait_for_timeout(1200)
+            except PlaywrightError:
+                continue
+            if self._contact_info_scope_candidates(page):
+                return
+
+    def _contact_info_scope_candidates(self, page: Page) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        for selector in (
+            "[role='dialog']",
+            ".artdeco-modal",
+            ".pv-contact-info",
+            "div:has-text('Contact info')",
+            "div:has-text('Email')",
+        ):
+            try:
+                locator = page.locator(selector)
+                count = min(locator.count(), 12)
+            except PlaywrightError:
+                continue
+            for index in range(count):
+                try:
+                    scope = locator.nth(index)
+                    text = scope.inner_text(timeout=1000)
+                    hrefs = scope.locator("a[href^='mailto:']").evaluate_all("els => els.map(e => e.href)")
+                except PlaywrightError:
+                    continue
+                normalized = " ".join(text.split()).lower()
+                if not hrefs:
+                    continue
+                if "email" not in normalized:
+                    continue
+                if "profile" not in normalized and "contact info" not in normalized:
+                    continue
+                candidates.append({"text": text, "hrefs": hrefs, "text_length": len(normalized)})
+        candidates.sort(key=lambda item: int(item["text_length"]))
+        return candidates
+
+    def _extract_emails_from_mailto_links(self, page: Page) -> list[str]:
+        # Backward-compatible helper for older tests; contact-info extraction uses
+        # the scoped variant above so unrelated profile/page mailto links do not leak in.
+        try:
+            hrefs = page.locator("a[href^='mailto:']").evaluate_all("els => els.map(e => e.href)")
+        except PlaywrightError:
+            return []
+        return self._extract_emails_from_text(" ".join(str(href) for href in hrefs))
 
     def _extract_emails_from_text(self, text: str) -> list[str]:
         seen: set[str] = set()

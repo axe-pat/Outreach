@@ -265,27 +265,55 @@ LinkedIn sends stay behind a second explicit flag:
 python main.py run-supervised-e2e --execute --send-linkedin
 ```
 
-The installed/manual one-command supervised runner is:
+The attended/manual Outreach debug runner is:
 
 ```bash
-scripts/run_daily_supervised_e2e.sh
+scripts/run_manual_supervised_e2e_debug.sh
 ```
 
-That script is also what cron calls at `1am`. It currently runs the live
-supervised path: ResumeGenerator discovery/generation, source imports, account
-tracker rebuild, Track 2 audit/campaign planning, live LinkedIn refresh,
-approved follow-up sends, bounded invite sends, and the HTML daily report. It
-loads approved keys/profile settings from `.env`, launches the Outreach Chrome
-profile on port `9222` if needed, disables Chrome extensions for automation
-stability, and keeps email research at `0`. ResumeGenerator discovery uses the
-normal long discovery budget in daily mode; shorter timeout flags are only for
-explicit supervised debugging runs.
+`scripts/run_daily_supervised_e2e.sh` is retained only as a compatibility shim
+that prints a warning and delegates to the debug runner.
+
+The installed daily runner is the macOS LaunchAgent
+`com.akshat.resumegenerator.nightly`, which calls ResumeGenerator's
+`discovery/scripts/run_nightly_pipeline.py` at `1am`. That is the blessed daily
+path because it already runs the live ResumeGenerator discovery/generation lane,
+Outreach relationship discovery, bounded app-queue invite sends, account
+maintenance, campaign planning, and the live bounded Track 2 daily plan.
+
+Current cycle config is `offcycle_light`:
+
+- ResumeGenerator/app-queue LinkedIn invites are capped at `5` total because
+  fall/off-cycle app volume is low.
+- Track 2 is the primary relationship lane and runs with up to `25` new
+  LinkedIn invites, `25` LinkedIn follow-ups/replies, `15` company mapping
+  tasks, and `10` LinkedIn Contact Info/email research tasks.
+- The old ResumeGenerator follow-up sender is skipped in nightly mode so Track
+  2 owns follow-up execution and the tracker remains the source of truth.
+- Switch the nightly pipeline to `--cycle-config normal` when app volume returns;
+  that raises the app-queue invite target back to `25` while preserving the
+  Track 2 relationship caps unless intentionally retuned.
+
+At the end of that LaunchAgent path, ResumeGenerator now calls:
+
+```bash
+python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json>
+```
+
+That command refreshes the Outreach HTML/Markdown report from the actual
+artifacts produced by the nightly run. The standalone debug runner remains
+useful for attended troubleshooting or a manual full Outreach run, but it is not
+the scheduled daily source of truth.
 
 Latest user-facing report:
 
 ```text
-workspace/daily_run_report.html
+workspace/reports/daily_html/daily_run_report.html
 ```
+
+For compatibility, the same latest HTML/Markdown report is also mirrored to
+`workspace/reports/daily_run_report.html`, `workspace/daily_run_report.html`,
+and `workspace/daily_run_report.md`.
 
 ## Current Status
 

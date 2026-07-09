@@ -53,6 +53,24 @@ def test_contact_info_overlay_url_normalizes_profile_url() -> None:
         scraper._contact_info_overlay_url("https://www.linkedin.com/in/test-user/?miniProfileUrn=abc")
         == "https://www.linkedin.com/in/test-user/overlay/contact-info/"
     )
+    assert (
+        scraper._contact_info_overlay_url("https://www.linkedin.com/in/test-user/overlay/contact-info/")
+        == "https://www.linkedin.com/in/test-user/overlay/contact-info/"
+    )
+
+
+def test_extract_emails_from_mailto_links_reads_contact_info_anchor() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    class _MailtoLocator:
+        def evaluate_all(self, _script: str) -> list[str]:
+            return ["mailto:Founder@Example.com?subject=Hi"]
+
+    class _MailtoPage:
+        def locator(self, _selector: str) -> _MailtoLocator:
+            return _MailtoLocator()
+
+    assert scraper._extract_emails_from_mailto_links(_MailtoPage()) == ["founder@example.com"]
 
 
 def test_extract_emails_from_text_dedupes_and_skips_linkedin_internal_email() -> None:

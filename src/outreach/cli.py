@@ -2326,12 +2326,24 @@ def apply_linkedin_reconcile_results(
     apply_changes: bool = False,
 ) -> dict[str, object]:
     contacts = workbook.list_contacts()
+    touchpoints = workbook.list_touchpoints()
     contact_by_id = {item.contact_id: item for item in contacts}
     contact_by_url = {
         normalize_dedupe_text(item.linkedin_url): item
         for item in contacts
         if item.linkedin_url
     }
+    sent_messages_by_contact: dict[str, set[str]] = {}
+    for touchpoint in touchpoints:
+        if (touchpoint.channel or "") != OutreachChannel.LINKEDIN:
+            continue
+        if (touchpoint.status or "").strip().lower() != "sent":
+            continue
+        if not touchpoint.contact_id or not touchpoint.message_text:
+            continue
+        sent_messages_by_contact.setdefault(touchpoint.contact_id, set()).add(
+            normalize_dedupe_text(touchpoint.message_text)
+        )
 
     processed: list[dict[str, object]] = []
     summary = {
@@ -2343,6 +2355,7 @@ def apply_linkedin_reconcile_results(
         "missing_contact": 0,
         "updated_contacts": 0,
         "touchpoints_added": 0,
+        "manual_outbound_touchpoints_added": 0,
     }
 
     for raw in results:
@@ -2368,12 +2381,16 @@ def apply_linkedin_reconcile_results(
         touchpoint_status = ""
         message_kind = "linkedin_reconcile"
         message_text = ""
+        existing_status = (contact.status or "").strip().lower()
         if status == "connected":
             summary["connected"] += 1
-            action = "mark_connected"
-            new_contact_status = "Connected"
-            touchpoint_status = "Accepted"
-            message_text = "LinkedIn invite accepted."
+            if existing_status in {"connected", "replied"}:
+                action = "already_connected"
+            else:
+                action = "mark_connected"
+                new_contact_status = "Connected"
+                touchpoint_status = "Accepted"
+                message_text = "LinkedIn invite accepted."
         elif status == "replied":
             summary["replied"] += 1
             action = "mark_replied"
@@ -2422,6 +2439,43 @@ def apply_linkedin_reconcile_results(
                 if created:
                     summary["touchpoints_added"] += 1
             applied = True
+
+        latest_message = str(raw.get("latest_message") or "").strip()
+        latest_sender = str(raw.get("last_sender") or raw.get("live_last_sender") or "").strip().lower()
+        latest_message_key = normalize_dedupe_text(latest_message)
+        if (
+            apply_changes
+            and latest_message
+            and latest_sender == "you"
+            and latest_message_key
+            and latest_message_key not in sent_messages_by_contact.get(contact.contact_id, set())
+        ):
+            _, created = workbook.append_touchpoint(
+                TouchpointRecord(
+                    touchpoint_id=workbook.make_touchpoint_id(
+                        contact.organization_id,
+                        contact.contact_id,
+                        OutreachChannel.LINKEDIN.value,
+                        latest_message,
+                        source_artifact=source_artifact,
+                    ),
+                    organization_id=contact.organization_id,
+                    contact_id=contact.contact_id,
+                    channel=OutreachChannel.LINKEDIN,
+                    status="Sent",
+                    message_kind="linkedin_manual_message",
+                    message_text=latest_message,
+                    recorded_at=utc_now_iso(),
+                    sent_at=utc_now_iso(),
+                    source_artifact=source_artifact,
+                    notes=f"manual_outbound_detected=true | reconcile_status={status} | detail={raw.get('detail', '')}",
+                )
+            )
+            if created:
+                summary["touchpoints_added"] += 1
+                summary["manual_outbound_touchpoints_added"] += 1
+                sent_messages_by_contact.setdefault(contact.contact_id, set()).add(latest_message_key)
+                workbook.update_contact(contact.contact_id, last_contacted_at=utc_now_iso())
 
         processed.append(
             {
@@ -5169,6 +5223,514 @@ def write_supervised_e2e_report(
     report_html_path.write_text(html_text, encoding="utf-8")
     latest_html_path.write_text(html_text, encoding="utf-8")
     return report_path, latest_path, report_html_path, latest_html_path
+
+
+def _parse_report_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    cleaned = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _artifacts_since(artifacts_dir: Path, since: datetime | None) -> list[Path]:
+    if not artifacts_dir.exists():
+        return []
+    paths = [path for path in artifacts_dir.glob("*.json") if path.is_file()]
+    if since is not None:
+        paths = [
+            path
+            for path in paths
+            if datetime.fromtimestamp(path.stat().st_mtime) >= since
+        ]
+    return sorted(paths, key=lambda path: path.stat().st_mtime)
+
+
+def _load_json_file(path: Path | None) -> dict[str, object]:
+    if path is None or not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _count_statuses(rows: list[object]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(
+            row.get("status")
+            or row.get("result")
+            or row.get("outcome")
+            or row.get("invite_result")
+            or "unknown"
+        )
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _latest_artifact_matching(paths: list[Path], token: str) -> tuple[Path | None, dict[str, object]]:
+    matches = [path for path in paths if token in path.name]
+    if not matches:
+        return None, {}
+    path = matches[-1]
+    return path, _load_json_file(path)
+
+
+def _render_status_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "-"
+
+
+def _reports_dir(settings: OutreachSettings) -> Path:
+    return settings.resolved_tracking_workspace_dir / "reports"
+
+
+def _daily_html_reports_dir(settings: OutreachSettings) -> Path:
+    return _reports_dir(settings) / "daily_html"
+
+
+def write_artifact_daily_report(
+    *,
+    settings: OutreachSettings,
+    workspace: Path,
+    since: datetime | None,
+    nightly_summary_path: Path | None = None,
+    title: str = "Outreach Daily Run Report",
+) -> tuple[Path, Path, Path, Path]:
+    """Write the daily HTML/MD report from the artifacts created by the active nightly runner."""
+    workbook = OutreachWorkbook(workspace)
+    workbook.initialize()
+    counts = workbook.summary_counts()
+    artifacts = _artifacts_since(settings.artifacts_dir, since)
+    nightly_summary = _load_json_file(nightly_summary_path)
+
+    invite_runs: list[dict[str, object]] = []
+    invite_totals: dict[str, int] = {}
+    for path in artifacts:
+        if "invite-send-batch" not in path.name:
+            continue
+        payload = _load_json_file(path)
+        rows = list(payload.get("results") or [])
+        status_counts = _count_statuses(rows)
+        for status, count in status_counts.items():
+            invite_totals[status] = invite_totals.get(status, 0) + count
+        invite_runs.append(
+            {
+                "company": str(payload.get("company") or ""),
+                "artifact": str(path),
+                "count": len(rows),
+                "status_counts": status_counts,
+            }
+        )
+
+    followup_runs: list[dict[str, object]] = []
+    pending_review_items: list[dict[str, object]] = []
+    manual_outbound_by_contact: dict[str, dict[str, object]] = {}
+    for path in artifacts:
+        if "linkedin-message-reconcile" not in path.name:
+            continue
+        payload = _load_json_file(path)
+        for item in list(payload.get("results") or []):
+            if not isinstance(item, dict):
+                continue
+            contact_id = str(item.get("contact_id") or "")
+            latest_message = str(item.get("latest_message") or "").strip()
+            last_sender = str(item.get("last_sender") or item.get("live_last_sender") or "").strip().lower()
+            if contact_id and latest_message and last_sender == "you":
+                manual_outbound_by_contact[contact_id] = {
+                    "company": item.get("company") or "",
+                    "name": item.get("name") or "",
+                    "contact_id": contact_id,
+                    "latest_message": latest_message,
+                    "artifact": str(path),
+                }
+    for path in artifacts:
+        if "linkedin-followup-send-results" not in path.name:
+            continue
+        payload = _load_json_file(path)
+        followup_runs.append(
+            {
+                "artifact": str(path),
+                "count": int(payload.get("count") or 0),
+                "status_counts": payload.get("status_counts") or {},
+                "touchpoints_added": int(payload.get("touchpoints_added") or 0),
+            }
+        )
+        for item in list(payload.get("skipped_by_recommendation") or []):
+            if isinstance(item, dict):
+                pending_review_items.append(item)
+
+    pending_path = settings.resolved_tracking_workspace_dir / "linkedin_followup_pending_review.json"
+    pending_payload = _load_json_file(pending_path)
+    for item in list(pending_payload.get("results") or []):
+        if isinstance(item, dict):
+            pending_review_items.append(item)
+
+    seen_review_keys: set[tuple[str, str, str]] = set()
+    deduped_review_items: list[dict[str, object]] = []
+    manually_cleared_items: list[dict[str, object]] = []
+    for item in pending_review_items:
+        contact_id = str(item.get("contact_id") or "")
+        manual_outbound = manual_outbound_by_contact.get(contact_id)
+        manual_message = str((manual_outbound or {}).get("latest_message") or "").strip()
+        stale_latest_message = str(item.get("latest_message") or item.get("last_message") or "").strip()
+        draft_message = str(item.get("draft_message") or "").strip()
+        should_clear_as_manual = bool(
+            manual_outbound
+            and manual_message
+            and (
+                normalize_dedupe_text(manual_message) == normalize_dedupe_text(draft_message)
+                or (
+                    stale_latest_message
+                    and normalize_dedupe_text(manual_message) != normalize_dedupe_text(stale_latest_message)
+                )
+            )
+        )
+        if should_clear_as_manual:
+            cleared_item = dict(item)
+            cleared_item["manual_latest_message"] = manual_message
+            cleared_item["manual_source_artifact"] = (manual_outbound or {}).get("artifact", "")
+            manually_cleared_items.append(cleared_item)
+            continue
+        key = (
+            str(item.get("company") or ""),
+            str(item.get("name") or ""),
+            str(item.get("draft_message") or ""),
+        )
+        if key in seen_review_keys:
+            continue
+        seen_review_keys.add(key)
+        deduped_review_items.append(item)
+
+    discovery_rows: list[dict[str, object]] = []
+    for path in artifacts:
+        if "-discover-" not in path.name:
+            continue
+        payload = _load_json_file(path)
+        source_value = payload.get("source")
+        if isinstance(source_value, dict):
+            source_name = str(source_value.get("source_id") or source_value.get("label") or "")
+        else:
+            source_name = str(source_value or "")
+        discovery_rows.append(
+            {
+                "source": source_name or path.stem.split("-discover-", 1)[-1],
+                "raw_count": int(payload.get("raw_count") or 0),
+                "count": int(payload.get("count") or 0),
+                "artifact": str(path),
+            }
+        )
+
+    campaign_artifact, campaign_payload = _latest_artifact_matching(artifacts, "account-campaign-plan")
+    campaign_rows = [row for row in list(campaign_payload.get("results") or []) if isinstance(row, dict)]
+    campaign_summary = campaign_payload.get("summary") if isinstance(campaign_payload.get("summary"), dict) else {}
+
+    enrichment_artifact, enrichment_payload = _latest_artifact_matching(artifacts, "company-context-enrichment")
+    enrichment_summary = enrichment_payload.get("summary") if isinstance(enrichment_payload.get("summary"), dict) else {}
+
+    website_artifact, website_payload = _latest_artifact_matching(artifacts, "company-website-resolution")
+    website_summary = website_payload.get("summary") if isinstance(website_payload.get("summary"), dict) else {}
+
+    source_metrics_path = Path(str(nightly_summary.get("source_metrics") or ""))
+    source_metrics = _load_json_file(source_metrics_path)
+    stage_metrics = source_metrics.get("stage_metrics") if isinstance(source_metrics.get("stage_metrics"), dict) else {}
+    jobspy_metrics = nightly_summary.get("jobspy_metrics") if isinstance(nightly_summary.get("jobspy_metrics"), dict) else {}
+
+    report_payload = {
+        "created_at": utc_now_iso(),
+        "since": since.isoformat(timespec="seconds") if since else "",
+        "workspace": str(workspace),
+        "nightly_summary": str(nightly_summary_path or ""),
+        "workspace_counts": counts,
+        "discovery": discovery_rows,
+        "stage_metrics": stage_metrics,
+        "jobspy_metrics": jobspy_metrics,
+        "generation_selected_count": nightly_summary.get("generation_selected_count", ""),
+        "generation_ran": nightly_summary.get("generation_ran", ""),
+        "invite_runs": invite_runs,
+        "invite_totals": invite_totals,
+        "followup_runs": followup_runs,
+        "pending_review_count": len(deduped_review_items),
+        "manually_cleared_review_count": len(manually_cleared_items),
+        "manually_cleared_review_items": manually_cleared_items,
+        "campaign_summary": campaign_summary,
+        "campaign_artifact": str(campaign_artifact or ""),
+        "campaign_rows": campaign_rows,
+        "enrichment_summary": enrichment_summary,
+        "enrichment_artifact": str(enrichment_artifact or ""),
+        "website_summary": website_summary,
+        "website_artifact": str(website_artifact or ""),
+        "artifact_count": len(artifacts),
+    }
+    reports_dir = _reports_dir(settings)
+    daily_html_dir = _daily_html_reports_dir(settings)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    daily_html_dir.mkdir(parents=True, exist_ok=True)
+    report_stem = f"{artifact_timestamp()}-daily-run-report"
+    summary_artifact = reports_dir / f"{report_stem}.json"
+    summary_artifact.write_text(json.dumps(report_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+    report_path = reports_dir / f"{report_stem}.md"
+    latest_path = reports_dir / "daily_run_report.md"
+    legacy_latest_path = settings.resolved_tracking_workspace_dir / "daily_run_report.md"
+    report_html_path = daily_html_dir / f"{report_stem}.html"
+    latest_html_path = daily_html_dir / "daily_run_report.html"
+    reports_latest_html_path = reports_dir / "daily_run_report.html"
+    legacy_latest_html_path = settings.resolved_tracking_workspace_dir / "daily_run_report.html"
+
+    lines = [
+        f"# {title}",
+        "",
+        f"- Created: `{report_payload['created_at']}`",
+        f"- Since: `{report_payload['since'] or 'latest artifacts'}`",
+        f"- Workspace counts: `{counts}`",
+        f"- Nightly summary: `{nightly_summary_path or ''}`",
+        f"- Report artifact: `{summary_artifact}`",
+        "",
+        "## Nightly Engine",
+        "",
+        f"- Daily engine return code: `{nightly_summary.get('daily_engine_returncode', '')}`",
+        f"- Generation ran: `{nightly_summary.get('generation_ran', '')}`",
+        f"- Selected for generation: `{nightly_summary.get('generation_selected_count', '')}`",
+        f"- Failures: `{nightly_summary.get('failures', [])}`",
+        "",
+        "## Discovery",
+        "",
+    ]
+    if discovery_rows:
+        for row in discovery_rows:
+            lines.append(f"- {row['source']}: {row['count']} kept / {row['raw_count']} raw")
+    else:
+        lines.append("- No source-discovery artifacts found for this run window.")
+    if jobspy_metrics:
+        lines.extend(["", "## JobSpy", ""])
+        for key, value in jobspy_metrics.items():
+            lines.append(f"- {key}: `{value}`")
+    lines.extend(["", "## Outreach Actions", ""])
+    lines.append(f"- LinkedIn invite totals: `{invite_totals}`")
+    for run in invite_runs:
+        lines.append(f"- {run['company']}: `{run['status_counts']}`")
+    for run in followup_runs:
+        lines.append(f"- Follow-ups: `{run['status_counts']}`; touchpoints added `{run['touchpoints_added']}`")
+    lines.append(f"- Website resolution: `{website_summary}`")
+    lines.append(f"- Company context enrichment: `{enrichment_summary}`")
+    lines.append(f"- Campaign plan: `{campaign_summary}`")
+    lines.extend(["", "## Company-Level Actions", ""])
+    if campaign_rows:
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for row in campaign_rows:
+            key = (str(row.get("tier") or "Unscored"), str(row.get("campaign_action") or "Other"))
+            grouped.setdefault(key, []).append(str(row.get("company") or ""))
+        for (tier, action), companies in sorted(grouped.items()):
+            lines.append(f"- Tier {tier} / {action}: {', '.join(companies[:12])}")
+    else:
+        lines.append("- No campaign rows found.")
+    lines.extend(["", "## Messages To Review", ""])
+    if deduped_review_items:
+        for item in deduped_review_items:
+            last_message = str(item.get("latest_message") or item.get("last_message") or "").strip()
+            lines.append(
+                f"- {item.get('company', '')} / {item.get('name', '')} "
+                f"(`{item.get('send_recommendation', '')}`): {item.get('draft_message', '')}"
+            )
+            if last_message:
+                lines.append(f"  - Last msg: {last_message}")
+    else:
+        lines.append("- No messages currently require review.")
+    lines.extend(["", "## Manually Cleared Messages", ""])
+    if manually_cleared_items:
+        for item in manually_cleared_items:
+            lines.append(
+                f"- {item.get('company', '')} / {item.get('name', '')}: already sent manually."
+            )
+            lines.append(f"  - Sent msg: {item.get('manual_latest_message', '')}")
+            stale_latest = str(item.get("latest_message") or item.get("last_message") or "").strip()
+            if stale_latest:
+                lines.append(f"  - Previous last msg: {stale_latest}")
+    else:
+        lines.append("- No manually cleared review items.")
+    report_text = "\n".join(lines).rstrip() + "\n"
+    report_path.write_text(report_text, encoding="utf-8")
+    latest_path.write_text(report_text, encoding="utf-8")
+    legacy_latest_path.write_text(report_text, encoding="utf-8")
+
+    def esc(value: object) -> str:
+        return html.escape(str(value))
+
+    stage_rows = "".join(
+        f"<tr><td>{esc(name)}</td><td>{esc((metric or {}).get('status', ''))}</td><td>{esc((metric or {}).get('runtime_seconds', ''))}</td></tr>"
+        for name, metric in stage_metrics.items()
+        if isinstance(metric, dict)
+    )
+    discovery_table = "".join(
+        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['count'])}</td><td>{esc(row['raw_count'])}</td></tr>"
+        for row in discovery_rows
+    )
+    invite_cards = "".join(
+        (
+            "<li>"
+            f"<strong>{esc(run['company'])}</strong>"
+            f"<span>{esc(_render_status_counts(run['status_counts']))}</span>"
+            "</li>"
+        )
+        for run in invite_runs
+    )
+    followup_cards = "".join(
+        (
+            "<li>"
+            f"<strong>Follow-ups</strong>"
+            f"<span>{esc(_render_status_counts(run['status_counts']))}; touchpoints {esc(run['touchpoints_added'])}</span>"
+            "</li>"
+        )
+        for run in followup_runs
+    )
+    campaign_cards = ""
+    if campaign_rows:
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for row in campaign_rows:
+            key = (str(row.get("tier") or "Unscored"), str(row.get("campaign_action") or "Other"))
+            grouped.setdefault(key, []).append(str(row.get("company") or ""))
+        for (tier, action), companies in sorted(grouped.items()):
+            company_items = "".join(f"<li>{esc(company)}</li>" for company in companies[:16])
+            campaign_cards += (
+                "<section class='card'>"
+                f"<h3>Tier {esc(tier)} · {esc(action)}</h3>"
+                f"<ul>{company_items}</ul>"
+                "</section>"
+            )
+    review_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{esc(item.get('company', ''))}</td>"
+            f"<td>{esc(item.get('name', ''))}</td>"
+            f"<td>{esc(item.get('send_recommendation', ''))}</td>"
+            f"<td>{esc(item.get('latest_message') or item.get('last_message') or '')}</td>"
+            f"<td>{esc(item.get('draft_message', ''))}</td>"
+            "</tr>"
+        )
+        for item in deduped_review_items
+    )
+    cleared_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{esc(item.get('company', ''))}</td>"
+            f"<td>{esc(item.get('name', ''))}</td>"
+            f"<td>{esc(item.get('manual_latest_message', ''))}</td>"
+            f"<td>{esc(item.get('latest_message') or item.get('last_message') or '')}</td>"
+            "</tr>"
+        )
+        for item in manually_cleared_items
+    )
+    jobspy_items = "".join(
+        f"<li><span>{esc(key)}</span><strong>{esc(value)}</strong></li>"
+        for key, value in jobspy_metrics.items()
+    )
+    html_text = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{esc(title)}</title>
+  <style>
+    body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fa; color: #15171a; }}
+    header {{ background: #102033; color: white; padding: 28px 36px; }}
+    header h1 {{ margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }}
+    header p {{ margin: 0; color: #dbe4ef; }}
+    main {{ max-width: 1240px; margin: 0 auto; padding: 28px; }}
+    section {{ margin-bottom: 22px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }}
+    .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }}
+    h2 {{ margin: 0 0 12px; font-size: 19px; }}
+    h3 {{ margin: 0 0 10px; font-size: 15px; }}
+    table {{ width: 100%; border-collapse: collapse; background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }}
+    th, td {{ padding: 10px 12px; border-bottom: 1px solid #edf2f7; text-align: left; vertical-align: top; }}
+    th {{ background: #f1f5f9; font-size: 12px; text-transform: uppercase; color: #475569; letter-spacing: 0; }}
+    code {{ background: #edf2f7; padding: 2px 5px; border-radius: 4px; }}
+    ul {{ margin: 0; padding-left: 18px; }}
+    .metric-list {{ list-style: none; padding: 0; display: grid; gap: 8px; }}
+    .metric-list li {{ display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #edf2f7; padding-bottom: 6px; }}
+    .metric-list span {{ color: #475569; }}
+    .action-list {{ list-style: none; padding: 0; display: grid; gap: 10px; }}
+    .action-list li {{ display: grid; gap: 4px; border: 1px solid #edf2f7; border-radius: 6px; padding: 10px; }}
+    .action-list span {{ color: #0f766e; font-weight: 700; }}
+    .review-table td:nth-child(4), .review-table td:nth-child(5) {{ max-width: 360px; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{esc(title)}</h1>
+    <p>Created {esc(report_payload['created_at'])} · since {esc(report_payload['since'] or 'latest artifacts')}</p>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="card"><h2>Workspace</h2><p><code>{esc(counts)}</code></p></div>
+      <div class="card"><h2>Generation</h2><p>ran=<code>{esc(nightly_summary.get('generation_ran', ''))}</code> selected=<code>{esc(nightly_summary.get('generation_selected_count', ''))}</code></p></div>
+      <div class="card"><h2>Outreach</h2><p>invites=<code>{esc(invite_totals)}</code></p><p>review=<code>{esc(len(deduped_review_items))}</code> cleared=<code>{esc(len(manually_cleared_items))}</code></p></div>
+    </section>
+    <section class="grid">
+      <div class="card"><h2>JobSpy</h2><ul class="metric-list">{jobspy_items or '<li><span>No metrics</span><strong>-</strong></li>'}</ul></div>
+      <div class="card"><h2>LinkedIn Actions</h2><ul class="action-list">{invite_cards}{followup_cards or ''}</ul></div>
+      <div class="card"><h2>Maintenance</h2><p>websites <code>{esc(website_summary)}</code></p><p>context <code>{esc(enrichment_summary)}</code></p><p>campaign <code>{esc(campaign_summary)}</code></p></div>
+    </section>
+    <section><h2>Discovery Sources</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
+    <section><h2>Nightly Stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
+    <section><h2>Company-Level Actions</h2><div class="grid">{campaign_cards or '<div class="card">No campaign rows found.</div>'}</div></section>
+    <section><h2>Messages To Review</h2><table class="review-table"><thead><tr><th>Company</th><th>Person</th><th>Rec</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>{review_rows or '<tr><td colspan="5">No messages currently require review.</td></tr>'}</tbody></table></section>
+    <section><h2>Manually Cleared Messages</h2><table><thead><tr><th>Company</th><th>Person</th><th>Sent msg</th><th>Previous last msg</th></tr></thead><tbody>{cleared_rows or '<tr><td colspan="4">No manually cleared review items.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>Artifacts</h2><p>Nightly summary: <code>{esc(nightly_summary_path or '')}</code></p><p>Report: <code>{esc(summary_artifact)}</code></p><p>Campaign: <code>{esc(campaign_artifact or '')}</code></p></section>
+  </main>
+</body>
+</html>
+"""
+    report_html_path.write_text(html_text, encoding="utf-8")
+    latest_html_path.write_text(html_text, encoding="utf-8")
+    reports_latest_html_path.write_text(html_text, encoding="utf-8")
+    legacy_latest_html_path.write_text(html_text, encoding="utf-8")
+    return summary_artifact, latest_path, report_html_path, latest_html_path
+
+
+@app.command("write-daily-run-report")
+def write_daily_run_report_cmd(
+    workspace: Annotated[
+        Path,
+        typer.Option(help="Path to the workspace directory containing CSVs"),
+    ] = Path("workspace"),
+    since: Annotated[
+        str,
+        typer.Option(help="Only include artifacts modified after this local ISO timestamp"),
+    ] = "",
+    nightly_summary: Annotated[
+        Path | None,
+        typer.Option(help="Optional ResumeGenerator nightly summary JSON"),
+    ] = None,
+    title: Annotated[
+        str,
+        typer.Option(help="Report title"),
+    ] = "Outreach Daily Run Report",
+) -> None:
+    """Write the latest daily HTML/MD report from the active nightly artifacts."""
+    settings = OutreachSettings()
+    since_dt = _parse_report_datetime(since)
+    artifact, md_path, html_artifact, html_path = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=since_dt,
+        nightly_summary_path=nightly_summary,
+        title=title,
+    )
+    typer.echo(f"Wrote daily run report.")
+    typer.echo(f"Summary artifact: {artifact}")
+    typer.echo(f"Daily report: {md_path}")
+    typer.echo(f"HTML report artifact: {html_artifact}")
+    typer.echo(f"HTML report: {html_path}")
 
 
 @app.command("build-communication-lab")

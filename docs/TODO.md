@@ -35,9 +35,16 @@
 
 ## Track 2 Daily Runner
 
-- Tune live daily breadth after the July 6 supervised run:
-  - current caps are functional but slow because `max-company-mapping=5` and `max-linkedin-invites=12` trigger many LinkedIn search passes.
-  - consider reducing nightly mapping to 2-3 companies while keeping invite/follow-up caps high enough for momentum.
+- Daily report wiring is now on the active ResumeGenerator LaunchAgent path:
+  - the nightly pipeline calls Outreach `write-daily-run-report` after live discovery, sends, maintenance, and campaign planning.
+  - current nightly cycle is `offcycle_light`: app-queue LinkedIn invites cap at 5, while Track 2 owns relationship sends with caps of 25 new invites, 25 follow-ups, 15 mapping tasks, and 10 LinkedIn Contact Info/email research tasks.
+  - switch back to `--cycle-config normal` when app volume returns so the app-queue invite cap moves back to 25.
+  - `scripts/run_manual_supervised_e2e_debug.sh` is the attended/manual Outreach debug runner; `scripts/run_daily_supervised_e2e.sh` is only a warning shim for backwards compatibility.
+  - latest daily HTML lives in `workspace/reports/daily_html/`, with compatibility mirrors in `workspace/reports/` and `workspace/`.
+  - the stale standalone Outreach crontab entry should stay removed so there is one blessed scheduled runner.
+- Tune live daily breadth after 2-3 high-volume Track 2 runs:
+  - watch LinkedIn restriction signals, send failures, accept/reply rate, and report-level company progress before increasing above 25 Track 2 invites/day.
+  - mapping cap is 15 because a 25-invite outflow usually drains relevant pools across 8-12 companies and some mapping passes produce no safe candidate.
   - keep ResumeGenerator discovery on its normal daily budget; if it hangs again, fix per-source timeouts inside ResumeGenerator rather than shrinking the whole discovery lane.
 - Keep the HTML report as the review surface:
   - include last inbound LinkedIn message for each review item.

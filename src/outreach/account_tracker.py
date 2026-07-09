@@ -531,6 +531,8 @@ def _data_quality_flags(
         flags.append("role_without_domain_context")
     if _parse_notes(org.notes).get("context_confidence") == "inferred_from_job":
         flags.append("context_inferred_from_job")
+    if "identity_conflict" in org.notes.lower():
+        flags.append("identity_conflict")
     return flags
 
 
@@ -872,6 +874,14 @@ def _derive_stage(
 
 def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str]:
     flags = {item.strip() for item in row.data_quality_flags.split(";") if item.strip()}
+    if "identity_conflict" in flags:
+        return (
+            "pause_account",
+            "none",
+            5,
+            "Company identity/source data conflict; pause outreach until the account and source job are reconciled.",
+            "lane_1_allowed",
+        )
     if "needs_domain_enrichment" in flags or "role_without_domain_context" in flags:
         if row.fit_score < 25 and row.score_brand == 0 and row.score_role_fit < 18:
             return (
@@ -1492,6 +1502,7 @@ def _daily_plan_skip_reason(
         return "daily_action_budget_exhausted"
     if used["companies"] + 1 > budget.max_companies:
         return "company_budget_exhausted"
+    _degrade_mapping_email_research_if_needed(item, used, budget)
     checks = [
         ("linkedin_invites", item.expected_linkedin_invites, budget.max_linkedin_invites),
         ("linkedin_followups", item.expected_linkedin_followups, budget.max_linkedin_followups),
@@ -1504,6 +1515,35 @@ def _daily_plan_skip_reason(
         if increment and used[key] + increment > cap:
             return f"{key}_budget_exhausted"
     return ""
+
+
+def _degrade_mapping_email_research_if_needed(
+    item: DailyPlanItem,
+    used: dict[str, int],
+    budget: DailyPlanBudget,
+) -> None:
+    if item.campaign_action != "map_more_contacts" or not item.expected_email_research:
+        return
+    if used["email_research"] + item.expected_email_research <= budget.max_email_research:
+        return
+    item.expected_email_research = 0
+    item.campaign_channel = _linkedin_only_mapping_channel(item.campaign_channel)
+    item.reason = (
+        f"{item.reason} Email/contact-info research budget is unavailable today, "
+        "so run the contact-mapping pass as LinkedIn-only."
+    )
+    item.phase, item.phase_order, item.can_parallelize = _daily_plan_phase(item)
+
+
+def _linkedin_only_mapping_channel(channel: str) -> str:
+    parts = [
+        part.strip()
+        for part in (channel or "").split("+")
+        if part.strip() and part.strip() not in {"email", "email_research"}
+    ]
+    if "linkedin" not in parts:
+        parts.insert(0, "linkedin")
+    return "+".join(parts)
 
 
 def _daily_plan_summary(items: list[DailyPlanItem]) -> dict[str, int]:

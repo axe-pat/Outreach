@@ -28,10 +28,11 @@
 
 ## Email Channel
 
-- Add and validate an email-finder provider key before enabling daily email research:
+- LinkedIn Contact Info email research is enabled inside Track 2 with a current cap of 10/day.
+- Add and validate an external email-finder provider key before enabling provider-backed fallback lookups:
   - preferred: `PROSPEO_API_KEY`
   - fallback: `HUNTER_API_KEY`
-  - keep `--max-email-research 0` in the daily live runner until one provider is configured and a small paid/credit-bounded test passes.
+  - keep external provider lookup opt-in until one provider is configured and a small paid/credit-bounded test passes.
 
 ## Track 2 Daily Runner
 

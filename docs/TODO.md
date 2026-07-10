@@ -30,11 +30,12 @@ paths visible instead of accidentally filtering them out.
    narrowly defined Growth/GTM-adjacent lane. Set a weekly coverage floor and
    report candidates found, scored, surfaced, and acted on for each family.
 5. **Add high-signal LinkedIn discovery, not more undifferentiated scraping.**
-   Run a lightweight daily home-feed capture (about a minute): save only actionable job,
-   hiring, funding, launch, and warm-network signals with the post URL and
-   source context. Treat the feed as a discovery source that can create an
-   opportunity, account signal, or contact task—not as an automatic messaging
-   queue.
+   Run a lightweight daily home-feed capture: save good startups and other
+   relevant/interesting company, job, hiring, funding, launch, and warm-network
+   signals with the post URL and source context. Treat the feed as a discovery
+   source that can create an opportunity, account signal, or contact task—not
+   as an automatic messaging queue. Set the time budget from real run data when
+   the pass is built, rather than fixing it prematurely.
 6. **Use relationship signals deliberately.** Add a weekly profile-viewer
    review, dedupe it against existing contacts, and promote only relevant
    viewers to a contextual follow-up/research queue. A profile view alone is a
@@ -49,7 +50,7 @@ paths visible instead of accidentally filtering them out.
 - **Initial LinkedIn → follow-up:** after an invite is accepted but has no reply,
   send one useful follow-up around day 4. Do not send a generic nudge to a
   pending invite.
-- **Second follow-up:** at most one, around day 10–14 after that, only with a distinct
+- **Second follow-up:** at most one, around day 4–5 after that, only with a distinct
   value-add (role, launch, referral context, thoughtful question, or channel
   switch). Then pause for 60–90 days unless the person re-engages.
 - **Cold email:** one targeted email to a verified address; one follow-up after

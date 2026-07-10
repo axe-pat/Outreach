@@ -301,7 +301,20 @@ python main.py write-daily-run-report --workspace workspace --since <run-start> 
 ```
 
 That command refreshes the Outreach HTML/Markdown report from the actual
-artifacts produced by the nightly run. The standalone debug runner remains
+artifacts produced by that nightly run. It has two modes: the scheduled
+run-scoped mode (pass both `--since` and `--nightly-summary`) is the source of
+truth; an ad-hoc mode without them is only for local troubleshooting and is
+clearly labeled as a workspace snapshot. The report has a first-class Source
+Breakdown for LinkedIn, Handshake, JobSpy, startup sources, the
+ResumeGenerator/app queue, and Track 2 imports/maintenance. Sources that did
+not run are shown as `skipped` with zeroes rather than being inferred from old
+artifacts.
+
+Each run also writes a small reusable LinkedIn comms-learning corpus under
+`workspace/comms_learning/`: manual messages are `gold`, generated drafts
+replaced by those messages are `negative`, and sent approved/automatic drafts
+are `silver`. The report shows only that run's learning counts and links its
+per-run artifact. The standalone debug runner remains
 useful for attended troubleshooting or a manual full Outreach run, but it is not
 the scheduled daily source of truth.
 

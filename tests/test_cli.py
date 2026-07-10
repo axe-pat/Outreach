@@ -62,6 +62,8 @@ from outreach.cli import (
     effective_send_min_score,
     text_contains_signal,
     touchpoint_status_from_invite_result,
+    _source_breakdown,
+    _write_comms_learning_artifact,
     write_communication_review_csv,
 )
 from outreach.config import OutreachSettings
@@ -70,6 +72,44 @@ from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume
 from outreach.services.linkedin import LinkedInFollowupSendResult
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
 from outreach.style_profile import CommunicationStyleProfile
+
+
+def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "source-run-metrics.json"
+    metrics_path.write_text(json.dumps({
+        "sources": {"linkedin": {"status": "ran", "raw_count": 12, "accepted_for_write": 3}},
+        "action_queue": {"counts": {"application_plus_outreach": 2}},
+    }), encoding="utf-8")
+
+    rows = _source_breakdown({"source_metrics": str(metrics_path), "generation_selected_count": 4})
+    by_source = {row["source"]: row for row in rows}
+
+    assert by_source["LinkedIn"]["status"] == "ran"
+    assert by_source["LinkedIn"]["raw"] == 12
+    assert by_source["Handshake"]["status"] == "skipped"
+    assert by_source["JobSpy"]["kept"] == 0
+    assert by_source["ResumeGenerator / app queue"]["status"] == "ran"
+    assert by_source["Track 2 imports / maintenance"]["status"] == "skipped"
+
+
+def test_comms_learning_writes_gold_negative_and_silver_examples(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    artifact, summary = _write_comms_learning_artifact(
+        workspace=tmp_path,
+        reports_dir=reports,
+        report_stem="run",
+        manually_cleared_items=[{
+            "company": "Example", "name": "A", "manual_latest_message": "Manual note", "draft_message": "Generated note",
+        }],
+        followup_payloads=[{"cleared_drafts": [{"company": "Example", "name": "B", "draft_message": "Sent draft"}]}],
+        run_summary=None,
+    )
+
+    assert summary == {"gold": 1, "negative": 1, "silver": 1}
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert {item["label"] for item in payload["examples"]} == {"gold", "negative", "silver"}
+    assert (tmp_path / "comms_learning" / "linkedin_examples.jsonl").exists()
 
 
 def test_tpm_titles_bucket_as_product() -> None:

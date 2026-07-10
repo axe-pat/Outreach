@@ -5252,6 +5252,13 @@ def _artifacts_since(artifacts_dir: Path, since: datetime | None) -> list[Path]:
 
 
 def _load_json_file(path: Path | None) -> dict[str, object]:
+    # Older ResumeGenerator summaries recorded a differently-cased Desktop
+    # component; repair only that known local-path spelling before declaring a
+    # run artifact unavailable.
+    if path is not None and not path.exists():
+        repaired = Path(str(path).replace("/Claude projects/", "/Claude Projects/"))
+        if repaired.exists():
+            path = repaired
     if path is None or not path.exists() or not path.is_file():
         return {}
     try:
@@ -5297,6 +5304,118 @@ def _daily_html_reports_dir(settings: OutreachSettings) -> Path:
     return _reports_dir(settings) / "daily_html"
 
 
+def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, object]]:
+    """Normalize the sources recorded by one ResumeGenerator nightly summary.
+
+    A report must not infer source activity from whichever artifact happens to be
+    newest in either checkout. Missing entries therefore mean skipped, not zero
+    discovered from a workspace snapshot.
+    """
+    source_metrics = _load_json_file(Path(str(nightly_summary.get("source_metrics") or "")))
+    sources = source_metrics.get("sources") if isinstance(source_metrics.get("sources"), dict) else {}
+    stages = source_metrics.get("stage_metrics") if isinstance(source_metrics.get("stage_metrics"), dict) else {}
+
+    def row(label: str, key: str, *, details: dict[str, object] | None = None) -> dict[str, object]:
+        metric = sources.get(key) if isinstance(sources, dict) else {}
+        metric = metric if isinstance(metric, dict) else {}
+        stage = stages.get(key) if isinstance(stages, dict) else {}
+        stage = stage if isinstance(stage, dict) else {}
+        return {
+            "source": label,
+            "status": metric.get("status") or stage.get("status") or "skipped",
+            "raw": metric.get("raw_count", 0) if metric else 0,
+            "kept": metric.get("accepted_for_write", 0) if metric else 0,
+            "details": details if details is not None else (metric.get("details") or {}),
+        }
+
+    startup_report = source_metrics.get("startup_source_report") if isinstance(source_metrics.get("startup_source_report"), dict) else {}
+    startup_details = {
+        "apply_discovered": (startup_report or {}).get("startup_apply_discovered", {}),
+        "relationship_targets": (startup_report or {}).get("relationship_targets", 0),
+        "relationship_sources": (startup_report or {}).get("relationship_source_counts", {}),
+    }
+    startup = row("Startup sources", "startup_apply", details=startup_details)
+    relationship = sources.get("startup_relationship") if isinstance(sources, dict) else {}
+    relationship = relationship if isinstance(relationship, dict) else {}
+    if startup["status"] == "skipped" and relationship:
+        startup["status"] = relationship.get("status") or "ran"
+
+    action_queue = source_metrics.get("action_queue") if isinstance(source_metrics.get("action_queue"), dict) else {}
+    app_queue = {
+        "source": "ResumeGenerator / app queue",
+        "status": "ran" if action_queue else "skipped",
+        "raw": 0,
+        "kept": 0,
+        "details": {
+            "action_queue_counts": (action_queue or {}).get("counts", {}),
+            "action_queue_sources": (action_queue or {}).get("source_counts", {}),
+            "generation_selected": nightly_summary.get("generation_selected_count", 0),
+            "generation_ran": nightly_summary.get("generation_ran", False),
+        },
+    }
+    maintenance = nightly_summary.get("outreach_maintenance") if isinstance(nightly_summary.get("outreach_maintenance"), dict) else {}
+    track_artifact = Path(str((maintenance or {}).get("track_2_daily_run_artifact") or ""))
+    track_payload = _load_json_file(track_artifact)
+    track = {
+        "source": "Track 2 imports / maintenance",
+        "status": "ran" if (maintenance or {}).get("ran") else "skipped",
+        "raw": 0,
+        "kept": 0,
+        "details": {
+            "returncodes": {key: value for key, value in (maintenance or {}).items() if key.endswith("_returncode")},
+            "artifacts": {key: value for key, value in (maintenance or {}).items() if key.endswith("_artifact") or key == "account_universe_import"},
+            "track_2_used": track_payload.get("used", {}),
+            "track_2_summary": track_payload.get("summary", {}),
+            "track_2_phase_summary": track_payload.get("phase_summary", {}),
+        },
+    }
+    return [row("LinkedIn", "linkedin"), row("Handshake", "handshake"), row("JobSpy", "jobspy"), startup, app_queue, track]
+
+
+def _write_comms_learning_artifact(
+    *,
+    workspace: Path,
+    reports_dir: Path,
+    report_stem: str,
+    manually_cleared_items: list[dict[str, object]],
+    followup_payloads: list[dict[str, object]],
+    run_summary: Path | None,
+) -> tuple[Path, dict[str, int]]:
+    """Persist run-scoped LinkedIn examples with explicit gold/silver/negative labels."""
+    examples: list[dict[str, object]] = []
+    for item in manually_cleared_items:
+        base = {"company": item.get("company", ""), "name": item.get("name", ""), "channel": "linkedin", "run_summary": str(run_summary or "")}
+        examples.append({**base, "label": "gold", "message": item.get("manual_latest_message", ""), "reason": "manually sent LinkedIn message"})
+        if str(item.get("draft_message") or "").strip():
+            examples.append({**base, "label": "negative", "message": item.get("draft_message", ""), "reason": "generated draft replaced or cleared after manual send"})
+    for payload in followup_payloads:
+        for item in list(payload.get("cleared_drafts") or []):
+            if not isinstance(item, dict):
+                continue
+            examples.append({
+                "company": item.get("company", ""), "name": item.get("name", ""), "channel": "linkedin", "run_summary": str(run_summary or ""),
+                "label": "silver", "message": item.get("draft_message", ""), "reason": "approved or automatic draft sent",
+            })
+    examples = [item for item in examples if str(item.get("message") or "").strip()]
+    summary = {label: sum(item["label"] == label for item in examples) for label in ("gold", "negative", "silver")}
+    payload = {"report_run": report_stem, "scope": "examples observed in this report run only", "examples": examples, "summary": summary}
+    artifact = reports_dir / f"{report_stem}-comms-learning.json"
+    artifact.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+    corpus_dir = workspace / "comms_learning"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+    corpus_path = corpus_dir / "linkedin_examples.jsonl"
+    existing = set()
+    if corpus_path.exists():
+        existing = {line.strip() for line in corpus_path.read_text(encoding="utf-8").splitlines() if line.strip()}
+    additions = [json.dumps(item, sort_keys=True, ensure_ascii=True) for item in examples]
+    new_lines = [line for line in additions if line not in existing]
+    if new_lines:
+        with corpus_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(new_lines) + "\n")
+    return artifact, summary
+
+
 def write_artifact_daily_report(
     *,
     settings: OutreachSettings,
@@ -5332,6 +5451,7 @@ def write_artifact_daily_report(
         )
 
     followup_runs: list[dict[str, object]] = []
+    followup_payloads: list[dict[str, object]] = []
     pending_review_items: list[dict[str, object]] = []
     manual_outbound_by_contact: dict[str, dict[str, object]] = {}
     for path in artifacts:
@@ -5356,6 +5476,7 @@ def write_artifact_daily_report(
         if "linkedin-followup-send-results" not in path.name:
             continue
         payload = _load_json_file(path)
+        followup_payloads.append(payload)
         followup_runs.append(
             {
                 "artifact": str(path),
@@ -5367,12 +5488,6 @@ def write_artifact_daily_report(
         for item in list(payload.get("skipped_by_recommendation") or []):
             if isinstance(item, dict):
                 pending_review_items.append(item)
-
-    pending_path = settings.resolved_tracking_workspace_dir / "linkedin_followup_pending_review.json"
-    pending_payload = _load_json_file(pending_path)
-    for item in list(pending_payload.get("results") or []):
-        if isinstance(item, dict):
-            pending_review_items.append(item)
 
     seen_review_keys: set[tuple[str, str, str]] = set()
     deduped_review_items: list[dict[str, object]] = []
@@ -5444,6 +5559,20 @@ def write_artifact_daily_report(
     stage_metrics = source_metrics.get("stage_metrics") if isinstance(source_metrics.get("stage_metrics"), dict) else {}
     jobspy_metrics = nightly_summary.get("jobspy_metrics") if isinstance(nightly_summary.get("jobspy_metrics"), dict) else {}
 
+    reports_dir = _reports_dir(settings)
+    daily_html_dir = _daily_html_reports_dir(settings)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    daily_html_dir.mkdir(parents=True, exist_ok=True)
+    report_stem = f"{artifact_timestamp()}-daily-run-report"
+    source_breakdown = _source_breakdown(nightly_summary)
+    comms_artifact, comms_summary = _write_comms_learning_artifact(
+        workspace=workspace,
+        reports_dir=reports_dir,
+        report_stem=report_stem,
+        manually_cleared_items=manually_cleared_items,
+        followup_payloads=followup_payloads,
+        run_summary=nightly_summary_path,
+    )
     report_payload = {
         "created_at": utc_now_iso(),
         "since": since.isoformat(timespec="seconds") if since else "",
@@ -5469,12 +5598,10 @@ def write_artifact_daily_report(
         "website_summary": website_summary,
         "website_artifact": str(website_artifact or ""),
         "artifact_count": len(artifacts),
+        "source_breakdown": source_breakdown,
+        "comms_learning_artifact": str(comms_artifact),
+        "comms_learning_summary": comms_summary,
     }
-    reports_dir = _reports_dir(settings)
-    daily_html_dir = _daily_html_reports_dir(settings)
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    daily_html_dir.mkdir(parents=True, exist_ok=True)
-    report_stem = f"{artifact_timestamp()}-daily-run-report"
     summary_artifact = reports_dir / f"{report_stem}.json"
     summary_artifact.write_text(json.dumps(report_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
@@ -5502,14 +5629,11 @@ def write_artifact_daily_report(
         f"- Selected for generation: `{nightly_summary.get('generation_selected_count', '')}`",
         f"- Failures: `{nightly_summary.get('failures', [])}`",
         "",
-        "## Discovery",
+        "## Source Breakdown (this run)",
         "",
     ]
-    if discovery_rows:
-        for row in discovery_rows:
-            lines.append(f"- {row['source']}: {row['count']} kept / {row['raw_count']} raw")
-    else:
-        lines.append("- No source-discovery artifacts found for this run window.")
+    for row in source_breakdown:
+        lines.append(f"- {row['source']}: status=`{row['status']}`; kept=`{row['kept']}`; raw=`{row['raw']}`; details=`{row['details']}`")
     if jobspy_metrics:
         lines.extend(["", "## JobSpy", ""])
         for key, value in jobspy_metrics.items():
@@ -5557,6 +5681,11 @@ def write_artifact_daily_report(
                 lines.append(f"  - Previous last msg: {stale_latest}")
     else:
         lines.append("- No manually cleared review items.")
+    lines.extend(["", "## Comms Learning (this run)", ""])
+    lines.append(f"- Gold (manual sends): `{comms_summary['gold']}`")
+    lines.append(f"- Negative (replaced/cleared drafts): `{comms_summary['negative']}`")
+    lines.append(f"- Silver (approved/automatic drafts sent): `{comms_summary['silver']}`")
+    lines.append(f"- Reusable corpus artifact: `{comms_artifact}`")
     report_text = "\n".join(lines).rstrip() + "\n"
     report_path.write_text(report_text, encoding="utf-8")
     latest_path.write_text(report_text, encoding="utf-8")
@@ -5573,6 +5702,10 @@ def write_artifact_daily_report(
     discovery_table = "".join(
         f"<tr><td>{esc(row['source'])}</td><td>{esc(row['count'])}</td><td>{esc(row['raw_count'])}</td></tr>"
         for row in discovery_rows
+    )
+    source_breakdown_table = "".join(
+        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['status'])}</td><td>{esc(row['kept'])}</td><td>{esc(row['raw'])}</td><td><code>{esc(row['details'])}</code></td></tr>"
+        for row in source_breakdown
     )
     invite_cards = "".join(
         (
@@ -5680,11 +5813,13 @@ def write_artifact_daily_report(
       <div class="card"><h2>LinkedIn Actions</h2><ul class="action-list">{invite_cards}{followup_cards or ''}</ul></div>
       <div class="card"><h2>Maintenance</h2><p>websites <code>{esc(website_summary)}</code></p><p>context <code>{esc(enrichment_summary)}</code></p><p>campaign <code>{esc(campaign_summary)}</code></p></div>
     </section>
-    <section><h2>Discovery Sources</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
+    <section><h2>Source Breakdown (this run)</h2><table><thead><tr><th>Source</th><th>Status</th><th>Kept</th><th>Raw</th><th>Run details</th></tr></thead><tbody>{source_breakdown_table}</tbody></table></section>
+    <section><h2>Discovery Artifacts (this run)</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
     <section><h2>Nightly Stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
     <section><h2>Company-Level Actions</h2><div class="grid">{campaign_cards or '<div class="card">No campaign rows found.</div>'}</div></section>
     <section><h2>Messages To Review</h2><table class="review-table"><thead><tr><th>Company</th><th>Person</th><th>Rec</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>{review_rows or '<tr><td colspan="5">No messages currently require review.</td></tr>'}</tbody></table></section>
     <section><h2>Manually Cleared Messages</h2><table><thead><tr><th>Company</th><th>Person</th><th>Sent msg</th><th>Previous last msg</th></tr></thead><tbody>{cleared_rows or '<tr><td colspan="4">No manually cleared review items.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>Comms Learning (this run)</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
     <section class="card"><h2>Artifacts</h2><p>Nightly summary: <code>{esc(nightly_summary_path or '')}</code></p><p>Report: <code>{esc(summary_artifact)}</code></p><p>Campaign: <code>{esc(campaign_artifact or '')}</code></p></section>
   </main>
 </body>

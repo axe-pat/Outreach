@@ -32,10 +32,16 @@ Note on AI usage: base LinkedIn note generation is deterministic. The optional `
 
 ```text
 src/outreach/
+  cadence.py
   cli.py
+  company_watchlist.py
   config.py
   discovery/
+  email_delivery.py
+  linkedin_signals.py
   models.py
+  outcome_learning.py
+  role_surface_monitor.py
   tracking.py
   scoring.py
   services/
@@ -109,6 +115,13 @@ instead of creating one sheet per avenue.
 - `python main.py draft-track-2-emails --max-email-drafts 5`
 - `python main.py review-linkedin-followup-drafts --draft-artifact artifacts/...track-2-linkedin-followup-drafts.json`
 - `python main.py review-track-2-email-drafts --draft-artifact artifacts/...track-2-email-drafts.json`
+- `python main.py capture-linkedin-intelligence --max-scrolls 5 --max-items 100`
+- `python main.py review-linkedin-feed-signal <signal-id> --disposition company_candidate`
+- `python main.py build-company-discovery-review --run-id <run-id>`
+- `python main.py build-role-surface-report --source-metrics <run-source-metrics.json> --run-id <run-id>`
+- `python main.py build-outreach-cadence-report`
+- `python main.py build-outcome-learning-report`
+- `python main.py send-track-2-emails --draft-artifact artifacts/...track-2-email-drafts.json`
 - `python main.py add-organization --name "Y Combinator" --organization-type accelerator`
 - `python main.py add-opportunity --organization "Figma" --title "Summer PM Intern"`
 - `python main.py add-contact --organization "Figma" --full-name "Avery Product"`
@@ -198,8 +211,10 @@ The source-key templates create clean one-time capture files and companion guide
 
 `workspace/communication_style_profile.yml` is the local voice/style control file.
 LinkedIn invite notes and Track 2 email drafts now use it for banned phrases,
-recipient-specific asks, and review metadata. Email drafting remains artifact-only:
-the engine can draft reviewed emails, but it does not send them.
+recipient-specific asks, and review metadata. Email work remains artifact-first.
+Live delivery exists only through the separately gated `send-track-2-emails`
+command described below; drafting or running the normal daily plan does not by
+itself send an email.
 
 For high-stakes emails, use the communication lab loop:
 
@@ -223,6 +238,212 @@ Story-fit metadata is now used directly in communication drafts. If an account h
 `story_fit_reason` or `profile_evidence` in its organization notes, Track 2 email
 and senior/founder/product LinkedIn drafts prefer that angle over generic company
 fit language.
+
+## Recruiting Intelligence, Coverage, and Channel Controls
+
+The recruiting-intelligence layer implements the discovery-to-learning loop
+without turning every signal into an automatic action. Its generated CSV/JSON
+files are operating artifacts under `workspace/`; they are not source files and
+should not be committed.
+
+### Daily LinkedIn feed and weekly viewer capture
+
+Run the read-only LinkedIn pass against the same dedicated, signed-in Chrome
+session used by the other live LinkedIn commands:
+
+```bash
+python main.py capture-linkedin-intelligence \
+  --max-scrolls 5 \
+  --max-items 100 \
+  --max-duration-seconds 0 \
+  --profile-viewers-every-days 7
+```
+
+The feed pass is intended to run daily. Its budget is configurable: `0` means
+no time cap, so the operating limit can be tuned from real runs instead of being
+fixed at 60 seconds. It records hiring, jobs, funding, launches, warm-network
+activity, good startups/new-company candidates, and other relevant posts in
+`workspace/linkedin_feed_signals.csv`, preserving post URL when LinkedIn exposes
+one plus author/company/context fallback and explicit URL-coverage counts when
+it does not. It never sends a message.
+
+Profile viewers are checked weekly by default and retained in
+`workspace/linkedin_profile_viewers.csv` as passive context. The ledger dedupes
+repeat observations and annotates target-company or role relevance; a profile
+view never creates or sends outreach by itself. Set
+`--profile-viewers-every-days 0` only for an intentional every-run capture.
+
+### Company discovery and reviewed watchlist
+
+The feed ledger is an independent discovery source; a company does not need to
+already exist in `organizations.csv`. Review an individual feed signal first if
+needed:
+
+```bash
+python main.py review-linkedin-feed-signal <signal-id> \
+  --disposition company_candidate \
+  --note "Why this deserves company review"
+python main.py build-company-discovery-review \
+  --run-id <run-id> \
+  --capture-artifact artifacts/...linkedin-intelligence-capture.json \
+  --source-metrics ../ResumeGenerator\ v1/discovery/source_validation/...source-run-metrics.json
+```
+
+The builder dedupes candidates, preserves provenance, and writes an editable
+review queue plus JSON/CSV watchlist payloads under
+`workspace/company_discovery/`. Its explicit 15-point rubric covers domain fit,
+the technical-MBA story, geography/remote viability, growth/quality, and a
+plausible Product or adjacent-role surface. A strong score is only a
+recommendation: promotion requires a human `approved` review state. After
+editing the review CSV, rebuild it and use `--promote-approved` to write only
+approved, rubric-qualified entries into the company-level account tracker:
+
+```bash
+python main.py build-company-discovery-review \
+  --run-id <run-id> \
+  --promote-approved
+```
+
+Current ingestion combines the exact nightly LinkedIn-feed capture with the
+same-run ResumeGenerator startup relationship/apply report, including its YC
+and Built In lanes. Hiring, funding, launch, and warm-network discoveries also
+arrive through the feed. Additional company/news directories can reuse the same
+typed candidate API; the tracker remains memory after discovery, not the source
+of discovery. Run summaries include only exact current inputs, while the
+editable review queue remains cumulative.
+
+### Role-family coverage
+
+The account tracker stays company-level. A separate, run-scoped monitor reads
+the current ResumeGenerator source-metrics artifact and reports discovered,
+scored, surfaced, and acted-on roles for:
+
+- Product / PM, the primary lane
+- Product Strategy
+- BizOps / Strategy
+- Program / Operations
+- narrowly defined Growth/GTM-adjacent roles
+
+```bash
+python main.py build-role-surface-report \
+  --source-metrics <run-source-metrics.json> \
+  --run-id <same-run-id>
+```
+
+Outputs live under `workspace/role_surface/` as reusable JSON and CSV tables by
+family, source, and source/family. Sources that were skipped or failed remain
+visible with zeroes. The monitor rejects mixed-run inputs and surfaces
+unclassified titles for audit; it does not add role rows to the company tracker.
+
+### Target-role-aware messaging
+
+The role being pursued is now separate from the recipient's job. Invite notes,
+accepted-invite follow-ups, reply drafts, review CSV suggestions, and Track 2
+initial/follow-up/final emails use one target-role resolver for Product/PM,
+Product Strategy, BizOps/Strategy, Program/Operations, narrow Growth/GTM, and a
+general-business fallback. This includes existing-connection, USC/Marshall, and
+shared-history invite paths; a concrete non-Product target no longer gets
+"pivoting into PM" copy.
+
+Resolution is deterministic and provenance-preserving: an explicit selected
+plan role wins; concrete opportunity titles come next (Product remains primary
+inside a mixed opportunity set); structured `target_roles` notes are the next
+tier; Product/PM is the fallback only when no concrete target exists. Recipient
+facts such as a contact's Product background remain intact while the candidate's
+pursued-role language changes.
+
+Draft artifacts and communication-review CSVs include `target_role_family`,
+label, source, matched text/rule, and whether the evidence was concrete. Sent
+invite touchpoints retain the
+family so message reconciliation and later follow-ups reuse the role actually
+targeted instead of guessing from the contact title. The daily Track 2 plan also
+passes its selected `target_role` into both LinkedIn invite generation and email
+drafting. This is execution context only: it does not add role rows or role-bound
+contacts to the company-level account tracker.
+
+### Tracker-backed cadence and cold email
+
+The touchpoint ledger is the source of truth for both channels. Inspect the
+current decisions with:
+
+```bash
+python main.py build-outreach-cadence-report
+```
+
+The implemented defaults are:
+
+- accepted LinkedIn invite, no reply: first useful follow-up on day 4
+- one final LinkedIn value-add 4–5 days later; generic or near-duplicate nudges
+  are blocked
+- cold email: initial note, first follow-up after 4 days, optional final note
+  4–5 days later, with at most three email touches in 90 days
+- any reply/engagement pauses automated cadence; rejection, unsubscribe,
+  bounce, invalid address, or do-not-contact stops it
+- a same-day LinkedIn/email double-tap is suppressed
+
+Cold-email delivery is preview-only unless every gate passes. The contact needs
+a verified address, the tracker must say the matching email action is due, the
+draft needs an explicit approval marker, and a bounded live command must include
+`--execute`:
+
+```bash
+# Safe preview: no SMTP connection and no send.
+python main.py send-track-2-emails \
+  --draft-artifact artifacts/...track-2-email-draft-review.json \
+  --approval-csv artifacts/...track-2-email-draft-review.csv \
+  --limit 5
+
+# Live only after review and SMTP setup.
+python main.py send-track-2-emails \
+  --draft-artifact artifacts/...track-2-email-draft-review.json \
+  --approval-csv artifacts/...track-2-email-draft-review.csv \
+  --limit 5 \
+  --execute
+```
+
+Live delivery requires `SMTP_HOST` and `SMTP_FROM_EMAIL`; configure
+`SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, and
+`SMTP_USE_SSL` as appropriate. These values are read from the environment or
+the repo-local `.env`; `SMTP_TIMEOUT_SECONDS` defaults to 30. The approval is
+bound to the exact review artifact, recipient, subject, and reviewed body, and
+the reviewed email must match the tracker address. Successful sends are written
+back to `touchpoints.csv`; an interrupted uncertain attempt is held for manual
+reconciliation instead of being blindly retried. SMTP delivery is not silently
+enabled by the nightly run.
+
+### Comms and outcome learning
+
+The run report's reusable comms corpus keeps manual sends as `gold`, sent
+approved/automatic drafts as `silver`, and generated drafts replaced or cleared
+by manual messages as `negative`. Build the outcome view with:
+
+```bash
+python main.py build-outcome-learning-report
+```
+
+`workspace/comms_learning/outcome_learning.json` combines those labels with
+tracker accepts, replies, rejections, message types, audiences, and accounts.
+Gold/silver examples sync as bounded strong examples and negative rows as weak
+examples in `workspace/communication_style_profile.yml`, so later draft
+polishing actually learns from the corpus. Aggregate outcome recommendations
+remain advisory: they do not rewrite prompt rules, rubrics, selection policy,
+or send messages. Human review remains the gate before those rules change.
+
+### Activation and manual gates
+
+The code paths above are implemented. Reliable operation still requires:
+
+- a dedicated Chrome session with a current LinkedIn login and successful
+  `check-linkedin-live` preflight; the current feed/viewer selectors were live
+  validated on July 10, 2026 and should be monitored for LinkedIn DOM changes
+- daily review dispositions for useful feed signals and explicit human approval
+  before any candidate is promoted into `organizations.csv`
+- a same-run ResumeGenerator source-metrics artifact for trustworthy role
+  coverage; missing sources must stay `skipped`/zero rather than borrowing an
+  older artifact
+- verified email addresses, reviewed drafts, working SMTP credentials, and an
+  explicit bounded `--execute` command before the first live email batch
+- real touchpoint outcomes before acting on learning recommendations
 
 ## Supervised Daily E2E
 
@@ -300,8 +521,9 @@ At the end of that LaunchAgent path, ResumeGenerator now calls:
 python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json>
 ```
 
-That command refreshes the Outreach HTML/Markdown report from the actual
-artifacts produced by that nightly run. It has two modes: the scheduled
+That command refreshes the Outreach HTML/Markdown report from exact nightly
+summary pointers plus clearly labeled artifacts observed inside that pipeline's
+time window. It has two modes: the scheduled
 run-scoped mode (pass both `--since` and `--nightly-summary`) is the source of
 truth; an ad-hoc mode without them is only for local troubleshooting and is
 clearly labeled as a workspace snapshot. The report has a first-class Source
@@ -317,6 +539,16 @@ are `silver`. The report shows only that run's learning counts and links its
 per-run artifact. The standalone debug runner remains
 useful for attended troubleshooting or a manual full Outreach run, but it is not
 the scheduled daily source of truth.
+
+The new intelligence sections retain their natural scopes instead of being
+blurred together. Feed capture status and the role-surface report are run-scoped
+when built from that run's capture/source-metrics artifacts. Company review and
+watchlist counts, the cadence plan, profile-viewer history, and outcome learning
+are cumulative workspace-state snapshots. A current nightly maintenance pointer
+proves that one of those snapshots was refreshed during the run; it does not
+turn its historical rows into events from that run. The report must label these
+as workspace state and must never use them to claim that a source ran or that
+all counted actions happened in the current cycle.
 
 Latest user-facing report:
 
@@ -335,6 +567,14 @@ This repo now covers:
 - LinkedIn discovery, scoring, note generation, and invite sending workflows
 - a reusable outreach workbook for multi-source discovery and contact tracking
 - target-action classification for `apply_now`, `outreach_now`, and `skip`
+- configurable LinkedIn home-feed discovery and a passive profile-viewer ledger
+- independent company-candidate review and human-approved watchlist promotion
+- run-scoped role-family coverage with explicit source status
+- tracker-enforced LinkedIn/email cadence and explicitly gated SMTP delivery
+- gold/silver/negative communication examples plus advisory outcome learning
 
-The next layer is source-specific discovery for startup directories, hacker houses,
-university labs, and job feeds.
+The next operating layer is live validation: run the new passes for several
+cycles, review the resulting queues, activate a small SMTP batch only after the
+manual gates pass, and use observed coverage/outcomes to tune source and role
+breadth. Additional company-discovery inputs can then reuse the same review
+contract.

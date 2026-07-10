@@ -265,6 +265,7 @@ class DailyPlanItem:
     reason: str = ""
     skip_reason: str = ""
     organization_id: str = ""
+    target_role: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1445,6 +1446,7 @@ def _daily_plan_item_for_campaign(row: CampaignPlanRow) -> DailyPlanItem:
         account_score=row.account_score,
         reason=row.campaign_reason,
         organization_id=row.organization_id,
+        target_role=row.target_role,
     )
     remaining_wave = max(0, LINKEDIN_WAVE_SIZE - row.invites_sent)
     if row.campaign_action in {"continue_conversation", "follow_up_connected_contact"}:

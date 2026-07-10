@@ -104,7 +104,7 @@ def test_review_outreach_message_flags_senior_referral_mismatch() -> None:
 
     assert review.verdict == "needs_rewrite"
     assert any("Seniority mismatch" in flag for flag in review.flags)
-    assert any("one simple product-fit" in guidance for guidance in review.rewrite_guidance)
+    assert any("one simple role-fit" in guidance for guidance in review.rewrite_guidance)
 
 
 def test_review_outreach_message_flags_generic_company_insight() -> None:

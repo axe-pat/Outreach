@@ -64,6 +64,7 @@ from outreach.cli import (
     touchpoint_status_from_invite_result,
     _source_breakdown,
     _write_comms_learning_artifact,
+    write_artifact_daily_report,
     write_communication_review_csv,
 )
 from outreach.config import OutreachSettings
@@ -77,7 +78,10 @@ from outreach.style_profile import CommunicationStyleProfile
 def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp_path: Path) -> None:
     metrics_path = tmp_path / "source-run-metrics.json"
     metrics_path.write_text(json.dumps({
-        "sources": {"linkedin": {"status": "ran", "raw_count": 12, "accepted_for_write": 3}},
+        "sources": {
+            "linkedin": {"status": "ran", "raw_count": 12, "accepted_for_write": 3},
+            "handshake": {"status": "skipped", "raw_count": None, "accepted_for_write": None},
+        },
         "action_queue": {"counts": {"application_plus_outreach": 2}},
     }), encoding="utf-8")
 
@@ -87,9 +91,213 @@ def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp
     assert by_source["LinkedIn"]["status"] == "ran"
     assert by_source["LinkedIn"]["raw"] == 12
     assert by_source["Handshake"]["status"] == "skipped"
+    assert by_source["Handshake"]["raw"] == 0
+    assert by_source["Handshake"]["kept"] == 0
     assert by_source["JobSpy"]["kept"] == 0
     assert by_source["ResumeGenerator / app queue"]["status"] == "ran"
     assert by_source["Track 2 imports / maintenance"]["status"] == "skipped"
+
+
+def test_source_breakdown_keeps_startup_lane_failures_explicit(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "source-run-metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "sources": {
+                    "startup_apply": {"status": "ran"},
+                    "startup_relationship": {"status": "timed_out"},
+                },
+                "startup_source_report": {
+                    "startup_apply_discovered": {"builtin": 2},
+                    "startup_apply_new": {"builtin": 1},
+                    "relationship_targets": 99,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = _source_breakdown({"source_metrics": str(metrics_path)})
+    startup = next(row for row in rows if row["source"] == "Startup sources")
+
+    assert startup["status"] == "partial_failed"
+    assert startup["raw"] == 2
+    assert startup["kept"] == 1
+    assert startup["details"]["lane_statuses"] == {
+        "startup_apply": "ran",
+        "startup_relationship": "timed_out",
+    }
+
+
+def test_source_breakdown_uses_referenced_linkedin_run_and_shows_zero_and_skipped(
+    tmp_path: Path,
+) -> None:
+    old_artifact = tmp_path / "20260709-linkedin-intelligence-capture.json"
+    old_artifact.write_text(
+        json.dumps(
+            {
+                "feed": {"status": "completed", "captured": 99, "added": 20},
+                "profile_viewers": {"status": "completed", "captured": 8, "added": 5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    current_artifact = tmp_path / "20260710-linkedin-intelligence-capture.json"
+    current_artifact.write_text(
+        json.dumps(
+            {
+                "observed_at": "2026-07-10T01:05:00-07:00",
+                "feed": {"status": "completed", "captured": 0, "added": 0},
+                "profile_viewers": {
+                    "status": "skipped",
+                    "reason": "not_scheduled_for_this_run",
+                    "captured": 0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = _source_breakdown(
+        {
+            "outreach_maintenance": {
+                "ran": True,
+                "linkedin_intelligence_returncode": 0,
+                "linkedin_intelligence_artifact": str(current_artifact),
+            }
+        }
+    )
+    by_source = {row["source"]: row for row in rows}
+
+    assert by_source["LinkedIn home feed"]["status"] == "completed"
+    assert by_source["LinkedIn home feed"]["raw"] == 0
+    assert by_source["LinkedIn home feed"]["kept"] == 0
+    assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
+    assert by_source["LinkedIn profile viewers"]["raw"] == 0
+    assert by_source["LinkedIn profile viewers"]["details"]["passive_context_only"] is True
+    assert all(row["raw"] != 99 for row in rows)
+
+
+def test_source_breakdown_marks_missing_failed_linkedin_capture_as_failed() -> None:
+    rows = _source_breakdown(
+        {
+            "outreach_maintenance": {
+                "ran": True,
+                "linkedin_intelligence_returncode": 2,
+                "linkedin_intelligence_artifact": "",
+            }
+        }
+    )
+    by_source = {row["source"]: row for row in rows}
+
+    assert by_source["LinkedIn home feed"]["status"] == "failed"
+    assert by_source["LinkedIn home feed"]["raw"] == 0
+    assert by_source["LinkedIn home feed"]["details"]["reason"] == "capture_command_failed"
+    assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
+    assert by_source["LinkedIn profile viewers"]["details"]["reason"] == "linkedin_capture_unavailable"
+
+
+def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    current_intelligence = artifacts / "current-linkedin-intelligence-capture.json"
+    current_intelligence.write_text(
+        json.dumps(
+            {
+                "observed_at": "2026-07-10T01:05:00-07:00",
+                "feed": {"status": "completed", "captured": 0, "added": 0},
+                "profile_viewers": {
+                    "status": "skipped",
+                    "reason": "not_scheduled_for_this_run",
+                    "captured": 0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    # A larger stale capture in the same artifacts directory must not leak into this run.
+    (artifacts / "old-linkedin-intelligence-capture.json").write_text(
+        json.dumps(
+            {
+                "feed": {"status": "completed", "captured": 77, "added": 33},
+                "profile_viewers": {"status": "completed", "captured": 9, "added": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "created_at": "2026-07-10T01:00:00-07:00",
+                "outreach_maintenance": {
+                    "ran": True,
+                    "linkedin_intelligence_returncode": 0,
+                    "linkedin_intelligence_artifact": str(current_intelligence),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    summary_path, report_path, html_artifact, _latest_html = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    report_text = report_path.read_text(encoding="utf-8")
+    html_text = html_artifact.read_text(encoding="utf-8")
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    by_source = {row["source"]: row for row in payload["source_breakdown"]}
+    assert "LinkedIn home feed: status=`completed`; kept=`0`; raw=`0`" in report_text
+    assert "LinkedIn profile viewers: status=`skipped`; kept=`0`; raw=`0`" in report_text
+    assert "LinkedIn home feed" in html_text
+    assert "LinkedIn profile viewers" in html_text
+    assert by_source["LinkedIn home feed"]["raw"] == 0
+    assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
+    assert "77" not in str(by_source)
+
+
+def test_daily_report_workspace_snapshot_never_claims_current_run_sources(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    summary_path, report_path, html_path, _ = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=None,
+        nightly_summary_path=None,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["report_mode"] == "workspace_snapshot"
+    assert {row["status"] for row in payload["source_breakdown"]} == {"not_scoped"}
+    assert "Workspace Snapshot" in report_path.read_text(encoding="utf-8")
+    assert "not scoped" in html_path.read_text(encoding="utf-8")
+
+
+def test_daily_report_cli_rejects_half_scoped_mode(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["write-daily-run-report", "--nightly-summary", str(tmp_path / "summary.json")],
+    )
+
+    assert result.exit_code != 0
+    assert "Pass both --since and --nightly-summary" in result.output
 
 
 def test_comms_learning_writes_gold_negative_and_silver_examples(tmp_path: Path) -> None:
@@ -420,6 +628,30 @@ def test_build_track_2_email_drafts_uses_email_contacts_and_style_review(tmp_pat
     assert drafts[0]["style_review"]["verdict"] == "style_ok"
     assert drafts[0]["craft_review"]["verdict"] in {"strong_send_candidate", "review"}
     assert drafts[0]["craft_review"]["score"] >= 76
+
+
+def test_track_2_email_followup_copy_uses_cadence_variant() -> None:
+    draft = draft_track_2_email(
+        organization=OrganizationRecord(
+            organization_id="org-a",
+            name="Signal Co",
+            organization_type=OrganizationType.COMPANY,
+            notes="tags=data,workflow",
+        ),
+        contact=ContactRecord(
+            contact_id="ct-a",
+            organization_id="org-a",
+            full_name="Alex Person",
+            email="alex@example.com",
+        ),
+        campaign_action="send_cold_email_followup",
+        cadence_action="email_followup_1",
+        style_profile=CommunicationStyleProfile(),
+    )
+
+    assert draft["cadence_action"] == "email_followup_1"
+    assert str(draft["subject"]).startswith("Re:")
+    assert "keep nudging" in str(draft["body"])
 
 
 def test_run_track_2_daily_plan_send_linkedin_requires_execute() -> None:

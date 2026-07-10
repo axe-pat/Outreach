@@ -1,66 +1,99 @@
 # TODO
 
-## Operating Priorities: Next 4–6 Weeks
+## Operating Priorities: Items 2–7 Implemented, Live Validation Next
 
 The objective is not maximum messages or a perfect database. It is to create
 enough high-quality conversations and live application paths to land a product
 role, while keeping genuinely strong Product Strategy, BizOps, and Operations
 paths visible instead of accidentally filtering them out.
 
-1. **Make the daily loop trustworthy and inspectable.** Run the nightly pipeline
-   for several real cycles, then use its run-scoped report to correct source
-   failures, review backlog, LinkedIn restrictions, and campaign execution.
-   This comes first: every later optimization is noise if it is based on stale
-   snapshots or missing source runs.
-2. **Build a company-discovery and promotion loop.** Do not depend on a hand-
-   built company list. Pull promising companies from the daily LinkedIn home
-   feed, startup/company sources, hiring/funding/news signals, and warm-network
-   activity; normalize them into a small candidate queue; then apply the target
-   rubric—domain fit, technical-MBA story, geography/remote viability,
-   growth/quality, and plausible Product or adjacent-role surface—to promote
-   only the best ones into the company-level watchlist. The existing tracker is
-   useful memory after discovery, not a substitute for discovery.
-3. **Close the channel loop: cold email plus follow-up.** Start with a small,
-   human-reviewed batch for high-fit accounts that have a verified email or a
-   meaningful warm path. Add a channel-aware cadence and stop rules before
-   increasing volume; Track 2 must record email and LinkedIn touches together.
-4. **Protect role coverage, without diluting the product thesis.** Audit the
-   ResumeGenerator role classifiers, queries, and queue outputs by role family:
-   Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and a
-   narrowly defined Growth/GTM-adjacent lane. Set a weekly coverage floor and
-   report candidates found, scored, surfaced, and acted on for each family.
-5. **Add high-signal LinkedIn discovery, not more undifferentiated scraping.**
-   Run a lightweight daily home-feed capture: save good startups and other
-   relevant/interesting company, job, hiring, funding, launch, and warm-network
-   signals with the post URL and source context. Treat the feed as a discovery
-   source that can create an opportunity, account signal, or contact task—not
-   as an automatic messaging queue. Set the time budget from real run data when
-   the pass is built, rather than fixing it prematurely.
-6. **Use relationship signals deliberately.** Add a weekly profile-viewer
-   review, dedupe it against existing contacts, and promote only relevant
-   viewers to a contextual follow-up/research queue. A profile view alone is a
-   soft signal; it should never trigger an automatic cold message.
-7. **Improve selection from feedback.** Use the gold/silver/negative comms
-   corpus, replies, accepts, and application outcomes to rebalance account
-   priority and message patterns. Expand throughput only after the first five
-   priorities are producing clean, reviewed evidence.
+1. **ACTIVE — make the daily loop trustworthy and inspectable.** Run the
+   nightly pipeline for several real cycles, then use its run-scoped report to
+   correct source failures, review backlog, LinkedIn restrictions, and campaign
+   execution. This comes first: every later optimization is noise if it is
+   based on stale snapshots or missing source runs.
+2. **IMPLEMENTED — operate the daily LinkedIn intelligence pass.** The
+   configurable home-feed capture records good startups and other interesting
+   company, role, hiring, funding, launch, and warm-network signals with post
+   and author provenance. It never auto-messages and has no hard-coded 60-second
+   limit. The current selectors were live-validated on July 10, 2026; the next
+   work is tuning `max_scrolls`, `max_items`, and the optional duration cap from
+   several scheduled runs.
+3. **IMPLEMENTED — review and promote independently discovered companies.**
+   Feed signals can become candidate companies without already existing in
+   `organizations.csv`. Dedupe, provenance, the five-part fit rubric, editable
+   review state, and JSON/CSV watchlist outputs are in place. Promotion into the
+   company tracker requires both rubric qualification and explicit human
+   approval. Same-run YC/Built In startup discovery is also connected; next add
+   further company/news directories through the same input contract.
+4. **IMPLEMENTED, LIVE GATE CLOSED — cold email and cross-channel cadence.**
+   Tracker-backed guards now cover LinkedIn and email timing, maximum touches,
+   replies/stops, same-day channel suppression, and distinct second LinkedIn
+   follow-ups. SMTP delivery exists only behind reviewed drafts, a due cadence
+   decision, configured credentials, a bounded limit, and explicit `--execute`.
+   The next step is one small reviewed live batch, not higher volume.
+5. **IMPLEMENTED MONITOR; TUNING REMAINS — protect adjacent role coverage.**
+   A separate run-scoped role-surface report keeps the account tracker
+   company-level while showing discovered, scored, surfaced, and acted-on
+   Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and narrow
+   Growth-adjacent roles by source. Product remains primary. Use real reports to
+   audit and then tune ResumeGenerator queries/classifiers where adjacent lanes
+   are genuinely missing; the monitor itself does not prove discovery breadth
+   is already adequate.
+6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
+   LinkedIn intelligence pass checks the viewer ledger every seven days by
+   default, dedupes repeated observations, and annotates target-company/role
+   relevance. It never creates an automatic outreach trigger. The current live
+   page was validated on July 10, 2026; monitor it for DOM/access changes.
+7. **IMPLEMENTED — learn from messages and outcomes.** The
+   gold/silver/negative corpus is combined with tracker accepts, replies,
+   rejections, message types, audiences, and accounts. Labeled messages sync
+   into the reusable style profile as bounded strong/weak examples. Aggregate
+   recommendations remain human-reviewed and do not automatically rewrite
+   prompt rules, account rubrics, or selection policy. Accumulate enough real
+   outcomes before making those higher-order changes.
 
-### Cadence and Stop Rules to Implement
+### Remaining Activation and Human Gates
+
+- [x] Validate the signed-in dedicated Chrome session against the current
+  LinkedIn feed and profile-viewer pages (live-validated July 10, 2026).
+- [ ] Observe the capture for several scheduled daily cycles before changing
+  its budget.
+- [ ] Review useful feed signals and set dispositions; review the generated
+  company CSV and explicitly approve candidates before running
+  `build-company-discovery-review --promote-approved`.
+- [ ] Pass the current run's ResumeGenerator source-metrics JSON into the role
+  monitor. Never fill a missing source with an older workspace artifact.
+- [ ] Configure `SMTP_HOST` and `SMTP_FROM_EMAIL` plus the appropriate port,
+  username/password, STARTTLS/SSL settings; verify sender authorization outside
+  the production batch.
+- [ ] Confirm each live email has a verified address, an approved draft, and a
+  tracker-backed due action; preview first, then run a bounded `--execute`
+  batch. SMTP is not enabled silently by the nightly pipeline.
+- [ ] Configure `PROSPEO_API_KEY` or `HUNTER_API_KEY` only if external email
+  lookup is intentionally enabled; LinkedIn Contact Info research can remain
+  the primary bounded path.
+- [ ] Review outcome-learning recommendations only after sufficient sample
+  size. Any prompt, rubric, or selection-policy change remains a human decision.
+
+### Implemented Cadence and Stop Rules
 
 - **Initial LinkedIn → follow-up:** after an invite is accepted but has no reply,
   send one useful follow-up around day 4. Do not send a generic nudge to a
   pending invite.
 - **Second follow-up:** at most one, around day 4–5 after that, only with a distinct
   value-add (role, launch, referral context, thoughtful question, or channel
-  switch). Then pause for 60–90 days unless the person re-engages.
+  switch). The engine then marks the cadence complete; operationally wait
+  60–90 days and require a real new hook or engagement before reconsidering.
 - **Cold email:** one targeted email to a verified address; one follow-up after
-  7–10 days; optional final close-the-loop follow-up 14–21 days later. No more
-  than three total email touches in a 90-day window without engagement.
+  4 days; optional final close-the-loop follow-up 4–5 days later. No more than
+  three total email touches in a 90-day window without engagement.
 - **Cross-channel:** do not send LinkedIn and email on the same day unless a
   warm event makes it natural. The tracker must show all touches before drafting
   the next one.
-- **Profile viewers:** review weekly, score by account fit/shared context, and
-  research before writing; no automatic sends.
+- **Profile viewers:** capture/review weekly as passive interest context, score
+  by account fit/shared context, and research before writing; no automatic
+  sends.
 
 ## Discovery Architecture
 
@@ -76,32 +109,51 @@ paths visible instead of accidentally filtering them out.
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
 - Decide whether the long-term canonical store should be one workbook with multiple sheets or a separate shared project/module.
-- Build a company-discovery and promotion loop: ingest candidate companies from
+- [x] Build the initial company-discovery and promotion loop: ingest candidates from
   LinkedIn home-feed signals, startup/company sources, hiring/funding/news, and
   warm-network activity; score candidates against the target rubric; and create
   a human-reviewed company watchlist. The goal is to discover strong companies
-  before a role or search query happens to put them in front of us.
-- Add a lightweight daily LinkedIn home-feed ingestion pass that records
+  before a role or search query happens to put them in front of us. Current
+  inputs are the feed ledger plus same-run YC/Built In startup source artifacts;
+  add further source adapters through the same candidate contract rather than
+  bypassing review.
+- [x] Add a lightweight daily LinkedIn home-feed ingestion pass that records
   actionable posts with source URL, author/company, signal type, and a review
   decision. It must be a provenance-preserving discovery source, not a bulk
   scraper or auto-send trigger.
-- Add a weekly LinkedIn profile-viewer review with dedupe, account-fit scoring,
-  and a contextual research/review queue.
+- [x] Add a weekly passive LinkedIn profile-viewer ledger with dedupe and
+  account/role relevance context. Keep it informational; decide manually when a
+  viewer warrants research rather than creating an automatic outreach action.
 
 ## Outreach Messaging
 
-- Add non-PM note-generation families so outreach copy matches the target role instead of defaulting to PM-oriented phrasing.
-- Cover at least these role buckets:
+- [x] Add first-class target-role inference so LinkedIn invites, accepted/reply
+  follow-ups, review suggestions, and Track 2 email sequences match the pursued
+  role rather than the recipient's title. The selected daily-plan role is carried
+  into both invite and email execution, while invite touchpoints preserve the
+  family for later reconciliation.
+- [x] Cover these role buckets while keeping Product primary within mixed
+  opportunity sets:
+  - Product / PM
+  - Product Strategy
   - Strategy / BizOps
   - Program / Operations
-  - GTM / Revenue / Growth
+  - narrow GTM / Growth strategy and operations
   - General business fallback
-- Remove hardcoded "pivoting into PM" / "exploring PM roles" language for candidates outside true product roles.
-- Keep PM-specific language only for Product / Product Ops / Product-adjacent outreach.
-- Implement explicit LinkedIn/email cadence enforcement and stop rules across
-  touchpoints; include cross-channel suppression and a 60–90-day cool-down.
-- Add a small, reviewed cold-email lane for verified addresses, including one
-  follow-up and an optional final close-the-loop note.
+- [x] Remove hardcoded "pivoting into PM" / "exploring PM roles" language for
+  concrete non-Product targets, including existing-connection, USC/Marshall,
+  shared-history, follow-up/reply, review-suggestion, and email paths. Preserve
+  factual references to a recipient's Product background.
+- [x] Keep PM-specific target language only for Product / Product Ops outreach;
+  do not add role rows or role fields to contacts in the company-level tracker.
+- [x] Implement explicit LinkedIn/email cadence enforcement and stop rules
+  across touchpoints, including cross-channel suppression, terminal/engagement
+  stops, and bounded touches. After the final LinkedIn value-add, the engine
+  stays complete until a real new hook or manual re-engagement decision rather
+  than automatically creating another nudge.
+- [x] Add a small, reviewed cold-email lane for verified addresses, including
+  one follow-up and an optional final close-the-loop note. Keep the live SMTP
+  gate closed until credentials and the first approved bounded batch are ready.
 
 ## Email Channel
 
@@ -121,6 +173,14 @@ paths visible instead of accidentally filtering them out.
   - latest daily HTML lives in `workspace/reports/daily_html/`, with compatibility mirrors in `workspace/reports/` and `workspace/`.
   - scheduled reports are run-scoped: Source Breakdown is anchored to the nightly summary and explicitly marks LinkedIn, Handshake, JobSpy, startup sources, ResumeGenerator/app queue, and Track 2 as ran/skipped. Do not present a workspace snapshot or a newest artifact as evidence for a prior run.
   - comms-learning artifacts are persisted under `workspace/comms_learning/`: manual sends are gold, replaced/cleared generated drafts are negative, and approved/automatic drafts actually sent are silver. Use the corpus to improve future messaging rather than merely deleting stale review rows.
+  - role-surface counts are run-scoped only when built from that run's source
+    metrics. Company review/watchlist, cadence, profile-viewer, and outcome-
+    learning counts are cumulative workspace-state snapshots even when they
+    were refreshed during the current run. Label them accordingly; persistent
+    rows are not current-run actions or proof a source ran.
+  - ad-hoc report mode without `--since` plus `--nightly-summary` remains a
+    clearly labeled workspace snapshot; only the paired-argument scheduled mode
+    is authoritative for one nightly run.
   - the stale standalone Outreach crontab entry should stay removed so there is one blessed scheduled runner.
 - Tune live daily breadth after 2-3 high-volume Track 2 runs:
   - watch LinkedIn restriction signals, send failures, accept/reply rate, and report-level company progress before increasing above 25 Track 2 invites/day.
@@ -138,7 +198,7 @@ paths visible instead of accidentally filtering them out.
 
 ## Role-Family Coverage
 
-- Keep the account tracker company-level. Add a separate role-surface monitor
+- [x] Keep the account tracker company-level and add a separate role-surface monitor
   that reports whether the discovery/application lanes are surfacing Product
   Strategy, BizOps/Strategy, Program/Operations, and narrowly defined
   Growth/GTM-adjacent roles alongside the primary Product lane.

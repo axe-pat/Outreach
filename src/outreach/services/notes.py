@@ -8,6 +8,7 @@ import re
 
 import anthropic
 
+from outreach.messaging_roles import infer_target_role_context, rewrite_message_for_target_role
 from outreach.style_profile import CommunicationStyleProfile, load_style_profile_if_exists, normalize_recipient_type
 
 
@@ -21,6 +22,12 @@ class GeneratedNote:
     ask_style: str
     length: int
     within_limit: bool
+    target_role_family: str = "product_pm"
+    target_role_label: str = "Product / PM"
+    target_role_source: str = "product_primary_default"
+    target_role_matched_text: str = ""
+    target_role_matched_rule: str = ""
+    target_role_is_concrete: bool = False
 
 
 @dataclass
@@ -53,6 +60,20 @@ class NoteGenerator:
         role_bucket = candidate.get("role_bucket") or "Other"
         ask_style = self._determine_ask_style(candidate, role_bucket, company_mode)
         context = self._note_context(candidate, note_context)
+        has_source_context = bool(context)
+        target_role = infer_target_role_context(
+            explicit_family=str(candidate.get("target_role_family") or ""),
+            explicit_title=str(candidate.get("target_role_title") or ""),
+            note_context=context,
+            organization_notes=str(context.get("organization_notes") or ""),
+        )
+        context["target_role_family"] = target_role.family.value
+        context["target_role_phrase"] = target_role.role_phrase
+        context["target_role_label"] = target_role.label
+        context["target_role_source"] = target_role.source
+        context["target_role_matched_text"] = target_role.matched_text
+        context["target_role_matched_rule"] = target_role.matched_rule
+        context["target_role_is_concrete"] = target_role.is_concrete
 
         use_contextual = (
             not candidate.get("existing_connection")
@@ -60,7 +81,7 @@ class NoteGenerator:
             and not candidate.get("usc")
             and not candidate.get("shared_history")
             and (
-                bool(context)
+                has_source_context
                 or role_bucket in {"Founder", "Adjacent"}
                 or (role_bucket == "Engineering" and self._is_india_based(candidate))
             )
@@ -77,6 +98,7 @@ class NoteGenerator:
             if contextual:
                 family, ask_style, variants = contextual
                 note = self._pick_variant(variants, candidate, company_for_note)
+                note = rewrite_message_for_target_role(note, target_role)
                 note = self._apply_style_profile(note, candidate, role_bucket)
                 note = self._tighten_to_limit(note)
                 return GeneratedNote(
@@ -85,6 +107,12 @@ class NoteGenerator:
                     ask_style=ask_style,
                     length=len(note),
                     within_limit=len(note) <= NOTE_CHAR_LIMIT,
+                    target_role_family=target_role.family.value,
+                    target_role_label=target_role.label,
+                    target_role_source=target_role.source,
+                    target_role_matched_text=target_role.matched_text,
+                    target_role_matched_rule=target_role.matched_rule,
+                    target_role_is_concrete=target_role.is_concrete,
                 )
 
         if candidate.get("existing_connection"):
@@ -113,6 +141,7 @@ class NoteGenerator:
             variants = self._general_variants(first_name, company_for_note, ask_style)
 
         note = self._pick_variant(variants, candidate, company_for_note)
+        note = rewrite_message_for_target_role(note, target_role)
         note = self._apply_style_profile(note, candidate, role_bucket)
         note = self._tighten_to_limit(note)
         return GeneratedNote(
@@ -121,6 +150,12 @@ class NoteGenerator:
             ask_style=ask_style,
             length=len(note),
             within_limit=len(note) <= NOTE_CHAR_LIMIT,
+            target_role_family=target_role.family.value,
+            target_role_label=target_role.label,
+            target_role_source=target_role.source,
+            target_role_matched_text=target_role.matched_text,
+            target_role_matched_rule=target_role.matched_rule,
+            target_role_is_concrete=target_role.is_concrete,
         )
 
     def generate_batch(
@@ -149,6 +184,12 @@ class NoteGenerator:
                 "note_ask_style": generated.ask_style,
                 "note_length": generated.length,
                 "note_within_limit": generated.within_limit,
+                "target_role_family": generated.target_role_family,
+                "target_role_label": generated.target_role_label,
+                "target_role_source": generated.target_role_source,
+                "target_role_matched_text": generated.target_role_matched_text,
+                "target_role_matched_rule": generated.target_role_matched_rule,
+                "target_role_is_concrete": generated.target_role_is_concrete,
                 "note_qc": asdict(quality),
                 "style_recipient_type": recipient_type,
                 "style_review": style_review.model_dump(mode="json"),
@@ -227,7 +268,10 @@ class NoteGenerator:
         for phrase in style_review.banned_phrases:
             flags.append(f"Style banned phrase: {phrase}")
             score -= 18
-        if not style_review.banned_phrases:
+        for label in style_review.weak_example_labels:
+            flags.append(f"Matches learned negative message: {label}")
+            score -= 18
+        if not style_review.banned_phrases and not style_review.weak_example_labels:
             strengths.append("Passes local style profile")
 
         signal_hits = 0
@@ -310,6 +354,7 @@ class NoteGenerator:
             or not ask_is_clear
             or not note.strip()
             or bool(style_review.banned_phrases)
+            or bool(style_review.weak_example_labels)
         )
         verdict = "blocked" if hard_fail else "send"
         return NoteQualityCheck(score=score, verdict=verdict, flags=flags, strengths=strengths)
@@ -337,6 +382,8 @@ class NoteGenerator:
                 "shared_history": candidate.get("shared_history", False),
             },
             "note_context": candidate.get("note_context") or {},
+            "target_role_family": candidate.get("target_role_family", "product_pm"),
+            "target_role_label": candidate.get("target_role_label", "Product / PM"),
             "base_note": base_note,
             "style_guidance": self.style_profile.prompt_guidance(
                 self._style_recipient_type(
@@ -352,6 +399,7 @@ class NoteGenerator:
             "- Maximum 300 characters\n"
             "- Keep it as a connection-request note, not an email\n"
             "- Preserve the strongest signal already present\n"
+            "- Preserve the target_role_family; never pivot the candidate into Product/PM when it is non-Product\n"
             "- Respect the ask_style: conversation, guidance, or direct_help\n"
             "- Only direct_help may ask for more explicit support, and even then keep it light\n"
             "- Keep 'Fight On!' if the candidate has USC or USC Marshall signal\n"
@@ -375,6 +423,16 @@ class NoteGenerator:
                     note = candidate_note
             except json.JSONDecodeError:
                 note = base_note
+        target_role = infer_target_role_context(
+            note_context={
+                "target_role_family": candidate.get("target_role_family") or "product_pm",
+                "target_role_source": candidate.get("target_role_source") or "product_primary_default",
+                "target_role_matched_text": candidate.get("target_role_matched_text") or "",
+                "target_role_matched_rule": candidate.get("target_role_matched_rule") or "",
+                "target_role_is_concrete": candidate.get("target_role_is_concrete", False),
+            }
+        )
+        note = rewrite_message_for_target_role(note, target_role)
         note = self._tighten_to_limit(note)
         return GeneratedNote(
             text=note,
@@ -382,6 +440,12 @@ class NoteGenerator:
             ask_style=str(candidate.get("note_ask_style", "conversation")),
             length=len(note),
             within_limit=len(note) <= NOTE_CHAR_LIMIT,
+            target_role_family=target_role.family.value,
+            target_role_label=target_role.label,
+            target_role_source=target_role.source,
+            target_role_matched_text=target_role.matched_text,
+            target_role_matched_rule=target_role.matched_rule,
+            target_role_is_concrete=target_role.is_concrete,
         )
 
     def _style_recipient_type(self, candidate: dict, family: str, role_bucket: str) -> str:
@@ -588,7 +652,7 @@ class NoteGenerator:
                 if title.lower().endswith("role"):
                     return title
                 return title
-        return "PM/product roles"
+        return str(context.get("target_role_phrase") or "PM/product roles")
 
     def _clean_role_title(self, title: str) -> str:
         cleaned = " ".join(title.split()).strip(" -")

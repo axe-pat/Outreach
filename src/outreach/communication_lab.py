@@ -223,8 +223,11 @@ def review_outreach_message(
             score -= 60
 
     banned_hits = [phrase for phrase in SLOP_PHRASES if phrase in lower]
+    learned_weak_labels: list[str] = []
     if style_profile is not None:
-        banned_hits.extend(style_profile.banned_phrases_in(text))
+        style_review = style_profile.review_message(text, recipient_type)
+        banned_hits.extend(style_review.banned_phrases)
+        learned_weak_labels = style_review.weak_example_labels
     banned_hits = sorted(set(banned_hits))
     for phrase in banned_hits:
         flags.append(f"Slop phrase: {phrase}")
@@ -232,6 +235,9 @@ def review_outreach_message(
         score -= 16
     if not banned_hits:
         strengths.append("Avoids obvious AI/networking-template phrases")
+    for label in learned_weak_labels:
+        flags.append(f"Repeats learned negative message pattern: {label}")
+        score -= 20
 
     if company and company.lower() in lower:
         strengths.append("Names the company directly")
@@ -444,7 +450,7 @@ def build_rewrite_guidance(
     if "ask is not concrete enough" in flag_text:
         add("End with one easy answer: route me, quick read, permission to send a short blurb, or no.")
     if "seniority mismatch" in flag_text:
-        add("For senior/principal contacts, ask one simple product-fit or right-person question; do not ask them to process a tactical referral packet.")
+        add("For senior/principal contacts, ask one simple role-fit or right-person question; do not ask them to process a tactical referral packet.")
     if "generic company insight" in flag_text or "generic fit framing" in flag_text:
         add("Replace the generic company-fit line with a specific product, workflow, customer, infrastructure, or operating mechanism.")
     if "too self-centered" in flag_text:

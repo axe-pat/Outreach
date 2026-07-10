@@ -22,6 +22,7 @@ from outreach.communication_lab import (
     review_email_craft,
     review_outreach_message,
 )
+from outreach.cadence import build_workbook_cadence_plan, guard_cadence_action
 from outreach.discovery.adapters import BuiltInCompaniesAdapter, SourceAdapter, YCombinatorCompanyDirectoryAdapter
 from outreach.discovery.http import HttpTextDownloader
 from outreach.discovery.registry import get_source_definition, list_source_definitions
@@ -33,13 +34,24 @@ from outreach.services.email_finder import (
 )
 from outreach.services.linkedin import FilterRunResult, LinkedInFollowupSendResult, LinkedInScraper
 from outreach.services.notes import NoteGenerator
-from outreach.style_profile import CommunicationStyleProfile, load_style_profile_if_exists
+from outreach.messaging_roles import (
+    TargetRoleContext,
+    infer_target_role_context,
+    rewrite_message_for_target_role,
+    target_role_context_from_family,
+)
+from outreach.style_profile import (
+    CommunicationStyleProfile,
+    load_style_profile_if_exists,
+    sync_comms_learning_into_style_profile,
+)
 from outreach.models import CandidateProfile, LinkedInCompanyQueueItem
 from outreach.strategic_accounts import import_strategic_accounts as import_strategic_account_seeds
 from outreach.story_fit_targets import (
     DEFAULT_STORY_FIT_TARGETS_PATH,
     import_story_fit_targets as import_story_fit_target_seeds,
 )
+from outreach.intelligence_commands import register_intelligence_commands
 from outreach.resume_jobs_bridge import (
     DEFAULT_INCLUDE_STATUSES,
     DEFAULT_COMPANY_OVERRIDES_FILENAME,
@@ -1596,7 +1608,12 @@ def build_linkedin_company_queue_items(
     return queue_items
 
 
-def build_company_note_context(workbook: OutreachWorkbook, company: str) -> dict[str, object]:
+def build_company_note_context(
+    workbook: OutreachWorkbook,
+    company: str,
+    *,
+    target_role_title: str = "",
+) -> dict[str, object]:
     company_key = normalize_dedupe_text(company)
     organization = next(
         (
@@ -1624,6 +1641,13 @@ def build_company_note_context(workbook: OutreachWorkbook, company: str) -> dict
         fit_rationale = parse_notes_metadata(opportunity.notes).get("fit_rationale", "")
         if fit_rationale:
             break
+    organization_metadata = parse_notes_metadata(organization.notes)
+    target_role = infer_target_role_context(
+        explicit_title=target_role_title,
+        opportunity_titles=[item.title for item in opportunities[:3]],
+        note_context={"target_roles": organization_metadata.get("target_roles", "")},
+        organization_notes=organization.notes,
+    )
 
     context: dict[str, object] = {
         "organization_type": organization.organization_type.value,
@@ -1633,6 +1657,14 @@ def build_company_note_context(workbook: OutreachWorkbook, company: str) -> dict
         "scale_signal": scale_signal,
         "opportunity_titles": [item.title for item in opportunities[:3]],
         "fit_rationale": fit_rationale,
+        "target_roles": organization_metadata.get("target_roles", ""),
+        "target_role_family": target_role.family.value,
+        "target_role_label": target_role.label,
+        "target_role_source": target_role.source,
+        "target_role_matched_text": target_role.matched_text,
+        "target_role_matched_rule": target_role.matched_rule,
+        "target_role_is_concrete": target_role.is_concrete,
+        "target_role_title": target_role_title,
     }
     return {
         key: value
@@ -1652,6 +1684,7 @@ def execute_linkedin_company_run(
     enable_marshall: bool = False,
     force_broad_fallback: bool = False,
     note_context: dict | None = None,
+    target_role_title: str = "",
 ) -> Path:
     scraper = LinkedInScraper(settings)
     scraper.require_live_cdp_session()
@@ -1660,7 +1693,20 @@ def execute_linkedin_company_run(
         note_context = build_company_note_context(
             OutreachWorkbook(settings.resolved_tracking_workspace_dir),
             company,
+            target_role_title=target_role_title,
         )
+    elif target_role_title:
+        target_role = infer_target_role_context(explicit_title=target_role_title)
+        note_context = {
+            **note_context,
+            "target_role_title": target_role_title,
+            "target_role_family": target_role.family.value,
+            "target_role_label": target_role.label,
+            "target_role_source": target_role.source,
+            "target_role_matched_text": target_role.matched_text,
+            "target_role_matched_rule": target_role.matched_rule,
+            "target_role_is_concrete": target_role.is_concrete,
+        }
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
     startup_pool: dict[str, int | str | bool | None] = {
@@ -2083,7 +2129,13 @@ def persist_invite_send_results(
                 source_artifact=str(send_artifact_path),
                 notes=(
                     f"invite_result={result.status} | detail={result.detail} | "
-                    f"source_artifact={source_artifact_path.name}"
+                    f"source_artifact={source_artifact_path.name} | "
+                    f"target_role_family={candidate.get('target_role_family', 'product_pm')} | "
+                    f"target_role_label={candidate.get('target_role_label', 'Product / PM')} | "
+                    f"target_role_source={candidate.get('target_role_source', 'product_primary_default')} | "
+                    f"target_role_matched_text={candidate.get('target_role_matched_text', '')} | "
+                    f"target_role_matched_rule={candidate.get('target_role_matched_rule', '')} | "
+                    f"target_role_is_concrete={candidate.get('target_role_is_concrete', False)}"
                 ),
             )
         )
@@ -2258,6 +2310,7 @@ def build_linkedin_reconcile_queue_items(
             continue
 
         latest_invite = latest_invite_touchpoint_for_contact(touchpoint_map.get(contact.contact_id, []))
+        invite_metadata = parse_notes_metadata(latest_invite.notes if latest_invite else "")
         last_touch_at = parse_iso_timestamp(
             contact.last_contacted_at
             or (latest_invite.sent_at if latest_invite else "")
@@ -2290,6 +2343,12 @@ def build_linkedin_reconcile_queue_items(
                 "age_hours": round(age_hours, 1) if age_hours is not None else None,
                 "original_invite_note": latest_invite.message_text if latest_invite else "",
                 "source_touchpoint_id": latest_invite.touchpoint_id if latest_invite else "",
+                "target_role_family": invite_metadata.get("target_role_family", ""),
+                "target_role_label": invite_metadata.get("target_role_label", ""),
+                "target_role_source": invite_metadata.get("target_role_source", ""),
+                "target_role_matched_text": invite_metadata.get("target_role_matched_text", ""),
+                "target_role_matched_rule": invite_metadata.get("target_role_matched_rule", ""),
+                "target_role_is_concrete": invite_metadata.get("target_role_is_concrete", ""),
             }
         )
 
@@ -2749,6 +2808,10 @@ def build_linkedin_message_reconcile_results(
             item for item in touchpoints
             if contact is not None and item.contact_id == contact.contact_id
         ]
+        latest_invite_touchpoint = latest_invite_touchpoint_for_contact(contact_touchpoints)
+        invite_metadata = parse_notes_metadata(
+            latest_invite_touchpoint.notes if latest_invite_touchpoint else ""
+        )
         message_window = compact_message_window(
             thread=thread,
             previous_state=next_thread_states.get(key, {}),
@@ -2821,6 +2884,12 @@ def build_linkedin_message_reconcile_results(
                 "previous_thread_signature": previous_signature,
                 "state_reason": state_reason,
                 "original_invite_note": original_invite_note,
+                "target_role_family": invite_metadata.get("target_role_family", ""),
+                "target_role_label": invite_metadata.get("target_role_label", ""),
+                "target_role_source": invite_metadata.get("target_role_source", ""),
+                "target_role_matched_text": invite_metadata.get("target_role_matched_text", ""),
+                "target_role_matched_rule": invite_metadata.get("target_role_matched_rule", ""),
+                "target_role_is_concrete": invite_metadata.get("target_role_is_concrete", ""),
             }
         )
 
@@ -2905,7 +2974,10 @@ def classify_linkedin_reply_intent(
         return "unknown"
     if any(token in lower for token in ["won't be able to help", "wont be able to help", "can't help", "cannot help", "unable to help", "not able to help"]):
         return "soft_no"
-    if any(token in lower for token in ["no idea", "don't know", "dont know", "not sure", "no clue"]):
+    if any(
+        token in lower
+        for token in ["no idea", "don't know", "dont know", "do not know", "not sure", "no clue"]
+    ):
         return "does_not_know"
     if extract_email_addresses(latest_message) and any(token in lower for token in ["resume", "cv", "profile"]):
         return "send_resume_to_email"
@@ -2915,7 +2987,9 @@ def classify_linkedin_reply_intent(
     compact_lower = re.sub(r"\s+", " ", lower).strip(" .!")
     asked_already = bool(
         re.search(
-            r"\b(referral path|hiring contact|product/recruiting|send (you )?(a )?(tight )?resume|short blurb|only send you a fit|real match|pm/product opening)\b",
+            r"\b(referral path|hiring contact|product/recruiting|point(?:ing)? me|recs? on who|"
+            r"who (?:i|we) should talk to|send (you )?(a )?(tight )?resume|short blurb|"
+            r"only send you a fit|real match|pm/product opening)\b",
             context,
         )
     )
@@ -2996,7 +3070,7 @@ def product_context_line(contact: ContactRecord, organization: OrganizationRecor
     return ""
 
 
-def accepted_followup_draft(
+def _accepted_followup_draft_product(
     *,
     company: str,
     contact: ContactRecord,
@@ -3075,7 +3149,27 @@ def accepted_followup_draft(
     )
 
 
-def reply_followup_draft(
+def accepted_followup_draft(
+    *,
+    company: str,
+    contact: ContactRecord,
+    original_invite_note: str,
+    organization: OrganizationRecord | None = None,
+    target_role: TargetRoleContext | None = None,
+) -> tuple[str, str]:
+    recommendation, message = _accepted_followup_draft_product(
+        company=company,
+        contact=contact,
+        original_invite_note=original_invite_note,
+        organization=organization,
+    )
+    effective_target = target_role or infer_target_role_context(
+        organization_notes=organization.notes if organization else ""
+    )
+    return recommendation, rewrite_message_for_target_role(message, effective_target)
+
+
+def _reply_followup_draft_product(
     *,
     company: str,
     contact: ContactRecord,
@@ -3140,14 +3234,16 @@ def reply_followup_draft(
                 "resume too if HR wants it."
             ),
         )
-    if "let me know if" in lower and any(token in lower for token in ["opening", "interested", "pm", "product"]):
+    if "let me know if" in lower and any(
+        token in lower for token in ["opening", "opens", "role", "interested", "pm", "product"]
+    ):
         return (
             "conversation_reply",
             "review",
             (
                 f"Thanks {name}, this is helpful. I'm focused on PM/product paths for now, so I'd really "
-                f"appreciate being kept in mind if something opens up at {company}. In the meantime, is there "
-                "someone on product you'd suggest I get on the radar of?"
+                f"appreciate being kept in mind if something opens up at {company}. Happy to send a short fit "
+                "summary if that would be useful."
             ),
         )
     if any(token in lower for token in ["small team", "high-impact", "high ownership", "feedback loop"]):
@@ -3167,6 +3263,28 @@ def reply_followup_draft(
             f"Thanks {name}, this is helpful. I'm exploring product roles where my engineering + MBA background "
             f"could be useful. Does that fit anything at {company}? Any recs on who I should talk to about that?"
         ),
+    )
+
+
+def reply_followup_draft(
+    *,
+    company: str,
+    contact: ContactRecord,
+    latest_message: str,
+    message_window: list[dict[str, str]] | None = None,
+    target_role: TargetRoleContext | None = None,
+) -> tuple[str, str, str]:
+    draft_kind, recommendation, message = _reply_followup_draft_product(
+        company=company,
+        contact=contact,
+        latest_message=latest_message,
+        message_window=message_window,
+    )
+    effective_target = target_role or infer_target_role_context()
+    return (
+        draft_kind,
+        recommendation,
+        rewrite_message_for_target_role(message, effective_target),
     )
 
 
@@ -3328,10 +3446,19 @@ def build_linkedin_followup_drafts(
     reconcile_results: list[dict],
     organizations: list[OrganizationRecord],
     contacts: list[ContactRecord],
+    opportunities: list[OpportunityRecord] | None = None,
+    style_profile: CommunicationStyleProfile | None = None,
 ) -> list[dict[str, object]]:
     organization_map = {item.organization_id: item for item in organizations}
     contact_map = {item.contact_id: item for item in contacts}
-    style_profile = load_style_profile_if_exists(Path("workspace") / "communication_style_profile.yml")
+    opportunities_by_org: dict[str, list[OpportunityRecord]] = {}
+    for opportunity in opportunities or []:
+        opportunities_by_org.setdefault(opportunity.organization_id, []).append(opportunity)
+    for organization_opportunities in opportunities_by_org.values():
+        organization_opportunities.sort(key=lambda item: item.discovered_at, reverse=True)
+    profile = style_profile or load_style_profile_if_exists(
+        Path("workspace") / "communication_style_profile.yml"
+    )
     drafts: list[dict[str, object]] = []
 
     for item in reconcile_results:
@@ -3341,6 +3468,24 @@ def build_linkedin_followup_drafts(
             continue
         organization = organization_map.get(contact.organization_id)
         company = organization.name if organization else ""
+        organization_opportunities = opportunities_by_org.get(contact.organization_id, [])
+        serialized_role_source = str(item.get("target_role_source") or "")
+        serialized_role_family = str(item.get("target_role_family") or "")
+        target_role = infer_target_role_context(
+            explicit_family=(serialized_role_family if serialized_role_family and not serialized_role_source else ""),
+            explicit_title=str(item.get("target_role_title") or item.get("target_role") or ""),
+            opportunity_titles=[entry.title for entry in organization_opportunities],
+            note_context={
+                "target_roles": item.get("target_roles") or "",
+                "target_role_family": serialized_role_family if serialized_role_source else "",
+                "target_role_label": item.get("target_role_label") or "",
+                "target_role_source": serialized_role_source,
+                "target_role_matched_text": item.get("target_role_matched_text") or "",
+                "target_role_matched_rule": item.get("target_role_matched_rule") or "",
+                "target_role_is_concrete": item.get("target_role_is_concrete", ""),
+            },
+            organization_notes=organization.notes if organization else "",
+        )
         item_with_company = {**item, "company": company}
         status = str(item.get("normalized_status") or item.get("status") or "")
         if status == "connected" and item.get("needs_follow_up"):
@@ -3349,6 +3494,7 @@ def build_linkedin_followup_drafts(
                 contact=contact,
                 original_invite_note=str(item.get("original_invite_note") or ""),
                 organization=organization,
+                target_role=target_role,
             )
             draft_kind = "accepted_follow_up"
         elif status == "replied":
@@ -3361,19 +3507,22 @@ def build_linkedin_followup_drafts(
                     for message in list(item.get("message_window") or [])
                     if isinstance(message, dict)
                 ],
+                target_role=target_role,
             )
         else:
             continue
 
         action_items = extract_linkedin_conversation_action_items(item_with_company)
         recipient_type = email_recipient_type(contact)
+        guided_style = profile.guide_draft_from_examples(draft, recipient_type)
+        draft = rewrite_message_for_target_role(guided_style.message, target_role)
         communication_review = review_outreach_message(
             body=draft,
             channel="linkedin_followup",
             company=company,
             recipient_type=recipient_type,
             recipient_title=contact.title,
-            style_profile=style_profile,
+            style_profile=profile,
             grounding_context=compact_context_text(
                 [
                     dict(message)
@@ -3395,6 +3544,13 @@ def build_linkedin_followup_drafts(
                 "name": contact.full_name,
                 "title": contact.title,
                 "contact_type": contact.contact_type,
+                "target_role_family": target_role.family.value,
+                "target_role_label": target_role.label,
+                "target_role_source": target_role.source,
+                "target_role_matched_text": target_role.matched_text,
+                "target_role_matched_rule": target_role.matched_rule,
+                "target_role_is_concrete": target_role.is_concrete,
+                "target_role_context": target_role.as_dict(),
                 "followup_audience": infer_followup_audience(
                     contact,
                     str(item.get("original_invite_note") or ""),
@@ -3406,6 +3562,9 @@ def build_linkedin_followup_drafts(
                 "draft_length": len(draft),
                 "communication_review": communication_review.__dict__,
                 "communication_recommendation": communication_review.recommended_action,
+                "style_guidance": guided_style.prompt_guidance,
+                "style_example_labels": list(guided_style.strong_example_labels),
+                "style_transformations": list(guided_style.transformations),
                 "source_status": status,
                 "latest_message": item.get("latest_message", ""),
                 "last_sender": item.get("last_sender", ""),
@@ -3656,7 +3815,14 @@ COMMUNICATION_REVIEW_CSV_FIELDS = [
     "company",
     "name",
     "title",
+    "email",
     "recipient_type",
+    "target_role_family",
+    "target_role_label",
+    "target_role_source",
+    "target_role_matched_text",
+    "target_role_matched_rule",
+    "target_role_is_concrete",
     "contact_id",
     "organization_id",
     "draft_kind",
@@ -3720,6 +3886,7 @@ def _communication_review_row_id(row: dict[str, str]) -> str:
             row.get("contact_id", ""),
             row.get("organization_id", ""),
             row.get("channel", ""),
+            row.get("target_role_family", ""),
             row.get("draft_kind", ""),
             row.get("subject", ""),
             row.get("message", "")[:240],
@@ -3794,7 +3961,13 @@ def suggest_linkedin_followup_message(draft: dict, *, flags: list[str]) -> str:
 
 def suggest_communication_message(draft: dict, *, channel: str, flags: list[str]) -> str:
     if channel == "linkedin_followup":
-        return suggest_linkedin_followup_message(draft, flags=flags)
+        suggestion = suggest_linkedin_followup_message(draft, flags=flags)
+        target_role = target_role_context_from_family(
+            str(draft.get("target_role_family") or "product_pm"),
+            source=str(draft.get("target_role_source") or "review_artifact"),
+            matched_text=str(draft.get("target_role_matched_text") or ""),
+        )
+        return rewrite_message_for_target_role(suggestion, target_role)
     return ""
 
 
@@ -3845,7 +4018,14 @@ def build_communication_review_csv_rows(
             "company": str(draft.get("company") or ""),
             "name": str(draft.get("name") or ""),
             "title": str(draft.get("title") or ""),
+            "email": str(draft.get("email") or ""),
             "recipient_type": recipient_type,
+            "target_role_family": str(draft.get("target_role_family") or "product_pm"),
+            "target_role_label": str(draft.get("target_role_label") or "Product / PM"),
+            "target_role_source": str(draft.get("target_role_source") or "product_primary_default"),
+            "target_role_matched_text": str(draft.get("target_role_matched_text") or ""),
+            "target_role_matched_rule": str(draft.get("target_role_matched_rule") or ""),
+            "target_role_is_concrete": str(draft.get("target_role_is_concrete", "")),
             "contact_id": str(draft.get("contact_id") or ""),
             "organization_id": str(draft.get("organization_id") or ""),
             "draft_kind": str(draft.get("draft_kind") or ""),
@@ -4005,6 +4185,7 @@ def summarize_communication_feedback(rows: list[dict[str, str]]) -> dict[str, ob
 
 
 app = typer.Typer(help="Outreach engine CLI")
+register_intelligence_commands(app)
 
 SAFE_FOLLOWUP_SEND_RECOMMENDATIONS = {"safe_to_review"}
 
@@ -4541,13 +4722,36 @@ def draft_track_2_email(
     contact: ContactRecord,
     campaign_action: str,
     style_profile: CommunicationStyleProfile,
+    cadence_action: str = "email_initial",
+    target_role: TargetRoleContext | None = None,
 ) -> dict[str, object]:
     name = first_name(contact.full_name)
     recipient_type = email_recipient_type(contact)
     fit_line = _email_company_fit_line(organization)
     company = organization.name
+    effective_target = target_role or infer_target_role_context(
+        organization_notes=organization.notes
+    )
     intro = "I'm a Marshall MBA and former data/platform engineer exploring technical product paths."
-    if recipient_type == "founder":
+    if cadence_action == "email_followup_1":
+        subject = f"Re: Product fit at {company}"
+        body = (
+            f"Hi {name},\n\n"
+            f"Following up with the specific reason I still think the fit may be real: {fit_line}\n\n"
+            "If there is a better person or path for this background, a pointer would be genuinely useful. "
+            "If it is not relevant, no worries—I would rather know than keep nudging.\n\n"
+            "Best,\nAkshat"
+        )
+    elif cadence_action == "email_final_optional":
+        subject = f"Re: Product fit at {company}"
+        body = (
+            f"Hi {name},\n\n"
+            "One last note to close the loop. I am still interested because the technical/product overlap is specific, "
+            f"not just because {company} is hiring. {fit_line}\n\n"
+            "If there is someone I should speak with, I would appreciate the pointer. Otherwise I will leave it here.\n\n"
+            "Best,\nAkshat"
+        )
+    elif recipient_type == "founder":
         subject = f"Product fit at {company}"
         body = (
             f"Hi {name},\n\n"
@@ -4562,7 +4766,7 @@ def draft_track_2_email(
         subject = f"Technical PM fit at {company}"
         body = (
             f"Hi {name},\n\n"
-            "I am not trying to send a generic admire-your-product note, so here is the actual reason I am reaching out.\n\n"
+            "I am not trying to send a generic company-praise note, so here is the actual reason I am reaching out.\n\n"
             f"{intro} {fit_line}\n\n"
             f"I'm trying to understand whether that profile is useful for product work at {company}. If yes, "
             "any recs on who I should talk to about that? If not, a blunt no is helpful.\n\n"
@@ -4598,6 +4802,10 @@ def draft_track_2_email(
             "Best,\nAkshat"
         )
 
+    subject = rewrite_message_for_target_role(subject, effective_target)
+    body = rewrite_message_for_target_role(body, effective_target)
+    guided_style = style_profile.guide_draft_from_examples(body, recipient_type)
+    body = rewrite_message_for_target_role(guided_style.message, effective_target)
     review = style_profile.review_message(body, recipient_type)
     message_review = review_outreach_message(
         subject=subject,
@@ -4617,7 +4825,15 @@ def draft_track_2_email(
         "title": contact.title,
         "email": contact.email,
         "recipient_type": recipient_type,
+        "target_role_family": effective_target.family.value,
+        "target_role_label": effective_target.label,
+        "target_role_source": effective_target.source,
+        "target_role_matched_text": effective_target.matched_text,
+        "target_role_matched_rule": effective_target.matched_rule,
+        "target_role_is_concrete": effective_target.is_concrete,
+        "target_role_context": effective_target.as_dict(),
         "campaign_action": campaign_action,
+        "cadence_action": cadence_action,
         "subject": subject,
         "body": body,
         "body_length": len(body),
@@ -4627,6 +4843,9 @@ def draft_track_2_email(
             else "needs_rewrite"
         ),
         "style_review": review.model_dump(mode="json"),
+        "style_guidance": guided_style.prompt_guidance,
+        "style_example_labels": list(guided_style.strong_example_labels),
+        "style_transformations": list(guided_style.transformations),
         "communication_review": message_review.__dict__,
         "craft_review": craft_review.__dict__,
     }
@@ -4643,11 +4862,21 @@ def build_track_2_email_drafts(
         return []
     workbook = OutreachWorkbook(workspace)
     organizations = {org.organization_id: org for org in workbook.list_organizations()}
+    opportunities_by_org: dict[str, list[OpportunityRecord]] = {}
+    for opportunity in workbook.list_opportunities():
+        opportunities_by_org.setdefault(opportunity.organization_id, []).append(opportunity)
+    for organization_opportunities in opportunities_by_org.values():
+        organization_opportunities.sort(key=lambda item: item.discovered_at, reverse=True)
     contacts_by_org: dict[str, list[ContactRecord]] = {}
     for contact in workbook.list_contacts():
         if contact.email.strip():
             contacts_by_org.setdefault(contact.organization_id, []).append(contact)
     profile = style_profile or load_style_profile_if_exists(workspace / "communication_style_profile.yml")
+    cadence_by_contact = {
+        item.contact_id: item
+        for item in build_workbook_cadence_plan(workbook)
+        if item.channel == "email"
+    }
 
     drafts: list[dict[str, object]] = []
     seen_contacts: set[str] = set()
@@ -4661,12 +4890,29 @@ def build_track_2_email_drafts(
         for contact in contacts:
             if contact.contact_id in seen_contacts:
                 continue
+            cadence = cadence_by_contact.get(contact.contact_id)
+            if cadence is None or cadence.state != "due" or not cadence.action.startswith("email_"):
+                continue
             drafts.append(
                 draft_track_2_email(
                     organization=organization,
                     contact=contact,
                     campaign_action=str(item.get("campaign_action") or ""),
                     style_profile=profile,
+                    cadence_action=cadence.action,
+                    target_role=infer_target_role_context(
+                        explicit_family=str(item.get("target_role_family") or ""),
+                        explicit_title=str(item.get("target_role_title") or item.get("target_role") or ""),
+                        opportunity_titles=[
+                            opportunity.title
+                            for opportunity in opportunities_by_org.get(
+                                organization.organization_id,
+                                [],
+                            )
+                        ],
+                        note_context={"target_roles": item.get("target_roles") or ""},
+                        organization_notes=organization.notes,
+                    ),
                 )
             )
             seen_contacts.add(contact.contact_id)
@@ -4766,6 +5012,98 @@ def _filter_reconcile_results_to_orgs(
         for item in reconcile_results
         if contact_org.get(str(item.get("contact_id") or "")) in organization_ids
     ]
+
+
+def _apply_linkedin_cadence_guards(
+    *,
+    workbook: OutreachWorkbook,
+    drafts: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Separate tracker-due LinkedIn drafts from early/stopped/repetitive holds."""
+    touchpoints = workbook.list_touchpoints()
+    contacts = workbook.list_contacts()
+    contact_by_id = {item.contact_id: item for item in contacts}
+    current_style_profile = load_style_profile_if_exists(
+        workbook.base_dir / "communication_style_profile.yml"
+    )
+    plan = build_workbook_cadence_plan(workbook)
+    recommendation_by_contact = {
+        item.contact_id: item for item in plan if item.channel == "linkedin"
+    }
+    allowed: list[dict[str, object]] = []
+    held: list[dict[str, object]] = []
+    for draft in drafts:
+        contact_id = str(draft.get("contact_id") or "")
+        organization_id = str(draft.get("organization_id") or "")
+        recommendation = recommendation_by_contact.get(contact_id)
+        communication_review = draft.get("communication_review")
+        communication_flags = (
+            communication_review.get("flags", [])
+            if isinstance(communication_review, dict)
+            else []
+        )
+        learned_negative = any(
+            "learned negative" in str(flag).casefold()
+            for flag in communication_flags
+        )
+        contact = contact_by_id.get(contact_id)
+        recipient_type = str(
+            draft.get("recipient_type")
+            or draft.get("followup_audience")
+            or draft.get("contact_type")
+            or (email_recipient_type(contact) if contact is not None else "general")
+        )
+        current_weak_labels = current_style_profile.weak_example_matches(
+            str(draft.get("draft_message") or ""),
+            recipient_type,
+        )
+        if learned_negative or current_weak_labels:
+            label_detail = (
+                f" ({', '.join(current_weak_labels)})" if current_weak_labels else ""
+            )
+            held.append(
+                {
+                    **draft,
+                    "send_recommendation": "cadence_hold",
+                    "cadence_reasons": [
+                        "Draft repeats a learned negative message pattern and requires a rewrite."
+                        + label_detail
+                    ],
+                }
+            )
+            continue
+        if recommendation is None:
+            held.append(
+                {
+                    **draft,
+                    "send_recommendation": "cadence_hold",
+                    "cadence_reasons": ["No tracker-backed LinkedIn cadence decision exists."],
+                }
+            )
+            continue
+        guard = guard_cadence_action(
+            touchpoints,
+            organization_id=organization_id,
+            contact_id=contact_id,
+            channel="linkedin",
+            action=recommendation.action,
+            proposed_message=str(draft.get("draft_message") or ""),
+            contacts=contacts,
+        )
+        enriched = {
+            **draft,
+            "cadence_action": recommendation.action,
+            "cadence_state": recommendation.state,
+            "cadence_due_at": recommendation.as_dict().get("due_at"),
+            "cadence_due_by": recommendation.as_dict().get("due_by"),
+            "cadence_reasons": list(guard.reasons),
+        }
+        if guard.allowed:
+            allowed.append(enriched)
+        else:
+            enriched["send_recommendation"] = "cadence_hold"
+            held.append(enriched)
+    return allowed, held
 
 
 def _company_mode_for_org(organization: OrganizationRecord) -> str:
@@ -5243,11 +5581,8 @@ def _artifacts_since(artifacts_dir: Path, since: datetime | None) -> list[Path]:
         return []
     paths = [path for path in artifacts_dir.glob("*.json") if path.is_file()]
     if since is not None:
-        paths = [
-            path
-            for path in paths
-            if datetime.fromtimestamp(path.stat().st_mtime) >= since
-        ]
+        since_epoch = since.timestamp()
+        paths = [path for path in paths if path.stat().st_mtime >= since_epoch]
     return sorted(paths, key=lambda path: path.stat().st_mtime)
 
 
@@ -5323,31 +5658,62 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
         return {
             "source": label,
             "status": metric.get("status") or stage.get("status") or "skipped",
-            "raw": metric.get("raw_count", 0) if metric else 0,
-            "kept": metric.get("accepted_for_write", 0) if metric else 0,
+            "raw": int(metric.get("raw_count") or 0) if metric else 0,
+            "kept": int(metric.get("accepted_for_write") or 0) if metric else 0,
             "details": details if details is not None else (metric.get("details") or {}),
         }
 
     startup_report = source_metrics.get("startup_source_report") if isinstance(source_metrics.get("startup_source_report"), dict) else {}
+    startup_apply_metric = sources.get("startup_apply") if isinstance(sources, dict) else {}
+    startup_apply_metric = startup_apply_metric if isinstance(startup_apply_metric, dict) else {}
+    relationship = sources.get("startup_relationship") if isinstance(sources, dict) else {}
+    relationship = relationship if isinstance(relationship, dict) else {}
+    apply_status = str(startup_apply_metric.get("status") or "skipped")
+    relationship_status = str(relationship.get("status") or "skipped")
     startup_details = {
+        "lane_statuses": {
+            "startup_apply": apply_status,
+            "startup_relationship": relationship_status,
+        },
         "apply_discovered": (startup_report or {}).get("startup_apply_discovered", {}),
+        "apply_new": (startup_report or {}).get("startup_apply_new", {}),
         "relationship_targets": (startup_report or {}).get("relationship_targets", 0),
         "relationship_sources": (startup_report or {}).get("relationship_source_counts", {}),
     }
     startup = row("Startup sources", "startup_apply", details=startup_details)
-    relationship = sources.get("startup_relationship") if isinstance(sources, dict) else {}
-    relationship = relationship if isinstance(relationship, dict) else {}
-    if startup["status"] == "skipped" and relationship:
-        startup["status"] = relationship.get("status") or "ran"
+    apply_discovered = startup_details["apply_discovered"]
+    apply_new = startup_details["apply_new"]
+    apply_ran = apply_status == "ran"
+    relationship_ran = relationship_status == "ran"
+    startup["raw"] = ((
+        sum(int(value or 0) for value in apply_discovered.values())
+        if isinstance(apply_discovered, dict)
+        else 0
+    ) if apply_ran else 0) + (
+        int(startup_details["relationship_targets"] or 0) if relationship_ran else 0
+    )
+    startup["kept"] = ((
+        sum(int(value or 0) for value in apply_new.values())
+        if isinstance(apply_new, dict)
+        else 0
+    ) if apply_ran else 0) + (
+        int(startup_details["relationship_targets"] or 0) if relationship_ran else 0
+    )
+    startup["status"] = _combined_source_status(apply_status, relationship_status)
 
     action_queue = source_metrics.get("action_queue") if isinstance(source_metrics.get("action_queue"), dict) else {}
+    action_queue_counts = (action_queue or {}).get("counts", {})
     app_queue = {
         "source": "ResumeGenerator / app queue",
         "status": "ran" if action_queue else "skipped",
-        "raw": 0,
-        "kept": 0,
+        "raw": (
+            sum(int(value or 0) for value in action_queue_counts.values())
+            if isinstance(action_queue_counts, dict)
+            else 0
+        ),
+        "kept": int(nightly_summary.get("generation_selected_count") or 0),
         "details": {
-            "action_queue_counts": (action_queue or {}).get("counts", {}),
+            "action_queue_counts": action_queue_counts,
             "action_queue_sources": (action_queue or {}).get("source_counts", {}),
             "generation_selected": nightly_summary.get("generation_selected_count", 0),
             "generation_ran": nightly_summary.get("generation_ran", False),
@@ -5356,20 +5722,133 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
     maintenance = nightly_summary.get("outreach_maintenance") if isinstance(nightly_summary.get("outreach_maintenance"), dict) else {}
     track_artifact = Path(str((maintenance or {}).get("track_2_daily_run_artifact") or ""))
     track_payload = _load_json_file(track_artifact)
+    track_used = track_payload.get("used") if isinstance(track_payload.get("used"), dict) else {}
+    maintenance_returncodes = {
+        key: value
+        for key, value in (maintenance or {}).items()
+        if key.endswith("_returncode") and value is not None
+    }
+    failed_maintenance = {
+        key: value for key, value in maintenance_returncodes.items() if value != 0
+    }
+    if not (maintenance or {}).get("ran"):
+        track_status = "skipped"
+    elif failed_maintenance and len(failed_maintenance) == len(maintenance_returncodes):
+        track_status = "failed"
+    elif failed_maintenance:
+        track_status = "partial_failed"
+    else:
+        track_status = "ran"
     track = {
         "source": "Track 2 imports / maintenance",
-        "status": "ran" if (maintenance or {}).get("ran") else "skipped",
-        "raw": 0,
-        "kept": 0,
+        "status": track_status,
+        "raw": sum(int(value or 0) for value in track_used.values()),
+        "kept": sum(int(value or 0) for value in track_used.values()),
         "details": {
-            "returncodes": {key: value for key, value in (maintenance or {}).items() if key.endswith("_returncode")},
+            "returncodes": maintenance_returncodes,
             "artifacts": {key: value for key, value in (maintenance or {}).items() if key.endswith("_artifact") or key == "account_universe_import"},
-            "track_2_used": track_payload.get("used", {}),
+            "track_2_used": track_used,
             "track_2_summary": track_payload.get("summary", {}),
             "track_2_phase_summary": track_payload.get("phase_summary", {}),
         },
     }
-    return [row("LinkedIn", "linkedin"), row("Handshake", "handshake"), row("JobSpy", "jobspy"), startup, app_queue, track]
+    intelligence_artifact = str((maintenance or {}).get("linkedin_intelligence_artifact") or "")
+    intelligence_path = Path(intelligence_artifact)
+    intelligence = _load_json_file(intelligence_path)
+    feed = intelligence.get("feed") if isinstance(intelligence.get("feed"), dict) else {}
+    viewers = intelligence.get("profile_viewers") if isinstance(intelligence.get("profile_viewers"), dict) else {}
+    intelligence_returncode = (maintenance or {}).get("linkedin_intelligence_returncode")
+    recorded_status = str((maintenance or {}).get("linkedin_intelligence_status") or "")
+    if feed.get("status"):
+        feed_status = str(feed["status"])
+        feed_reason = str(feed.get("reason") or "")
+    elif recorded_status:
+        feed_status = recorded_status
+        feed_reason = "nightly_summary_recorded_source_status"
+    elif intelligence_returncode is not None:
+        feed_status = "failed"
+        feed_reason = (
+            "capture_command_failed"
+            if intelligence_returncode != 0
+            else "capture_artifact_missing"
+        )
+    else:
+        feed_status = "skipped"
+        feed_reason = "not_recorded_for_this_run"
+    feed_details = dict(feed)
+    if not feed_details:
+        feed_details = {
+            "reason": feed_reason,
+            "returncode": intelligence_returncode,
+            "artifact": intelligence_artifact,
+        }
+    feed_row = {
+        "source": "LinkedIn home feed",
+        "status": feed_status,
+        "raw": feed.get("captured") or 0,
+        "kept": feed.get("added") or 0,
+        "details": feed_details,
+    }
+    viewer_details = dict(viewers)
+    if viewers.get("status"):
+        viewer_status = str(viewers["status"])
+    else:
+        viewer_status = "skipped"
+        viewer_details = {
+            "reason": (
+                "linkedin_capture_unavailable"
+                if feed_status == "failed"
+                else "not_recorded_for_this_run"
+            ),
+            "returncode": intelligence_returncode,
+            "artifact": intelligence_artifact,
+        }
+    viewer_row = {
+        "source": "LinkedIn profile viewers",
+        "status": viewer_status,
+        "raw": viewers.get("captured") or 0,
+        "kept": viewers.get("added") or 0,
+        "details": {**viewer_details, "passive_context_only": True},
+    }
+    return [row("LinkedIn", "linkedin"), feed_row, viewer_row, row("Handshake", "handshake"), row("JobSpy", "jobspy"), startup, app_queue, track]
+
+
+def _combined_source_status(*statuses: str) -> str:
+    normalized = [str(status or "skipped").strip().lower() for status in statuses]
+    failures = {"failed", "timeout", "timed_out"}
+    if normalized and all(status in failures for status in normalized):
+        return "failed"
+    if any(status in failures for status in normalized):
+        return "partial_failed"
+    if normalized and all(status == "ran" for status in normalized):
+        return "ran"
+    if any(status == "ran" for status in normalized):
+        return "partial"
+    return "skipped"
+
+
+def _unscoped_source_breakdown() -> list[dict[str, object]]:
+    return [
+        {
+            "source": label,
+            "status": "not_scoped",
+            "raw": 0,
+            "kept": 0,
+            "details": {
+                "reason": "workspace snapshot mode has no selected nightly run; no source activity is claimed"
+            },
+        }
+        for label in (
+            "LinkedIn",
+            "LinkedIn home feed",
+            "LinkedIn profile viewers",
+            "Handshake",
+            "JobSpy",
+            "Startup sources",
+            "ResumeGenerator / app queue",
+            "Track 2 imports / maintenance",
+        )
+    ]
 
 
 def _write_comms_learning_artifact(
@@ -5380,6 +5859,7 @@ def _write_comms_learning_artifact(
     manually_cleared_items: list[dict[str, object]],
     followup_payloads: list[dict[str, object]],
     run_summary: Path | None,
+    scope: str = "examples observed in this report run only",
 ) -> tuple[Path, dict[str, int]]:
     """Persist run-scoped LinkedIn examples with explicit gold/silver/negative labels."""
     examples: list[dict[str, object]] = []
@@ -5398,7 +5878,12 @@ def _write_comms_learning_artifact(
             })
     examples = [item for item in examples if str(item.get("message") or "").strip()]
     summary = {label: sum(item["label"] == label for item in examples) for label in ("gold", "negative", "silver")}
-    payload = {"report_run": report_stem, "scope": "examples observed in this report run only", "examples": examples, "summary": summary}
+    payload = {
+        "report_run": report_stem,
+        "scope": scope,
+        "examples": examples,
+        "summary": summary,
+    }
     artifact = reports_dir / f"{report_stem}-comms-learning.json"
     artifact.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
@@ -5425,11 +5910,24 @@ def write_artifact_daily_report(
     title: str = "Outreach Daily Run Report",
 ) -> tuple[Path, Path, Path, Path]:
     """Write the daily HTML/MD report from the artifacts created by the active nightly runner."""
+    if (since is None) != (nightly_summary_path is None):
+        raise ValueError(
+            "Run-scoped reporting requires both since and nightly_summary_path; "
+            "omit both for a clearly labeled workspace snapshot."
+        )
+    run_scoped = since is not None and nightly_summary_path is not None
+    report_mode = "run_scoped" if run_scoped else "workspace_snapshot"
+    scope_note = (
+        "Exact nightly pointers plus artifacts observed inside this pipeline time window."
+        if run_scoped
+        else "Workspace artifact history for troubleshooting; this is not evidence for one run."
+    )
     workbook = OutreachWorkbook(workspace)
     workbook.initialize()
     counts = workbook.summary_counts()
     artifacts = _artifacts_since(settings.artifacts_dir, since)
     nightly_summary = _load_json_file(nightly_summary_path)
+    maintenance = nightly_summary.get("outreach_maintenance") if isinstance(nightly_summary.get("outreach_maintenance"), dict) else {}
 
     invite_runs: list[dict[str, object]] = []
     invite_totals: dict[str, int] = {}
@@ -5544,27 +6042,54 @@ def write_artifact_daily_report(
             }
         )
 
-    campaign_artifact, campaign_payload = _latest_artifact_matching(artifacts, "account-campaign-plan")
+    if run_scoped:
+        campaign_value = str((maintenance or {}).get("campaign_plan_artifact") or "")
+        campaign_artifact = Path(campaign_value) if campaign_value else None
+        campaign_payload = _load_json_file(campaign_artifact)
+    else:
+        campaign_artifact, campaign_payload = _latest_artifact_matching(artifacts, "account-campaign-plan")
     campaign_rows = [row for row in list(campaign_payload.get("results") or []) if isinstance(row, dict)]
     campaign_summary = campaign_payload.get("summary") if isinstance(campaign_payload.get("summary"), dict) else {}
 
-    enrichment_artifact, enrichment_payload = _latest_artifact_matching(artifacts, "company-context-enrichment")
+    if run_scoped:
+        enrichment_value = str((maintenance or {}).get("context_enrichment_artifact") or "")
+        enrichment_artifact = Path(enrichment_value) if enrichment_value else None
+        enrichment_payload = _load_json_file(enrichment_artifact)
+    else:
+        enrichment_artifact, enrichment_payload = _latest_artifact_matching(artifacts, "company-context-enrichment")
     enrichment_summary = enrichment_payload.get("summary") if isinstance(enrichment_payload.get("summary"), dict) else {}
 
-    website_artifact, website_payload = _latest_artifact_matching(artifacts, "company-website-resolution")
+    if run_scoped:
+        website_value = str((maintenance or {}).get("website_resolution_artifact") or "")
+        website_artifact = Path(website_value) if website_value else None
+        website_payload = _load_json_file(website_artifact)
+    else:
+        website_artifact, website_payload = _latest_artifact_matching(artifacts, "company-website-resolution")
     website_summary = website_payload.get("summary") if isinstance(website_payload.get("summary"), dict) else {}
 
     source_metrics_path = Path(str(nightly_summary.get("source_metrics") or ""))
     source_metrics = _load_json_file(source_metrics_path)
     stage_metrics = source_metrics.get("stage_metrics") if isinstance(source_metrics.get("stage_metrics"), dict) else {}
     jobspy_metrics = nightly_summary.get("jobspy_metrics") if isinstance(nightly_summary.get("jobspy_metrics"), dict) else {}
+    if run_scoped:
+        company_discovery = _load_json_file(Path(str((maintenance or {}).get("company_discovery_artifact") or "")))
+        role_surface = _load_json_file(Path(str((maintenance or {}).get("role_surface_artifact") or "")))
+        cadence_report = _load_json_file(Path(str((maintenance or {}).get("cadence_report_artifact") or "")))
+        outcome_learning = _load_json_file(Path(str((maintenance or {}).get("outcome_learning_artifact") or "")))
+    else:
+        _, company_discovery = _latest_artifact_matching(artifacts, "company-discovery-review")
+        _, role_surface = _latest_artifact_matching(artifacts, "role-surface-report")
+        _, cadence_report = _latest_artifact_matching(artifacts, "outreach-cadence-report")
+        _, outcome_learning = _latest_artifact_matching(artifacts, "outcome-learning-report")
 
     reports_dir = _reports_dir(settings)
     daily_html_dir = _daily_html_reports_dir(settings)
     reports_dir.mkdir(parents=True, exist_ok=True)
     daily_html_dir.mkdir(parents=True, exist_ok=True)
     report_stem = f"{artifact_timestamp()}-daily-run-report"
-    source_breakdown = _source_breakdown(nightly_summary)
+    source_breakdown = (
+        _source_breakdown(nightly_summary) if run_scoped else _unscoped_source_breakdown()
+    )
     comms_artifact, comms_summary = _write_comms_learning_artifact(
         workspace=workspace,
         reports_dir=reports_dir,
@@ -5572,9 +6097,22 @@ def write_artifact_daily_report(
         manually_cleared_items=manually_cleared_items,
         followup_payloads=followup_payloads,
         run_summary=nightly_summary_path,
+        scope=(
+            "examples observed in this nightly run window"
+            if run_scoped
+            else "examples found across workspace artifact history; not one run"
+        ),
     )
+    style_sync_summary = sync_comms_learning_into_style_profile(
+        profile_path=workspace / "communication_style_profile.yml",
+        examples_path=workspace / "comms_learning" / "linkedin_examples.jsonl",
+        contacts=workbook.list_contacts(),
+        organizations=workbook.list_organizations(),
+    ).as_dict()
     report_payload = {
         "created_at": utc_now_iso(),
+        "report_mode": report_mode,
+        "scope_note": scope_note,
         "since": since.isoformat(timespec="seconds") if since else "",
         "workspace": str(workspace),
         "nightly_summary": str(nightly_summary_path or ""),
@@ -5601,6 +6139,11 @@ def write_artifact_daily_report(
         "source_breakdown": source_breakdown,
         "comms_learning_artifact": str(comms_artifact),
         "comms_learning_summary": comms_summary,
+        "style_profile_sync": style_sync_summary,
+        "company_discovery": company_discovery,
+        "role_surface": role_surface,
+        "cadence_report": cadence_report,
+        "outcome_learning": outcome_learning,
     }
     summary_artifact = reports_dir / f"{report_stem}.json"
     summary_artifact.write_text(json.dumps(report_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -5614,9 +6157,11 @@ def write_artifact_daily_report(
     legacy_latest_html_path = settings.resolved_tracking_workspace_dir / "daily_run_report.html"
 
     lines = [
-        f"# {title}",
+        f"# {title}{'' if run_scoped else ' — Workspace Snapshot'}",
         "",
         f"- Created: `{report_payload['created_at']}`",
+        f"- Report mode: `{report_mode}`",
+        f"- Scope: {scope_note}",
         f"- Since: `{report_payload['since'] or 'latest artifacts'}`",
         f"- Workspace counts: `{counts}`",
         f"- Nightly summary: `{nightly_summary_path or ''}`",
@@ -5629,7 +6174,11 @@ def write_artifact_daily_report(
         f"- Selected for generation: `{nightly_summary.get('generation_selected_count', '')}`",
         f"- Failures: `{nightly_summary.get('failures', [])}`",
         "",
-        "## Source Breakdown (this run)",
+        (
+            "## Source Breakdown (this run)"
+            if run_scoped
+            else "## Source Breakdown (not scoped — no nightly run selected)"
+        ),
         "",
     ]
     for row in source_breakdown:
@@ -5638,7 +6187,19 @@ def write_artifact_daily_report(
         lines.extend(["", "## JobSpy", ""])
         for key, value in jobspy_metrics.items():
             lines.append(f"- {key}: `{value}`")
-    lines.extend(["", "## Outreach Actions", ""])
+    lines.extend(["", "## Recruiting Intelligence", ""])
+    company_scope = "this run" if run_scoped else "latest available artifact; not one run"
+    role_scope = "this run" if run_scoped else "latest available artifact; not one run"
+    lines.append(f"- Company discovery ({company_scope}): `{company_discovery.get('summary', {})}`")
+    lines.append(f"- Company review queue (workspace): `{company_discovery.get('workspace_summary', {})}`")
+    lines.append(f"- Role surfaces ({role_scope}): `{role_surface.get('summary', {})}`")
+    lines.append(f"- Cadence (workspace snapshot): `{cadence_report.get('summary', {})}`")
+    lines.append(f"- Outcome learning (workspace snapshot): `{outcome_learning.get('summary', {})}`")
+    lines.extend([
+        "",
+        "## Outreach Actions" + (" (run window)" if run_scoped else " (workspace artifact history)"),
+        "",
+    ])
     lines.append(f"- LinkedIn invite totals: `{invite_totals}`")
     for run in invite_runs:
         lines.append(f"- {run['company']}: `{run['status_counts']}`")
@@ -5681,10 +6242,15 @@ def write_artifact_daily_report(
                 lines.append(f"  - Previous last msg: {stale_latest}")
     else:
         lines.append("- No manually cleared review items.")
-    lines.extend(["", "## Comms Learning (this run)", ""])
+    lines.extend([
+        "",
+        "## Comms Learning" + (" (run window)" if run_scoped else " (workspace artifact history)"),
+        "",
+    ])
     lines.append(f"- Gold (manual sends): `{comms_summary['gold']}`")
     lines.append(f"- Negative (replaced/cleared drafts): `{comms_summary['negative']}`")
     lines.append(f"- Silver (approved/automatic drafts sent): `{comms_summary['silver']}`")
+    lines.append(f"- Reusable style profile sync: `{style_sync_summary}`")
     lines.append(f"- Reusable corpus artifact: `{comms_artifact}`")
     report_text = "\n".join(lines).rstrip() + "\n"
     report_path.write_text(report_text, encoding="utf-8")
@@ -5766,12 +6332,37 @@ def write_artifact_daily_report(
         f"<li><span>{esc(key)}</span><strong>{esc(value)}</strong></li>"
         for key, value in jobspy_metrics.items()
     )
+    intelligence_cards = "".join(
+        f"<div class='card'><h3>{esc(label)}</h3><p><code>{esc(payload)}</code></p></div>"
+        for label, payload in [
+            (f"Company discovery · {company_scope}", company_discovery.get("summary", {})),
+            ("Company review queue · workspace", company_discovery.get("workspace_summary", {})),
+            (f"Role surfaces · {role_scope}", role_surface.get("summary", {})),
+            ("Cadence · workspace snapshot", cadence_report.get("summary", {})),
+            ("Outcome learning · workspace snapshot", outcome_learning.get("summary", {})),
+        ]
+    )
+    html_source_heading = (
+        "Source Breakdown (this run)"
+        if run_scoped
+        else "Source Breakdown (not scoped — no nightly run selected)"
+    )
+    html_discovery_heading = (
+        "Discovery Artifacts (run window)"
+        if run_scoped
+        else "Discovery Artifacts (workspace history)"
+    )
+    html_comms_heading = (
+        "Comms Learning (run window)"
+        if run_scoped
+        else "Comms Learning (workspace artifact history)"
+    )
     html_text = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{esc(title)}</title>
+  <title>{esc(title)}{'' if run_scoped else ' — Workspace Snapshot'}</title>
   <style>
     body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fa; color: #15171a; }}
     header {{ background: #102033; color: white; padding: 28px 36px; }}
@@ -5799,8 +6390,9 @@ def write_artifact_daily_report(
 </head>
 <body>
   <header>
-    <h1>{esc(title)}</h1>
-    <p>Created {esc(report_payload['created_at'])} · since {esc(report_payload['since'] or 'latest artifacts')}</p>
+    <h1>{esc(title)}{'' if run_scoped else ' — Workspace Snapshot'}</h1>
+    <p>Mode {esc(report_mode)} · created {esc(report_payload['created_at'])} · since {esc(report_payload['since'] or 'workspace history')}</p>
+    <p>{esc(scope_note)}</p>
   </header>
   <main>
     <section class="grid">
@@ -5813,13 +6405,14 @@ def write_artifact_daily_report(
       <div class="card"><h2>LinkedIn Actions</h2><ul class="action-list">{invite_cards}{followup_cards or ''}</ul></div>
       <div class="card"><h2>Maintenance</h2><p>websites <code>{esc(website_summary)}</code></p><p>context <code>{esc(enrichment_summary)}</code></p><p>campaign <code>{esc(campaign_summary)}</code></p></div>
     </section>
-    <section><h2>Source Breakdown (this run)</h2><table><thead><tr><th>Source</th><th>Status</th><th>Kept</th><th>Raw</th><th>Run details</th></tr></thead><tbody>{source_breakdown_table}</tbody></table></section>
-    <section><h2>Discovery Artifacts (this run)</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
+    <section><h2>{esc(html_source_heading)}</h2><table><thead><tr><th>Source</th><th>Status</th><th>Kept</th><th>Raw</th><th>Run details</th></tr></thead><tbody>{source_breakdown_table}</tbody></table></section>
+    <section><h2>{esc(html_discovery_heading)}</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
     <section><h2>Nightly Stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
+    <section><h2>Recruiting Intelligence</h2><div class="grid">{intelligence_cards}</div></section>
     <section><h2>Company-Level Actions</h2><div class="grid">{campaign_cards or '<div class="card">No campaign rows found.</div>'}</div></section>
     <section><h2>Messages To Review</h2><table class="review-table"><thead><tr><th>Company</th><th>Person</th><th>Rec</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>{review_rows or '<tr><td colspan="5">No messages currently require review.</td></tr>'}</tbody></table></section>
     <section><h2>Manually Cleared Messages</h2><table><thead><tr><th>Company</th><th>Person</th><th>Sent msg</th><th>Previous last msg</th></tr></thead><tbody>{cleared_rows or '<tr><td colspan="4">No manually cleared review items.</td></tr>'}</tbody></table></section>
-    <section class="card"><h2>Comms Learning (this run)</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
+    <section class="card"><h2>{esc(html_comms_heading)}</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Style-profile sync: <code>{esc(style_sync_summary)}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
     <section class="card"><h2>Artifacts</h2><p>Nightly summary: <code>{esc(nightly_summary_path or '')}</code></p><p>Report: <code>{esc(summary_artifact)}</code></p><p>Campaign: <code>{esc(campaign_artifact or '')}</code></p></section>
   </main>
 </body>
@@ -5851,9 +6444,18 @@ def write_daily_run_report_cmd(
         typer.Option(help="Report title"),
     ] = "Outreach Daily Run Report",
 ) -> None:
-    """Write the latest daily HTML/MD report from the active nightly artifacts."""
+    """Write a paired-argument run report or an explicitly unscoped workspace snapshot."""
     settings = OutreachSettings()
+    has_since = bool(since.strip())
+    has_summary = nightly_summary is not None
+    if has_since != has_summary:
+        raise typer.BadParameter(
+            "Pass both --since and --nightly-summary for run-scoped mode, "
+            "or omit both for workspace-snapshot mode."
+        )
     since_dt = _parse_report_datetime(since)
+    if has_since and since_dt is None:
+        raise typer.BadParameter("--since must be a valid ISO timestamp")
     artifact, md_path, html_artifact, html_path = write_artifact_daily_report(
         settings=settings,
         workspace=workspace,
@@ -5861,7 +6463,7 @@ def write_daily_run_report_cmd(
         nightly_summary_path=nightly_summary,
         title=title,
     )
-    typer.echo(f"Wrote daily run report.")
+    typer.echo("Wrote daily run report.")
     typer.echo(f"Summary artifact: {artifact}")
     typer.echo(f"Daily report: {md_path}")
     typer.echo(f"HTML report artifact: {html_artifact}")
@@ -6329,8 +6931,13 @@ def run_track_2_daily_plan_cmd(
                 reconcile_results=filtered_results,
                 organizations=organizations,
                 contacts=contacts,
+                opportunities=workbook.list_opportunities(),
             )[:followup_budget]
-            action_summary = summarize_linkedin_followup_actions(drafts, filtered_results)
+            cadence_allowed_drafts, cadence_held_drafts = _apply_linkedin_cadence_guards(
+                workbook=workbook,
+                drafts=drafts,
+            )
+            action_summary = summarize_linkedin_followup_actions(cadence_allowed_drafts, filtered_results)
             draft_artifact = write_artifact(
                 settings.artifacts_dir,
                 "track-2-linkedin-followup-drafts",
@@ -6339,6 +6946,9 @@ def run_track_2_daily_plan_cmd(
                     "count": len(drafts),
                     "summary": action_summary,
                     "results": drafts,
+                    "cadence_allowed_count": len(cadence_allowed_drafts),
+                    "cadence_held_count": len(cadence_held_drafts),
+                    "cadence_held": cadence_held_drafts,
                 },
             )
             followup_result.update(
@@ -6348,6 +6958,8 @@ def run_track_2_daily_plan_cmd(
                     "detected_count": len(message_results),
                     "filtered_count": len(filtered_results),
                     "draft_count": len(drafts),
+                    "cadence_allowed_count": len(cadence_allowed_drafts),
+                    "cadence_held_count": len(cadence_held_drafts),
                     "action_summary": action_summary,
                     "artifacts": [str(reconcile_artifact), str(draft_artifact)],
                 }
@@ -6355,14 +6967,14 @@ def run_track_2_daily_plan_cmd(
             if send_linkedin and drafts:
                 sendable_drafts = [
                     draft
-                    for draft in drafts
+                    for draft in cadence_allowed_drafts
                     if str(draft.get("send_recommendation") or "") in SAFE_FOLLOWUP_SEND_RECOMMENDATIONS
                 ]
                 review_drafts = [
                     draft
-                    for draft in drafts
+                    for draft in cadence_allowed_drafts
                     if str(draft.get("send_recommendation") or "") not in SAFE_FOLLOWUP_SEND_RECOMMENDATIONS
-                ]
+                ] + cadence_held_drafts
                 pending_path = update_linkedin_followup_pending_review(
                     settings=settings,
                     pending_drafts=review_drafts,
@@ -6613,6 +7225,7 @@ def run_track_2_daily_plan_cmd(
                     company=company,
                     dry_run=True,
                     company_mode=_company_mode_for_org(org) if org else "default",
+                    target_role_title=str(item.get("target_role") or ""),
                 )
                 mapping_result["runs"].append(
                     {
@@ -6650,6 +7263,7 @@ def run_track_2_daily_plan_cmd(
                     company=company,
                     dry_run=True,
                     company_mode=_company_mode_for_org(org) if org else "default",
+                    target_role_title=str(item.get("target_role") or ""),
                 )
                 with pipeline_artifact.open(encoding="utf-8") as handle:
                     payload = json.load(handle)
@@ -6671,6 +7285,7 @@ def run_track_2_daily_plan_cmd(
                     "pipeline_artifact": str(pipeline_artifact),
                     "candidate_count": len(batch),
                     "effective_min_score": effective_min_score_value,
+                    "target_role": str(item.get("target_role") or ""),
                     "sent": False,
                 }
                 if send_linkedin and batch:
@@ -9552,6 +10167,7 @@ def pull_linkedin_followups(
         reconcile_results=list(reconcile_result.get("results") or []),
         organizations=workbook.list_organizations(),
         contacts=workbook.list_contacts(),
+        opportunities=workbook.list_opportunities(),
     )[:draft_limit]
     action_summary = summarize_linkedin_followup_actions(drafts, list(reconcile_result.get("results") or []))
     draft_artifact = write_artifact(
@@ -9608,6 +10224,7 @@ def draft_linkedin_followups(
         reconcile_results=list(payload.get("results") or []),
         organizations=workbook.list_organizations(),
         contacts=workbook.list_contacts(),
+        opportunities=workbook.list_opportunities(),
     )[:limit]
 
     kind_summary: dict[str, int] = {}
@@ -9697,6 +10314,12 @@ def send_linkedin_followups(
             else:
                 skipped_by_recommendation.append(draft)
         drafts = eligible
+    cadence_allowed, cadence_held = _apply_linkedin_cadence_guards(
+        workbook=OutreachWorkbook(settings.resolved_tracking_workspace_dir),
+        drafts=drafts,
+    )
+    drafts = cadence_allowed
+    skipped_by_recommendation.extend(cadence_held)
     if not drafts:
         pending_path = update_linkedin_followup_pending_review(
             settings=settings,
@@ -9718,6 +10341,7 @@ def send_linkedin_followups(
                 "total_drafts": len(all_drafts),
                 "eligible_count": 0,
                 "skipped_by_recommendation_count": len(skipped_by_recommendation),
+                "cadence_held_count": len(cadence_held),
                 "count": 0,
                 "status_counts": {"skipped_by_recommendation": len(skipped_by_recommendation)},
                 "touchpoints_added": 0,
@@ -9768,6 +10392,7 @@ def send_linkedin_followups(
         send_payload["total_drafts"] = len(all_drafts)
         send_payload["eligible_count"] = len(drafts)
         send_payload["skipped_by_recommendation_count"] = len(skipped_by_recommendation)
+        send_payload["cadence_held_count"] = len(cadence_held)
         send_payload["skipped_by_recommendation"] = skipped_by_recommendation
         send_payload["pending_review_artifact"] = str(pending_path)
         send_payload["status_counts"]["skipped_by_recommendation"] = len(skipped_by_recommendation)
@@ -9780,6 +10405,7 @@ def send_linkedin_followups(
         send_payload["total_drafts"] = len(all_drafts)
         send_payload["eligible_count"] = len(drafts)
         send_payload["skipped_by_recommendation_count"] = 0
+        send_payload["cadence_held_count"] = len(cadence_held)
         send_payload["pending_review_artifact"] = str(pending_path)
         artifact.write_text(json.dumps(send_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     typer.echo(f"Status summary: {status_counts}")

@@ -1,5 +1,66 @@
 # TODO
 
+## Operating Priorities: Next 4–6 Weeks
+
+The objective is not maximum messages or a perfect database. It is to create
+enough high-quality conversations and live application paths to land a product
+role, while keeping genuinely strong Product Strategy, BizOps, and Operations
+paths visible instead of accidentally filtering them out.
+
+1. **Make the daily loop trustworthy and inspectable.** Run the nightly pipeline
+   for several real cycles, then use its run-scoped report to correct source
+   failures, review backlog, LinkedIn restrictions, and campaign execution.
+   This comes first: every later optimization is noise if it is based on stale
+   snapshots or missing source runs.
+2. **Create a repeatable account-coverage review.** The current tracker has a
+   broad company universe, but only a smaller strategic/story-fit subset gets
+   deliberate account-level attention. Each week, rank the unprioritized
+   universe against an explicit target rubric—domain fit, technical-MBA story,
+   geography/remote viability, growth/quality, and plausible Product or
+   adjacent-role surface—then promote the best candidates to a reviewed
+   watchlist. This is how we catch companies that clearly fit but were never
+   named in a hand-built seed list.
+3. **Close the channel loop: cold email plus follow-up.** Start with a small,
+   human-reviewed batch for high-fit accounts that have a verified email or a
+   meaningful warm path. Add a channel-aware cadence and stop rules before
+   increasing volume; Track 2 must record email and LinkedIn touches together.
+4. **Protect role coverage, without diluting the product thesis.** Audit the
+   ResumeGenerator role classifiers, queries, and queue outputs by role family:
+   Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and a
+   narrowly defined Growth/GTM-adjacent lane. Set a weekly coverage floor and
+   report candidates found, scored, surfaced, and acted on for each family.
+5. **Add high-signal LinkedIn discovery, not more undifferentiated scraping.**
+   Run an attended home-feed capture 2–3 times a week: save only actionable job,
+   hiring, funding, launch, and warm-network signals with the post URL and
+   source context. Treat the feed as a discovery source that can create an
+   opportunity, account signal, or contact task—not as an automatic messaging
+   queue.
+6. **Use relationship signals deliberately.** Add a weekly profile-viewer
+   review, dedupe it against existing contacts, and promote only relevant
+   viewers to a contextual follow-up/research queue. A profile view alone is a
+   soft signal; it should never trigger an automatic cold message.
+7. **Improve selection from feedback.** Use the gold/silver/negative comms
+   corpus, replies, accepts, and application outcomes to rebalance account
+   priority and message patterns. Expand throughput only after the first five
+   priorities are producing clean, reviewed evidence.
+
+### Cadence and Stop Rules to Implement
+
+- **Initial LinkedIn → follow-up:** one useful follow-up after 7–10 days if the
+  invite was accepted or there is a substantive new hook. Do not send a generic
+  nudge to a pending invite.
+- **Second follow-up:** at most one, 14–21 days later, only with a distinct
+  value-add (role, launch, referral context, thoughtful question, or channel
+  switch). Then pause for 60–90 days unless the person re-engages.
+- **Cold email:** one targeted email to a verified address; one follow-up after
+  7–10 days; optional final close-the-loop follow-up 14–21 days later. No more
+  than three total email touches in a 90-day window without engagement.
+- **Cross-channel:** do not send LinkedIn and email on the same day unless a
+  warm event makes it natural. The tracker must show all touches before drafting
+  the next one.
+- **Profile viewers:** review weekly, score by account fit/shared context, and
+  research before writing; no automatic sends.
+
 ## Discovery Architecture
 
 - Evaluate a shared discovery layer that ingests both ResumeGenerator job pulls and Outreach startup/company sources into one canonical store before downstream actioning.
@@ -14,6 +75,17 @@
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
 - Decide whether the long-term canonical store should be one workbook with multiple sheets or a separate shared project/module.
+- Build a weekly account-universe coverage audit that compares the broad
+  tracker against the strategic/story-fit watchlist, scores unprioritized
+  companies against the target rubric, and produces a human-reviewed promotion
+  queue. The goal is to surface strong companies before a role or search query
+  happens to put them in front of us.
+- Add an attended LinkedIn home-feed ingestion pass (2–3x/week) that records
+  actionable posts with source URL, author/company, signal type, and a review
+  decision. It must be a provenance-preserving discovery source, not a bulk
+  scraper or auto-send trigger.
+- Add a weekly LinkedIn profile-viewer review with dedupe, account-fit scoring,
+  and a contextual research/review queue.
 
 ## Outreach Messaging
 
@@ -25,6 +97,10 @@
   - General business fallback
 - Remove hardcoded "pivoting into PM" / "exploring PM roles" language for candidates outside true product roles.
 - Keep PM-specific language only for Product / Product Ops / Product-adjacent outreach.
+- Implement explicit LinkedIn/email cadence enforcement and stop rules across
+  touchpoints; include cross-channel suppression and a 60–90-day cool-down.
+- Add a small, reviewed cold-email lane for verified addresses, including one
+  follow-up and an optional final close-the-loop note.
 
 ## Email Channel
 
@@ -58,3 +134,15 @@
 
 - Populate `workspace/relationship_leads.csv` from manual PeopleGrove/USC/recent-MBA-PM pulls when ready.
 - Keep these as one-time or low-frequency source imports, not daily scrapers.
+
+## Role-Family Coverage
+
+- Make Product the primary lane, but set weekly reporting and selection floors
+  for Product Strategy, BizOps/Strategy, Program/Operations, and narrowly
+  defined Growth/GTM-adjacent roles.
+- Audit ResumeGenerator title/query filters and scoring so those families are
+  discovered, scored, and surfaced rather than silently treated as generic
+  non-PM roles or deprioritized sales.
+- Add account-level role-watch tasks for strategic companies: a company can
+  remain active even when it has no current PM role, while a good adjacent
+  opening should create an application/research action.

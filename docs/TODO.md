@@ -12,14 +12,14 @@ paths visible instead of accidentally filtering them out.
    failures, review backlog, LinkedIn restrictions, and campaign execution.
    This comes first: every later optimization is noise if it is based on stale
    snapshots or missing source runs.
-2. **Create a repeatable account-coverage review.** The current tracker has a
-   broad company universe, but only a smaller strategic/story-fit subset gets
-   deliberate account-level attention. Each week, rank the unprioritized
-   universe against an explicit target rubric—domain fit, technical-MBA story,
-   geography/remote viability, growth/quality, and plausible Product or
-   adjacent-role surface—then promote the best candidates to a reviewed
-   watchlist. This is how we catch companies that clearly fit but were never
-   named in a hand-built seed list.
+2. **Build a company-discovery and promotion loop.** Do not depend on a hand-
+   built company list. Pull promising companies from the daily LinkedIn home
+   feed, startup/company sources, hiring/funding/news signals, and warm-network
+   activity; normalize them into a small candidate queue; then apply the target
+   rubric—domain fit, technical-MBA story, geography/remote viability,
+   growth/quality, and plausible Product or adjacent-role surface—to promote
+   only the best ones into the company-level watchlist. The existing tracker is
+   useful memory after discovery, not a substitute for discovery.
 3. **Close the channel loop: cold email plus follow-up.** Start with a small,
    human-reviewed batch for high-fit accounts that have a verified email or a
    meaningful warm path. Add a channel-aware cadence and stop rules before
@@ -30,7 +30,7 @@ paths visible instead of accidentally filtering them out.
    narrowly defined Growth/GTM-adjacent lane. Set a weekly coverage floor and
    report candidates found, scored, surfaced, and acted on for each family.
 5. **Add high-signal LinkedIn discovery, not more undifferentiated scraping.**
-   Run an attended home-feed capture 2–3 times a week: save only actionable job,
+   Run a lightweight daily home-feed capture (about a minute): save only actionable job,
    hiring, funding, launch, and warm-network signals with the post URL and
    source context. Treat the feed as a discovery source that can create an
    opportunity, account signal, or contact task—not as an automatic messaging
@@ -46,10 +46,10 @@ paths visible instead of accidentally filtering them out.
 
 ### Cadence and Stop Rules to Implement
 
-- **Initial LinkedIn → follow-up:** one useful follow-up after 7–10 days if the
-  invite was accepted or there is a substantive new hook. Do not send a generic
-  nudge to a pending invite.
-- **Second follow-up:** at most one, 14–21 days later, only with a distinct
+- **Initial LinkedIn → follow-up:** after an invite is accepted but has no reply,
+  send one useful follow-up around day 4. Do not send a generic nudge to a
+  pending invite.
+- **Second follow-up:** at most one, around day 10–14 after that, only with a distinct
   value-add (role, launch, referral context, thoughtful question, or channel
   switch). Then pause for 60–90 days unless the person re-engages.
 - **Cold email:** one targeted email to a verified address; one follow-up after
@@ -75,12 +75,12 @@ paths visible instead of accidentally filtering them out.
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
 - Decide whether the long-term canonical store should be one workbook with multiple sheets or a separate shared project/module.
-- Build a weekly account-universe coverage audit that compares the broad
-  tracker against the strategic/story-fit watchlist, scores unprioritized
-  companies against the target rubric, and produces a human-reviewed promotion
-  queue. The goal is to surface strong companies before a role or search query
-  happens to put them in front of us.
-- Add an attended LinkedIn home-feed ingestion pass (2–3x/week) that records
+- Build a company-discovery and promotion loop: ingest candidate companies from
+  LinkedIn home-feed signals, startup/company sources, hiring/funding/news, and
+  warm-network activity; score candidates against the target rubric; and create
+  a human-reviewed company watchlist. The goal is to discover strong companies
+  before a role or search query happens to put them in front of us.
+- Add a lightweight daily LinkedIn home-feed ingestion pass that records
   actionable posts with source URL, author/company, signal type, and a review
   decision. It must be a provenance-preserving discovery source, not a bulk
   scraper or auto-send trigger.
@@ -137,9 +137,10 @@ paths visible instead of accidentally filtering them out.
 
 ## Role-Family Coverage
 
-- Make Product the primary lane, but set weekly reporting and selection floors
-  for Product Strategy, BizOps/Strategy, Program/Operations, and narrowly
-  defined Growth/GTM-adjacent roles.
+- Keep the account tracker company-level. Add a separate role-surface monitor
+  that reports whether the discovery/application lanes are surfacing Product
+  Strategy, BizOps/Strategy, Program/Operations, and narrowly defined
+  Growth/GTM-adjacent roles alongside the primary Product lane.
 - Audit ResumeGenerator title/query filters and scoring so those families are
   discovered, scored, and surfaced rather than silently treated as generic
   non-PM roles or deprioritized sales.

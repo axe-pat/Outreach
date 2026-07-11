@@ -212,7 +212,9 @@ context, preferably in bounded batches because public pages/search can be slower
 Run website resolution/enrichment in small visible batches when the result will affect
 Relationship A/B, Large L1/L2, or the campaign plan. Compound names with short
 prefixes, such as `d-Matrix`, must preserve the full company identity and should not
-be resolved to generic domains like `matrix.com`.
+be resolved to generic domains like `matrix.com`. The production resolver does not
+accept company-name/TLD guesses without independent source/search evidence; keep
+`--allow-domain-guess` limited to explicit manual diagnostics.
 
 ## Campaign Plan
 

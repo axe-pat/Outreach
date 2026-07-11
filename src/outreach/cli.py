@@ -11840,6 +11840,15 @@ def resolve_company_websites_cmd(
         bool,
         typer.Option(help="Use public web search after direct source URLs/outbound links fail"),
     ] = True,
+    allow_domain_guess: Annotated[
+        bool,
+        typer.Option(
+            help=(
+                "Allow uncorroborated company-name/TLD guesses. Disabled by "
+                "default because a reachable lookalike domain is not company proof"
+            )
+        ),
+    ] = False,
     max_search_results: Annotated[int, typer.Option(help="Maximum search-result URLs to validate per company")] = 5,
     min_score: Annotated[int, typer.Option(help="Minimum website-validation score required to accept a resolved URL")] = 11,
     timeout_seconds: Annotated[int, typer.Option(help="Network fetch timeout per public page")] = 4,
@@ -11855,6 +11864,7 @@ def resolve_company_websites_cmd(
         execute=execute,
         only_non_verified=only_non_verified,
         use_web_search=web_search,
+        allow_domain_guess=allow_domain_guess,
         max_search_results=max_search_results,
         min_score=min_score,
         fetcher=HttpTextDownloader(timeout_seconds=timeout_seconds),
@@ -11875,6 +11885,7 @@ def resolve_company_websites_cmd(
             "execute": execute,
             "only_non_verified": only_non_verified,
             "web_search": web_search,
+            "allow_domain_guess": allow_domain_guess,
             "max_search_results": max_search_results,
             "min_score": min_score,
             "timeout_seconds": timeout_seconds,

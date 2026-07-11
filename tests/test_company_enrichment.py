@@ -260,7 +260,13 @@ def test_company_website_resolution_rejects_generic_short_domain_match(tmp_path:
         }
     )
 
-    results = resolve_company_websites(tmp_path, execute=True, fetcher=fetcher, use_web_search=False)
+    results = resolve_company_websites(
+        tmp_path,
+        execute=True,
+        fetcher=fetcher,
+        use_web_search=False,
+        allow_domain_guess=True,
+    )
 
     assert results[0].status == "no_url_found"
     assert OutreachWorkbook(tmp_path).list_organizations()[0].website == ""
@@ -295,7 +301,13 @@ def test_company_website_resolution_keeps_meaningful_short_prefix(tmp_path: Path
         }
     )
 
-    results = resolve_company_websites(tmp_path, execute=True, fetcher=fetcher, use_web_search=False)
+    results = resolve_company_websites(
+        tmp_path,
+        execute=True,
+        fetcher=fetcher,
+        use_web_search=False,
+        allow_domain_guess=True,
+    )
 
     assert results[0].status == "resolved"
     assert results[0].website == "https://d-matrix.com"
@@ -369,7 +381,47 @@ def test_company_website_resolution_rejects_parked_domain_guess(tmp_path: Path) 
         }
     )
 
-    results = resolve_company_websites(tmp_path, execute=True, fetcher=fetcher, use_web_search=False)
+    results = resolve_company_websites(
+        tmp_path,
+        execute=True,
+        fetcher=fetcher,
+        use_web_search=False,
+        allow_domain_guess=True,
+    )
+
+    assert results[0].status == "no_url_found"
+    assert OutreachWorkbook(tmp_path).list_organizations()[0].website == ""
+
+
+def test_company_website_resolution_disables_uncorroborated_guesses_by_default(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-two-labs",
+            name="Two Labs",
+            organization_type=OrganizationType.COMPANY,
+            source_url="https://www.linkedin.com/jobs/view/123/",
+            notes="Imported from ResumeGenerator v1 jobs.xlsx",
+        )
+    )
+    fetcher = RoutingFetcher(
+        {
+            "https://two.com": """
+            <html><head><title>Two Labs official website</title></head>
+            <body><p>Two Labs builds software products.</p></body></html>
+            """,
+        }
+    )
+
+    results = resolve_company_websites(
+        tmp_path,
+        execute=True,
+        fetcher=fetcher,
+        use_web_search=False,
+    )
 
     assert results[0].status == "no_url_found"
     assert OutreachWorkbook(tmp_path).list_organizations()[0].website == ""

@@ -397,6 +397,7 @@ def resolve_company_websites(
     execute: bool = False,
     only_non_verified: bool = True,
     use_web_search: bool = True,
+    allow_domain_guess: bool = False,
     max_search_results: int = 5,
     min_score: int | None = None,
     fetcher: HttpTextDownloader | None = None,
@@ -433,6 +434,7 @@ def resolve_company_websites(
                 org,
                 fetcher=fetcher,
                 use_web_search=use_web_search,
+                allow_domain_guess=allow_domain_guess,
                 max_search_results=max_search_results,
                 min_score=min_score,
             )
@@ -494,6 +496,7 @@ def resolve_company_website(
     *,
     fetcher: HttpTextDownloader,
     use_web_search: bool,
+    allow_domain_guess: bool = False,
     max_search_results: int = 5,
     min_score: int | None = None,
 ) -> CompanyWebsiteCandidate | None:
@@ -527,18 +530,19 @@ def resolve_company_website(
             if candidate:
                 return candidate
 
-    for url in _guessed_company_website_urls(org.name):
-        candidate = _validate_company_website(
-            org.name,
-            url,
-            fetcher=fetcher,
-            source="domain_guess",
-            evidence_url=url,
-            source_bonus=0,
-            min_score=min_score,
-        )
-        if candidate:
-            return candidate
+    if allow_domain_guess:
+        for url in _guessed_company_website_urls(org.name):
+            candidate = _validate_company_website(
+                org.name,
+                url,
+                fetcher=fetcher,
+                source="domain_guess",
+                evidence_url=url,
+                source_bonus=0,
+                min_score=min_score,
+            )
+            if candidate:
+                return candidate
 
     if not use_web_search:
         return None

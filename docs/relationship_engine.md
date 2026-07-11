@@ -366,6 +366,11 @@ new companies imported from ResumeGenerator jobs. It writes:
 - `prestige_signals`
 - `prestige_evidence_url`
 
+Website resolution accepts direct company/source evidence and validated public
+search results. Uncorroborated company-name/TLD guesses are disabled by default:
+a reachable lookalike domain is not identity proof. `--allow-domain-guess` is a
+manual diagnostic opt-in and should not be enabled in the nightly pipeline.
+
 Confidence matters:
 
 - `external_verified`: public company/source page was fetched; safest for Account Score
@@ -645,6 +650,8 @@ Large companies follow different campaign logic:
   website resolution now preserves meaningful short prefixes (`d-Matrix` must not
   collapse to generic `matrix.com`), generic suffixes such as "Solutions" require
   stronger identity matches, and JavaScript/anti-bot placeholder pages are rejected.
+  Uncorroborated domain guesses are now default-off after a live run demonstrated
+  that plausible lookalike domains could otherwise be persisted as resolved.
   Continue running visible batches, use **Needs Enrichment** as the work queue, and
   regenerate the tracker after each batch to inspect rank/action movement.
 - Company enrichment is wired into the nightly orchestrator as a small bounded

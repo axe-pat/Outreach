@@ -6,6 +6,7 @@ import sys
 import time
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from outreach.cli import (
@@ -87,6 +88,8 @@ from outreach.services.linkedin import InviteSendResult, LinkedInFollowupSendRes
 from outreach.invite_reservations import load_invite_reservations, reservation_ledger_path
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
 from outreach.style_profile import CommunicationStyleProfile
+
+REPORT_RUN_ID = "20260711-010000"
 
 
 def _julia_failed_filter_payload() -> dict[str, object]:
@@ -336,6 +339,7 @@ def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path:
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "created_at": "2026-07-10T01:00:00-07:00",
                 "outreach_maintenance": {
                     "ran": True,
@@ -361,6 +365,12 @@ def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path:
     report_text = report_path.read_text(encoding="utf-8")
     html_text = html_artifact.read_text(encoding="utf-8")
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary_path.name == f"{REPORT_RUN_ID}-daily-run-report.json"
+    assert report_path.name == f"{REPORT_RUN_ID}-daily-run-report.md"
+    assert html_artifact.name == f"{REPORT_RUN_ID}-daily-run-report.html"
+    assert payload["run_id"] == REPORT_RUN_ID
+    assert f"Run ID: `{REPORT_RUN_ID}`" in report_text
+    assert f"Run ID {REPORT_RUN_ID}" in html_text
     by_source = {row["source"]: row for row in payload["source_breakdown"]}
     assert "LinkedIn home feed: `completed` · kept `0` / raw `0`" in report_text
     assert "LinkedIn profile viewers: `skipped` · kept `0` / raw `0`" in report_text
@@ -433,7 +443,7 @@ def test_daily_report_surfaces_open_inbound_resume_request(tmp_path: Path) -> No
     )
     nightly_summary = tmp_path / "nightly-summary.json"
     nightly_summary.write_text(
-        json.dumps({"created_at": "2026-07-10T01:00:00-07:00", "outreach_maintenance": {"ran": True}}),
+        json.dumps({"run_id": REPORT_RUN_ID, "created_at": "2026-07-10T01:00:00-07:00", "outreach_maintenance": {"ran": True}}),
         encoding="utf-8",
     )
     settings = SimpleNamespace(
@@ -467,7 +477,25 @@ def test_daily_report_cli_rejects_half_scoped_mode(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "Pass both --since and --nightly-summary" in result.output
+    assert "Pass --since, --nightly-summary, and --run-id together" in result.output
+
+
+def test_daily_report_rejects_run_id_mismatch(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(json.dumps({"run_id": REPORT_RUN_ID}), encoding="utf-8")
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    with pytest.raises(ValueError, match="does not match nightly summary run_id"):
+        write_artifact_daily_report(
+            settings=settings,
+            workspace=workspace,
+            since=datetime(2026, 1, 1, tzinfo=UTC),
+            nightly_summary_path=nightly_summary,
+            run_id="20260711-020000",
+        )
 
 
 def test_daily_report_run_scope_ignores_unreferenced_concurrent_artifacts(tmp_path: Path) -> None:
@@ -505,6 +533,7 @@ def test_daily_report_run_scope_ignores_unreferenced_concurrent_artifacts(tmp_pa
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "created_at": "2026-07-11T01:00:00-07:00",
                 "daily_engine_manifest": str(manifest),
                 "outreach_maintenance": {"ran": True},
@@ -542,6 +571,7 @@ def test_daily_report_missing_manifest_fails_closed_without_mtime_fallback(tmp_p
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "outreach_maintenance": {
                     "ran": True,
                     "track_2_daily_run_returncode": 0,
@@ -658,7 +688,7 @@ def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_p
     )
     nightly_summary = tmp_path / "summary.json"
     nightly_summary.write_text(
-        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        json.dumps({"run_id": REPORT_RUN_ID, "daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
         encoding="utf-8",
     )
     settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
@@ -736,7 +766,7 @@ def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Pat
     )
     summary = tmp_path / "summary.json"
     summary.write_text(
-        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        json.dumps({"run_id": REPORT_RUN_ID, "daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
         encoding="utf-8",
     )
     settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
@@ -795,7 +825,7 @@ def test_daily_report_counts_only_actual_sent_email_and_clears_matching_draft(tm
     )
     summary = tmp_path / "summary.json"
     summary.write_text(
-        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        json.dumps({"run_id": REPORT_RUN_ID, "daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
         encoding="utf-8",
     )
     settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
@@ -875,6 +905,7 @@ def test_daily_report_track_2_company_counts_are_actual_not_planned(tmp_path: Pa
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "daily_engine_returncode": 0,
                 "daily_engine_manifest": str(manifest),
                 "source_metrics": str(source_metrics),
@@ -1644,9 +1675,24 @@ def test_track_2_execution_status_never_marks_unknown_delivery_or_filter_failure
             ],
         },
     )
+    partial = _track_2_execution_status(
+        maintenance,
+        {
+            "execute": True,
+            "phase_results": [
+                {
+                    "phase": "4_contact_mapping",
+                    "status": "partial_failed",
+                    "failed_companies": ["ExampleCo"],
+                },
+                {"phase": "3_company_research", "status": "ran"},
+            ],
+        },
+    )
 
     assert unknown["status"] == "incomplete"
     assert blocked["status"] == "failed"
+    assert partial["status"] == "partial_failed"
 
 
 def test_app_invite_failure_is_visible_and_makes_exact_report_non_green(
@@ -1718,6 +1764,7 @@ def test_app_invite_failure_is_visible_and_makes_exact_report_non_green(
     summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "daily_engine_returncode": 0,
                 "daily_engine_manifest": str(manifest),
                 "source_metrics": str(source_metrics),
@@ -2068,6 +2115,7 @@ def test_track_2_unmatched_inbound_thread_surfaces_as_report_action(
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "daily_engine_returncode": 0,
                 "daily_engine_manifest": str(manifest),
                 "source_metrics": str(source_metrics),

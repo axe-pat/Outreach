@@ -7889,6 +7889,7 @@ def write_artifact_daily_report(
     workspace: Path,
     since: datetime | None,
     nightly_summary_path: Path | None = None,
+    run_id: str = "",
     title: str = "Outreach Daily Run Report",
 ) -> tuple[Path, Path, Path, Path]:
     """Write the daily HTML/MD report from the artifacts created by the active nightly runner."""
@@ -7908,6 +7909,23 @@ def write_artifact_daily_report(
     workbook.initialize()
     counts = workbook.summary_counts()
     nightly_summary = _load_json_file(nightly_summary_path)
+    requested_run_id = run_id.strip()
+    summary_run_id = str(nightly_summary.get("run_id") or "").strip()
+    selected_run_id = ""
+    if run_scoped:
+        if not re.fullmatch(r"\d{8}-\d{6}", summary_run_id):
+            raise ValueError(
+                "Run-scoped reporting requires a valid run_id in the selected nightly summary."
+            )
+        selected_run_id = requested_run_id or summary_run_id
+        if not re.fullmatch(r"\d{8}-\d{6}", selected_run_id):
+            raise ValueError("Run-scoped reporting requires run_id in YYYYMMDD-HHMMSS format.")
+        if selected_run_id != summary_run_id:
+            raise ValueError(
+                f"Requested run_id {selected_run_id!r} does not match nightly summary run_id {summary_run_id!r}."
+            )
+    elif requested_run_id:
+        raise ValueError("run_id is only valid for a run-scoped report.")
     maintenance = nightly_summary.get("outreach_maintenance") if isinstance(nightly_summary.get("outreach_maintenance"), dict) else {}
     track_artifact = _resolve_run_reference(
         (maintenance or {}).get("track_2_daily_run_artifact"),
@@ -8403,7 +8421,11 @@ def write_artifact_daily_report(
     daily_html_dir = _daily_html_reports_dir(settings)
     reports_dir.mkdir(parents=True, exist_ok=True)
     daily_html_dir.mkdir(parents=True, exist_ok=True)
-    report_stem = f"{artifact_timestamp()}-daily-run-report"
+    report_stem = (
+        f"{selected_run_id}-daily-run-report"
+        if run_scoped
+        else f"{artifact_timestamp()}-daily-run-report"
+    )
     track_execution = _track_2_execution_status(maintenance or {}, track_payload)
     track_linkedin_actions, track_company_counts = _track_2_actual_actions(
         track_payload=track_payload,
@@ -8785,6 +8807,7 @@ def write_artifact_daily_report(
     ).as_dict()
     report_payload = {
         "created_at": utc_now_iso(),
+        "run_id": selected_run_id,
         "report_mode": report_mode,
         "scope_note": scope_note,
         "since": since.isoformat(timespec="seconds") if since else "",
@@ -8863,6 +8886,7 @@ def write_artifact_daily_report(
         f"# {title}{'' if run_scoped else ' — Workspace Snapshot'}",
         "",
         f"- Created: `{report_payload['created_at']}`",
+        f"- Run ID: `{selected_run_id or 'not applicable'}`",
         f"- Report mode: `{report_mode}`",
         f"- Run status: `{run_status}`",
         f"- Scope: {scope_note}",
@@ -9161,7 +9185,7 @@ def write_artifact_daily_report(
 <body>
   <header>
     <h1>{esc(title)}{'' if run_scoped else ' — Workspace Snapshot'}</h1>
-    <p>Mode {esc(report_mode)} · status {esc(run_status)} · created {esc(report_payload['created_at'])} · run started {esc(report_payload['since'] or 'workspace history')}</p>
+    <p>Run ID {esc(selected_run_id or 'not applicable')} · mode {esc(report_mode)} · status {esc(run_status)} · created {esc(report_payload['created_at'])} · run started {esc(report_payload['since'] or 'workspace history')}</p>
     <p>{esc(scope_note)}</p>
   </header>
   <main>
@@ -9194,7 +9218,7 @@ def write_artifact_daily_report(
     latest_html_path.write_text(html_text, encoding="utf-8")
     reports_latest_html_path.write_text(html_text, encoding="utf-8")
     legacy_latest_html_path.write_text(html_text, encoding="utf-8")
-    return summary_artifact, latest_path, report_html_path, latest_html_path
+    return summary_artifact, report_path, report_html_path, latest_html_path
 
 
 @app.command("write-daily-run-report")
@@ -9211,6 +9235,10 @@ def write_daily_run_report_cmd(
         Path | None,
         typer.Option(help="Optional ResumeGenerator nightly summary JSON"),
     ] = None,
+    run_id: Annotated[
+        str,
+        typer.Option(help="Nightly run ID in YYYYMMDD-HHMMSS format for run-scoped mode"),
+    ] = "",
     title: Annotated[
         str,
         typer.Option(help="Report title"),
@@ -9220,10 +9248,11 @@ def write_daily_run_report_cmd(
     settings = OutreachSettings()
     has_since = bool(since.strip())
     has_summary = nightly_summary is not None
-    if has_since != has_summary:
+    has_run_id = bool(run_id.strip())
+    if len({has_since, has_summary, has_run_id}) != 1:
         raise typer.BadParameter(
-            "Pass both --since and --nightly-summary for run-scoped mode, "
-            "or omit both for workspace-snapshot mode."
+            "Pass --since, --nightly-summary, and --run-id together for run-scoped mode, "
+            "or omit all three for workspace-snapshot mode."
         )
     since_dt = _parse_report_datetime(since)
     if has_since and since_dt is None:
@@ -9233,13 +9262,15 @@ def write_daily_run_report_cmd(
         workspace=workspace,
         since=since_dt,
         nightly_summary_path=nightly_summary,
+        run_id=run_id,
         title=title,
     )
     typer.echo("Wrote daily run report.")
     typer.echo(f"Summary artifact: {artifact}")
     typer.echo(f"Daily report: {md_path}")
     typer.echo(f"HTML report artifact: {html_artifact}")
-    typer.echo(f"HTML report: {html_path}")
+    typer.echo(f"HTML report: {html_artifact}")
+    typer.echo(f"Latest HTML report: {html_path}")
 
 
 @app.command("build-communication-lab")

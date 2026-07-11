@@ -659,12 +659,13 @@ Current cycle config is `offcycle_light`:
 At the end of that LaunchAgent path, ResumeGenerator now calls:
 
 ```bash
-python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json>
+python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json> --run-id <run-id>
 ```
 
 That command refreshes the Outreach HTML/Markdown report from the selected
-nightly summary. In run-scoped mode, `--since` identifies the run start but is
-never used to discover artifacts. Every claimed action must come from one of
+nightly summary. In run-scoped mode, `--run-id` must match the ID recorded in
+the summary and names each exact report artifact; `--since` identifies the run
+start but is never used to discover artifacts. Every claimed action must come from one of
 these explicit pointers:
 
 - `nightly_summary.daily_engine_manifest` for ResumeGenerator/app-queue invite,

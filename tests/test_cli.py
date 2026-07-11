@@ -56,6 +56,7 @@ from outreach.cli import (
     run_supervised_e2e_pipeline,
     score_opportunity_relevance,
     select_invite_candidates,
+    should_stop_after_company_filter_error,
     summarize_linkedin_followup_actions,
     startup_pool_metadata,
     startup_pool_mode,
@@ -963,6 +964,23 @@ def test_founding_mechatronics_engineer_buckets_as_engineering() -> None:
 def test_company_search_aliases_strip_common_startup_suffixes() -> None:
     assert company_search_aliases("Splash Inc.")[:2] == ["Splash Inc.", "Splash"]
     assert "Surtr" in company_search_aliases("Surtr Defense Systems")
+
+
+def test_exact_company_filter_miss_stops_only_before_any_success() -> None:
+    error = "Could not find an exact company suggestion for 'Globalization Partners'."
+
+    assert should_stop_after_company_filter_error(
+        error,
+        successful_filtered_passes=0,
+    )
+    assert not should_stop_after_company_filter_error(
+        error,
+        successful_filtered_passes=1,
+    )
+    assert not should_stop_after_company_filter_error(
+        "LinkedIn navigation timed out",
+        successful_filtered_passes=0,
+    )
 
 
 def test_build_linkedin_contact_info_email_queue_uses_daily_email_research_accounts(tmp_path: Path) -> None:

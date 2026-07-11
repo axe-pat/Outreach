@@ -1704,6 +1704,17 @@ def build_company_note_context(
     }
 
 
+def should_stop_after_company_filter_error(
+    error_text: str,
+    *,
+    successful_filtered_passes: int,
+) -> bool:
+    return (
+        successful_filtered_passes == 0
+        and "Could not find an exact company suggestion for" in error_text
+    )
+
+
 def execute_linkedin_company_run(
     *,
     settings: OutreachSettings,
@@ -1741,6 +1752,8 @@ def execute_linkedin_company_run(
         }
     deduped: dict[str, dict] = {}
     pass_summaries: list[dict] = []
+    successful_filtered_passes = 0
+    terminal_company_filter_error = ""
     startup_pool: dict[str, int | str | bool | None] = {
         "raw_count": None,
         "kept_count": None,
@@ -1935,6 +1948,7 @@ def execute_linkedin_company_run(
                 use_us_location=bool(pass_config.get("use_us_location", True)),
             )
         except Exception as exc:
+            error_text = str(exc)
             pass_summaries.append(
                 {
                     "pass_name": pass_name,
@@ -1949,11 +1963,21 @@ def execute_linkedin_company_run(
                     "raw_count": 0,
                     "kept_count": 0,
                     "artifact": "",
-                    "error": str(exc),
+                    "error": error_text,
                 }
             )
             typer.echo(f"- Pass {pass_name}: failed ({exc})")
+            if should_stop_after_company_filter_error(
+                error_text,
+                successful_filtered_passes=successful_filtered_passes,
+            ):
+                terminal_company_filter_error = error_text
+                typer.echo(
+                    "  stopping remaining passes: exact company filter is unavailable"
+                )
+                break
             continue
+        successful_filtered_passes += 1
         raw_candidates = filter_run.candidates
         kept_count = 0
         pass_artifact = write_artifact(
@@ -2061,6 +2085,12 @@ def execute_linkedin_company_run(
             "dry_run": dry_run,
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
+            "company_filter_status": (
+                "failed_exact_company_suggestion"
+                if terminal_company_filter_error
+                else "completed"
+            ),
+            "company_filter_error": terminal_company_filter_error,
             "affinity_expansion": affinity_summary,
             "startup_pool": startup_pool,
             "note_context": note_context,

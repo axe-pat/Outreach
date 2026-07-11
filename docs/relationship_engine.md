@@ -221,6 +221,40 @@ heuristics.
 
 ## Build Order
 
+### One-Time Relationship Source Imports
+
+PeopleGrove/USC and recent-MBA-to-PM pulls are low-frequency, high-signal batches,
+not daily scrapers. Their safe path is now explicit:
+
+1. Capture the signed-in PeopleGrove directory into a JSON array with stable source
+   IDs/URLs and the visible professional fields. Write a companion coverage manifest
+   with per-query advertised/captured counts, batch/scroll observations, and either
+   `exhausted_exact_count` or an honest bounded/error termination.
+2. Run `curate-peoplegrove-capture --workspace workspace` to reject students,
+   interns, job seekers, vague/irrelevant roles, ambiguous current companies,
+   capture duplicates, and already-imported contacts. The command never writes the
+   tracker. When a card omits a parseable current role/company, an optional
+   capture-hash-bound `--enrichment-path` may supply exact Career Journey
+   `current_roles`; identity mismatches or malformed mappings fail closed, and only
+   explicit roles that pass the normal relevance gates can be selected.
+3. Inspect its curated relationship-lead CSV and JSON decision audit. The audit
+   records category, score, source identity, and an explicit rejection reason for
+   every captured profile.
+4. Run `stage-relationship-leads` to normalize, validate, fingerprint, and dedupe.
+5. Review the staged CSV and seal decisions with `review-relationship-leads`.
+6. Run `import-relationship-leads --execute` only against that reviewed staged file.
+
+Execution fails closed on missing provenance, invalid URLs/email shape, edited rows
+after review, duplicate rows, and ambiguous workbook identity conflicts. No email is
+guessed, and staging/review never writes the company/contact tracker. Existing July 4
+PeopleGrove rows remain valid tracker history, but the 28-profile set is only an early
+seed. The July 11 signed-in USC Marshall/Trojan-connection capture contains 1,845
+unique profiles across 12 queries: seven exact-count surfaces were exhausted and five
+high-volume surfaces were deliberately bounded best-match samples. Retain those
+coverage qualifications, stable source record IDs/URLs, and explicit junk-rejection
+reasons, then route only the useful deduped rows through this gate instead of
+importing a raw scrape directly.
+
 ### 1. LinkedIn Reconcile
 
 Highest immediate value. Detect and record what happened after sends:

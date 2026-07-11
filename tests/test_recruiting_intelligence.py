@@ -27,6 +27,44 @@ def test_feed_ledger_becomes_scored_company_signal(tmp_path: Path) -> None:
     assert signals[0].provenance[0].source_type == "linkedin_home_feed"
 
 
+def test_feed_company_page_does_not_turn_person_author_into_company(tmp_path: Path) -> None:
+    path = tmp_path / "feed.csv"
+    fields = [
+        "company",
+        "signal_kinds",
+        "review_disposition",
+        "post_text",
+        "post_url",
+        "author_name",
+        "company_url",
+        "last_seen_at",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "company": "Brad Smith",
+                "author_name": "Brad Smith",
+                "company_url": "https://www.linkedin.com/company/microsoft/posts/",
+                "post_url": "https://www.linkedin.com/company/microsoft/posts/",
+                "signal_kinds": "company_discovery;relevant_update",
+                "review_disposition": "pending",
+                "post_text": "Microsoft is building accessible AI products.",
+            }
+        )
+
+    signals = company_signals_from_feed_ledger(path, run_id="run-1")
+    skipped_known = company_signals_from_feed_ledger(
+        path,
+        run_id="run-1",
+        known_companies=["Microsoft"],
+    )
+
+    assert [item.company_name for item in signals] == ["Microsoft"]
+    assert skipped_known == []
+
+
 def test_feed_company_signals_can_be_scoped_to_exact_capture_ids(tmp_path: Path) -> None:
     path = tmp_path / "feed.csv"
     fields = [

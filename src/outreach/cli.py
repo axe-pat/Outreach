@@ -52,6 +52,14 @@ from outreach.story_fit_targets import (
     import_story_fit_targets as import_story_fit_target_seeds,
 )
 from outreach.intelligence_commands import register_intelligence_commands
+from outreach.linkedin_affinity import (
+    affinity_pass_candidate_relevant,
+    allocate_affinity_invite_cap,
+    filter_affinity_pass_definitions,
+    high_affinity_candidate_signals,
+    plan_high_affinity_expansion,
+    recommend_affinity_send_cap,
+)
 from outreach.resume_jobs_bridge import (
     DEFAULT_INCLUDE_STATUSES,
     DEFAULT_COMPANY_OVERRIDES_FILENAME,
@@ -78,10 +86,21 @@ from outreach.resume_jobs_bridge import (
 )
 from outreach.relationship_leads import (
     DEFAULT_RELATIONSHIP_LEADS_PATH,
+    RelationshipLeadConflictError,
+    RelationshipLeadReviewError,
+    RelationshipLeadValidationError,
     ensure_relationship_leads_template,
     import_relationship_leads as import_relationship_lead_seeds,
+    review_staged_relationship_leads,
     relationship_source_default_path,
     relationship_source_preset,
+    stage_relationship_leads,
+)
+from outreach.peoplegrove_curation import (
+    DEFAULT_MINIMUM_PEOPLEGROVE_SCORE,
+    DEFAULT_PEOPLEGROVE_CURATED_PATH,
+    PeopleGroveCurationError,
+    curate_peoplegrove_capture,
 )
 from outreach.tracking import (
     ContactRecord,
@@ -490,6 +509,13 @@ def pass_relevance(
 
     if pass_name == "existing_connections":
         return True
+    if pass_name.startswith("affinity_"):
+        return affinity_pass_candidate_relevant(
+            pass_name,
+            role_bucket=role_bucket,
+            title=title,
+            raw_text=raw_text,
+        )
     if company_mode == "startup":
         if pass_name in {"startup_preflight", "startup_company_coverage"}:
             if _is_explicitly_bad_startup_coverage_title(title_lower):
@@ -528,6 +554,11 @@ def apply_raw_candidate(
     pass_implies_marshall = "marshall" in pass_school.lower()
     pass_implies_existing_connection = pass_name == "existing_connections"
     shared_history_signals = detect_shared_history_signals(raw_text, settings)
+    pass_history_term = str(pass_config.get("shared_history_term") or "").strip()
+    if pass_name.startswith("affinity_history_") and pass_history_term:
+        shared_history_signals = list(
+            dict.fromkeys([*shared_history_signals, pass_history_term])
+        )
     profile = CandidateProfile(
         name=raw.name,
         title=raw.title or "",
@@ -1861,6 +1892,17 @@ def execute_linkedin_company_run(
         enable_marshall=enable_marshall,
         force_broad_fallback=force_broad_fallback,
     )
+    affinity_plan = plan_high_affinity_expansion(
+        note_context,
+        ex_companies=settings.search.ex_companies,
+        shared_history_keywords=settings.search.shared_history_keywords,
+    )
+    affinity_passes = filter_affinity_pass_definitions(
+        affinity_plan,
+        include_passes=tuple(include_pass or []),
+        exclude_passes=tuple(exclude_pass or []),
+    )
+    pass_definitions.update(affinity_passes)
     ordered_passes = sorted(
         pass_definitions.items(),
         key=lambda item: int(item[1].get("priority", 999)),
@@ -1985,6 +2027,21 @@ def execute_linkedin_company_run(
     )
     scored_candidates = [*noted_candidates, *scored_candidates[settings.search.note_generation_limit :]]
 
+    affinity_summary = affinity_plan.as_dict()
+    affinity_summary.update(
+        {
+            "enabled_passes": list(affinity_passes),
+            "high_affinity_candidate_count": sum(
+                bool(high_affinity_candidate_signals(candidate))
+                for candidate in scored_candidates
+            ),
+            "recommended_send_cap": recommend_affinity_send_cap(
+                scored_candidates,
+                plan=affinity_plan,
+            ),
+        }
+    )
+
     artifact = write_artifact(
         settings.artifacts_dir,
         "dry-run-pipeline",
@@ -1994,6 +2051,7 @@ def execute_linkedin_company_run(
             "dry_run": dry_run,
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
+            "affinity_expansion": affinity_summary,
             "startup_pool": startup_pool,
             "note_context": note_context,
             "count": len(scored_candidates),
@@ -5810,7 +5868,53 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
         "kept": viewers.get("added") or 0,
         "details": {**viewer_details, "passive_context_only": True},
     }
-    return [row("LinkedIn", "linkedin"), feed_row, viewer_row, row("Handshake", "handshake"), row("JobSpy", "jobspy"), startup, app_queue, track]
+    company_news_artifact = str((maintenance or {}).get("company_news_artifact") or "")
+    company_news_payload = _load_json_file(
+        Path(company_news_artifact) if company_news_artifact else None
+    )
+    company_news_returncode = (maintenance or {}).get("company_news_returncode")
+    recorded_company_news_status = str((maintenance or {}).get("company_news_status") or "")
+    if company_news_payload.get("status"):
+        company_news_status = str(company_news_payload["status"])
+        company_news_reason = ""
+    elif recorded_company_news_status:
+        company_news_status = recorded_company_news_status
+        company_news_reason = "nightly_summary_recorded_source_status"
+    elif company_news_returncode is not None:
+        company_news_status = "failed"
+        company_news_reason = (
+            "capture_command_failed"
+            if company_news_returncode != 0
+            else "capture_artifact_missing"
+        )
+    else:
+        company_news_status = "skipped"
+        company_news_reason = "not_recorded_for_this_run"
+    company_news_details = dict(company_news_payload)
+    if not company_news_details:
+        company_news_details = {
+            "reason": company_news_reason,
+            "returncode": company_news_returncode,
+            "artifact": company_news_artifact,
+        }
+    company_news_row = {
+        "source": "Company/news feeds",
+        "status": company_news_status,
+        "raw": int(company_news_payload.get("captured") or 0),
+        "kept": int(company_news_payload.get("added") or 0),
+        "details": company_news_details,
+    }
+    return [
+        row("LinkedIn", "linkedin"),
+        feed_row,
+        viewer_row,
+        company_news_row,
+        row("Handshake", "handshake"),
+        row("JobSpy", "jobspy"),
+        startup,
+        app_queue,
+        track,
+    ]
 
 
 def _combined_source_status(*statuses: str) -> str:
@@ -5842,6 +5946,7 @@ def _unscoped_source_breakdown() -> list[dict[str, object]]:
             "LinkedIn",
             "LinkedIn home feed",
             "LinkedIn profile viewers",
+            "Company/news feeds",
             "Handshake",
             "JobSpy",
             "Startup sources",
@@ -6005,6 +6110,16 @@ def _source_summary(row: dict[str, object]) -> str:
         )
     if source == "LinkedIn profile viewers":
         return str(details.get("reason") or "Passive context only.")
+    if source == "Company/news feeds":
+        sources = details.get("sources") if isinstance(details.get("sources"), list) else []
+        completed = sum(
+            isinstance(item, dict) and str(item.get("status") or "") == "completed"
+            for item in sources
+        )
+        return (
+            f"{int(details.get('captured') or 0)} review-gated company signals captured; "
+            f"{int(details.get('added') or 0)} new; {completed} feeds completed."
+        )
     if source == "ResumeGenerator / app queue":
         counts = details.get("action_queue_counts") if isinstance(details.get("action_queue_counts"), dict) else {}
         return (
@@ -7443,21 +7558,32 @@ def run_track_2_daily_plan_cmd(
 
     invite_items = _daily_plan_items_matching(daily_plan, phase_prefix="5_send_linkedin_invites")
     if invite_items:
+        planned_invite_budget = int(
+            (daily_plan.get("used") or {}).get("linkedin_invites") or 0
+        )
+        global_invite_budget = max(
+            planned_invite_budget,
+            int((daily_plan.get("budget") or {}).get("max_linkedin_invites") or 0),
+        )
+        affinity_headroom = max(0, global_invite_budget - planned_invite_budget)
+        initial_affinity_headroom = affinity_headroom
         invite_result: dict[str, object] = {
             "phase": "5_send_linkedin_invites",
             "status": "planned",
-            "budget": int((daily_plan.get("used") or {}).get("linkedin_invites") or 0),
+            "budget": planned_invite_budget,
+            "max_budget": global_invite_budget,
+            "affinity_headroom": affinity_headroom,
             "send_enabled": send_linkedin,
             "runs": [],
         }
-        remaining_invites = int(invite_result["budget"])
+        remaining_invites = planned_invite_budget
         if execute and allow_live_linkedin:
             for item in invite_items:
                 if remaining_invites <= 0:
                     break
                 company = str(item.get("company") or "")
-                per_company_limit = min(int(item.get("expected_linkedin_invites") or 0), remaining_invites)
-                if per_company_limit <= 0:
+                planned_company_cap = int(item.get("expected_linkedin_invites") or 0)
+                if planned_company_cap <= 0:
                     continue
                 org = org_by_id.get(str(item.get("organization_id") or ""))
                 pipeline_artifact = execute_linkedin_company_run(
@@ -7469,6 +7595,27 @@ def run_track_2_daily_plan_cmd(
                 )
                 with pipeline_artifact.open(encoding="utf-8") as handle:
                     payload = json.load(handle)
+                affinity_summary = (
+                    payload.get("affinity_expansion")
+                    if isinstance(payload.get("affinity_expansion"), dict)
+                    else {}
+                )
+                try:
+                    recommended_company_cap = int(
+                        affinity_summary.get("recommended_send_cap") or planned_company_cap
+                    )
+                except (TypeError, ValueError):
+                    recommended_company_cap = planned_company_cap
+                per_company_limit, remaining_invites, affinity_headroom = (
+                    allocate_affinity_invite_cap(
+                        planned_cap=planned_company_cap,
+                        recommended_cap=recommended_company_cap,
+                        remaining_invites=remaining_invites,
+                        affinity_headroom=affinity_headroom,
+                    )
+                )
+                if per_company_limit <= 0:
+                    continue
                 effective_min_score_value = effective_send_min_score(
                     payload,
                     requested_min_score=invite_min_score,
@@ -7487,9 +7634,17 @@ def run_track_2_daily_plan_cmd(
                     "pipeline_artifact": str(pipeline_artifact),
                     "candidate_count": len(batch),
                     "effective_min_score": effective_min_score_value,
+                    "planned_company_cap": planned_company_cap,
+                    "recommended_company_cap": recommended_company_cap,
+                    "effective_company_cap": per_company_limit,
                     "target_role": str(item.get("target_role") or ""),
                     "sent": False,
                 }
+                # Reserve the prepared batch before attempting a live send. A
+                # send exception can occur after partial progress was persisted,
+                # so reusing those slots for another company could exceed the
+                # global daily cap.
+                remaining_invites = max(0, remaining_invites - len(batch))
                 if send_linkedin and batch:
                     try:
                         send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = (
@@ -7524,7 +7679,6 @@ def run_track_2_daily_plan_cmd(
                                 "touchpoints_added": touchpoints_added,
                             }
                         )
-                        remaining_invites -= len(batch)
                 else:
                     candidate_artifact = write_artifact(
                         settings.artifacts_dir,
@@ -7539,8 +7693,11 @@ def run_track_2_daily_plan_cmd(
                         },
                     )
                     run_entry["candidate_artifact"] = str(candidate_artifact)
-                    remaining_invites -= len(batch)
                 invite_result["runs"].append(run_entry)
+            invite_result["affinity_headroom_allocated"] = (
+                initial_affinity_headroom - affinity_headroom
+            )
+            invite_result["remaining_budget"] = remaining_invites
             if send_linkedin:
                 failed_runs = [
                     run
@@ -8477,6 +8634,152 @@ def init_relationship_leads_cmd(
         typer.echo(f"Guide: {path.with_suffix('.md')}")
 
 
+@app.command("curate-peoplegrove-capture")
+def curate_peoplegrove_capture_cmd(
+    input_path: Annotated[
+        Path,
+        typer.Option(help="Browser-captured PeopleGrove JSON array"),
+    ],
+    output_path: Annotated[
+        Path,
+        typer.Option(help="Curated raw relationship-lead CSV; never writes tracker CSVs"),
+    ] = DEFAULT_PEOPLEGROVE_CURATED_PATH,
+    summary_path: Annotated[
+        Path | None,
+        typer.Option(help="JSON decision audit; defaults beside the curated CSV"),
+    ] = None,
+    enrichment_path: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Optional capture-bound PeopleGrove career-journey JSON used only "
+                "when a card headline has no parseable current role/company"
+            )
+        ),
+    ] = None,
+    workspace: Annotated[
+        Path | None,
+        typer.Option(help="Optional existing Outreach workspace for read-only contact dedupe"),
+    ] = None,
+    capture_batch: Annotated[
+        str,
+        typer.Option(help="Stable capture batch label; generated from date/input hash by default"),
+    ] = "",
+    captured_by: Annotated[
+        str,
+        typer.Option(help="Operator or capture-agent identifier stored in provenance"),
+    ] = "codex-peoplegrove-browser-capture",
+    minimum_score: Annotated[
+        int,
+        typer.Option(help="Minimum relevance score (0-100); default is conservative"),
+    ] = DEFAULT_MINIMUM_PEOPLEGROVE_SCORE,
+) -> None:
+    """Filter a signed-in PeopleGrove capture into the explicit review/import lane."""
+    try:
+        summary = curate_peoplegrove_capture(
+            input_path,
+            output_path=output_path,
+            summary_path=summary_path,
+            enrichment_path=enrichment_path,
+            workspace=workspace,
+            capture_batch=capture_batch,
+            captured_by=captured_by,
+            minimum_score=minimum_score,
+        )
+    except (PeopleGroveCurationError, FileNotFoundError) as exc:
+        typer.echo(f"PeopleGrove capture curation blocked: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo("Curated PeopleGrove capture without changing the Outreach tracker.")
+    typer.echo(
+        f"Accepted: {summary['rows_accepted']} | rejected: {summary['rows_rejected']}"
+    )
+    typer.echo(f"Curated CSV: {summary['output_path']}")
+    typer.echo(f"Decision audit: {summary['summary_path']}")
+
+
+@app.command("stage-relationship-leads")
+def stage_relationship_leads_cmd(
+    source_path: Annotated[
+        Path,
+        typer.Option(help="Raw relationship lead capture CSV to validate and stage"),
+    ] = DEFAULT_RELATIONSHIP_LEADS_PATH,
+    staged_path: Annotated[
+        Path | None,
+        typer.Option(help="Output staged CSV; defaults beside the raw capture CSV"),
+    ] = None,
+    source_key: Annotated[
+        str,
+        typer.Option(help="Optional preset defaults: peoplegrove_usc or recent_mba_pm"),
+    ] = "",
+) -> None:
+    """Validate, normalize, deduplicate, and stage a low-frequency relationship lead batch."""
+    if source_key and source_path == DEFAULT_RELATIONSHIP_LEADS_PATH:
+        source_path = relationship_source_default_path(source_key)
+    try:
+        summary = stage_relationship_leads(
+            source_path,
+            staged_path=staged_path,
+            source_key=source_key,
+        )
+    except (RelationshipLeadValidationError, FileNotFoundError) as exc:
+        typer.echo(f"Relationship lead staging blocked: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo("Staged relationship leads for review.")
+    typer.echo(f"Summary: {summary}")
+    typer.echo(f"Staged CSV: {summary['staged_path']}")
+    typer.echo(f"Manifest: {summary['manifest_path']}")
+
+
+@app.command("review-relationship-leads")
+def review_relationship_leads_cmd(
+    staged_path: Annotated[
+        Path,
+        typer.Option(help="Staged relationship lead CSV produced by stage-relationship-leads"),
+    ],
+    reviewer: Annotated[
+        str,
+        typer.Option(help="Reviewer name or stable operator identifier"),
+    ],
+    approve_row: Annotated[
+        list[str] | None,
+        typer.Option("--approve-row", help="Staged row_id to approve; repeatable"),
+    ] = None,
+    reject_row: Annotated[
+        list[str] | None,
+        typer.Option("--reject-row", help="Staged row_id to reject; repeatable"),
+    ] = None,
+    approve_all_ready: Annotated[
+        bool,
+        typer.Option(help="Approve every validation-ready row after reviewing the staged CSV"),
+    ] = False,
+    reject_all_blocked: Annotated[
+        bool,
+        typer.Option(help="Reject every validation-blocked row"),
+    ] = False,
+    review_notes: Annotated[
+        str,
+        typer.Option(help="Optional note applied to rows decided in this review action"),
+    ] = "",
+) -> None:
+    """Record explicit reviewer decisions and seal the staged CSV for import."""
+    try:
+        summary = review_staged_relationship_leads(
+            staged_path,
+            reviewer=reviewer,
+            approve_row_ids=tuple(approve_row or ()),
+            reject_row_ids=tuple(reject_row or ()),
+            approve_all_ready=approve_all_ready,
+            reject_all_blocked=reject_all_blocked,
+            review_notes=review_notes,
+        )
+    except (RelationshipLeadReviewError, FileNotFoundError) as exc:
+        typer.echo(f"Relationship lead review blocked: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo("Recorded relationship lead review decisions.")
+    typer.echo(f"Summary: {summary}")
+    typer.echo(f"Review manifest: {summary['review_manifest_path']}")
+
+
 @app.command("import-relationship-leads")
 def import_relationship_leads_cmd(
     workspace: Annotated[
@@ -8493,19 +8796,30 @@ def import_relationship_leads_cmd(
     ] = "",
     execute: Annotated[
         bool,
-        typer.Option(help="Write relationship leads to organizations.csv and contacts.csv"),
+        typer.Option(help="Write an explicitly reviewed staged batch to organizations.csv and contacts.csv"),
     ] = False,
 ) -> None:
-    """Import one-time relationship leads from PeopleGrove, recent MBA PM, USC founder, or manual pulls."""
+    """Preview raw/staged leads or import an explicitly reviewed one-time batch."""
     if source_key and source_path == DEFAULT_RELATIONSHIP_LEADS_PATH:
         source_path = relationship_source_default_path(source_key)
+    if execute and not source_path.exists():
+        typer.echo(f"Relationship lead import blocked: source file not found: {source_path}", err=True)
+        raise typer.Exit(code=2)
     ensure_relationship_leads_template(source_path, source_key=source_key)
-    summary = import_relationship_lead_seeds(
-        workspace,
-        source_path=source_path,
-        source_key=source_key,
-        execute=execute,
-    )
+    try:
+        summary = import_relationship_lead_seeds(
+            workspace,
+            source_path=source_path,
+            source_key=source_key,
+            execute=execute,
+        )
+    except (
+        RelationshipLeadConflictError,
+        RelationshipLeadReviewError,
+        RelationshipLeadValidationError,
+    ) as exc:
+        typer.echo(f"Relationship lead import blocked: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     artifact = write_artifact(
         OutreachSettings().artifacts_dir,
         "relationship-lead-import",
@@ -8946,10 +9260,22 @@ def run(
         requested_min_score=send_min_score,
         adaptive=adaptive_send,
     )
-    auto_limit = send_limit or recommend_auto_send_limit(
+    adaptive_auto_limit = recommend_auto_send_limit(
         len(payload["results"]),
         str(pool_metadata.get("pool_mode") or "unknown"),
     )
+    affinity_summary = (
+        payload.get("affinity_expansion")
+        if isinstance(payload.get("affinity_expansion"), dict)
+        else {}
+    )
+    try:
+        affinity_auto_limit = int(affinity_summary.get("recommended_send_cap") or 0)
+    except (TypeError, ValueError):
+        affinity_auto_limit = 0
+    if not affinity_summary.get("eligible") or affinity_auto_limit <= 3:
+        affinity_auto_limit = 0
+    auto_limit = send_limit or max(adaptive_auto_limit, affinity_auto_limit)
     batch = select_invite_candidates(
         payload["results"],
         verdict="send",

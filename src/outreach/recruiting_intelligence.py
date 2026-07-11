@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -34,7 +35,9 @@ def company_signals_from_feed_ledger(
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     signals: list[CandidateCompanySignal] = []
-    known = {item.strip().casefold() for item in known_companies if item.strip()}
+    known_names = [item.strip() for item in known_companies if item.strip()]
+    known = {item.casefold() for item in known_names}
+    known_by_token = {_company_token(item): item for item in known_names}
     selected_ids = (
         {item.strip() for item in signal_ids if item.strip()}
         if signal_ids is not None
@@ -50,6 +53,12 @@ def company_signals_from_feed_ledger(
         company = normalize_extracted_company(
             str(row.get("company") or ""),
             post_text,
+        )
+        company = _company_page_identity(
+            company,
+            author_name=str(row.get("author_name") or ""),
+            company_url=str(row.get("company_url") or ""),
+            known_by_token=known_by_token,
         )
         kinds = {item.strip() for item in str(row.get("signal_kinds") or "").split(";") if item.strip()}
         disposition = str(row.get("review_disposition") or "pending").strip()
@@ -94,6 +103,36 @@ def company_signals_from_feed_ledger(
             )
         )
     return signals
+
+
+def _company_page_identity(
+    company: str,
+    *,
+    author_name: str,
+    company_url: str,
+    known_by_token: dict[str, str],
+) -> str:
+    """Prefer a LinkedIn company-page identity when DOM extraction used a person."""
+
+    match = re.search(r"linkedin\.com/company/([^/?#]+)", company_url, re.IGNORECASE)
+    if match is None:
+        return company
+    slug = match.group(1)
+    slug_token = _company_token(slug)
+    company_token = _company_token(company)
+    author_token = _company_token(author_name)
+    if not slug_token or company_token == slug_token:
+        return company
+    if company_token and company_token != author_token:
+        return company
+    known_name = known_by_token.get(slug_token)
+    if known_name:
+        return known_name
+    return " ".join(part.capitalize() for part in re.split(r"[-_]+", slug) if part)
+
+
+def _company_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
 def company_signals_from_source_metrics(

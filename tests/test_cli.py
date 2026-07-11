@@ -197,6 +197,45 @@ def test_source_breakdown_marks_missing_failed_linkedin_capture_as_failed() -> N
     assert by_source["LinkedIn profile viewers"]["details"]["reason"] == "linkedin_capture_unavailable"
 
 
+def test_source_breakdown_uses_only_referenced_company_news_capture(tmp_path: Path) -> None:
+    current = tmp_path / "current-company-news-capture.json"
+    current.write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "captured": 6,
+                "added": 4,
+                "sources": [
+                    {"source_id": "techcrunch_startups", "status": "completed"},
+                    {"source_id": "crunchbase_news", "status": "completed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    stale = tmp_path / "stale-company-news-capture.json"
+    stale.write_text(
+        json.dumps({"status": "completed", "captured": 99, "added": 99}),
+        encoding="utf-8",
+    )
+
+    rows = _source_breakdown(
+        {
+            "outreach_maintenance": {
+                "ran": True,
+                "company_news_returncode": 0,
+                "company_news_artifact": str(current),
+            }
+        }
+    )
+    item = next(row for row in rows if row["source"] == "Company/news feeds")
+
+    assert item["status"] == "completed"
+    assert item["raw"] == 6
+    assert item["kept"] == 4
+    assert "stale-company-news-capture.json" not in str(item)
+
+
 def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     artifacts = tmp_path / "artifacts"

@@ -221,10 +221,12 @@ class _UniqueRole:
 
 _PRODUCT_STRATEGY_RULES = (
     (re.compile(r"\bproduct\s+strateg(?:y|ic)\b"), "product strategy"),
+    (re.compile(r"\bproduct\s+strategist\b"), "product strategist"),
     (re.compile(r"\bstrateg(?:y|ic)\b.*\bproduct\b"), "strategy plus product"),
 )
 
 _PRODUCT_PM_RULES = (
+    (re.compile(r"\b(?:growth\s+product|product\s+growth)\b"), "growth product"),
     (re.compile(r"\bproduct\s+(?:ops|operations)\b"), "product operations"),
     (re.compile(r"\bproduct\s+management\b"), "product management"),
     (re.compile(r"\bproduct\s+manager\b"), "product manager"),
@@ -260,13 +262,23 @@ _PROGRAM_OPERATIONS_RULES = (
 
 _GROWTH_EXCLUSIONS = re.compile(
     r"\b(?:sales|account executive|business development|demand gen(?:eration)?|seo|"
-    r"paid media|performance marketing|growth marketing)\b"
+    r"paid media|marketing)\b"
 )
 _GROWTH_RULES = (
     (re.compile(r"\bgrowth\s+strateg(?:y|ic)\b"), "growth strategy"),
     (re.compile(r"\bgrowth\s+(?:ops|operations)\b"), "growth operations"),
-    (re.compile(r"\b(?:growth|lifecycle)\s+(?:manager|lead|analyst|associate)\b"), "growth role"),
-    (re.compile(r"\bhead\s+of\s+growth\b"), "head of growth"),
+    (
+        re.compile(r"\b(?:strateg(?:y|ic)|ops|operations)\s*(?:and|&)\s*growth\b"),
+        "strategy or operations and growth",
+    ),
+    (
+        re.compile(r"\bgrowth\s*(?:and|&)\s*(?:strateg(?:y|ic)|ops|operations)\b"),
+        "growth and strategy or operations",
+    ),
+    (
+        re.compile(r"\buser\s+growth\s+(?:strateg(?:y|ic)|ops|operations|project)\b"),
+        "user growth strategy or operations",
+    ),
 )
 
 

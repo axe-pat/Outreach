@@ -101,11 +101,41 @@ Default channels by target type:
 - hacker houses and communities: X, email, or website form plus LinkedIn
 - warm referrals: direct LinkedIn message or email, depending on relationship strength
 
+## Shared Daily Decision Queue
+
+The entity workbook remains Outreach's relationship system of record and
+ResumeGenerator's `jobs.xlsx` remains the application system of record. The cross-repo
+layer is deliberately a run-stamped decision artifact rather than a third tracker.
+Its scope labels the ResumeGenerator input as exact-run evidence and the Outreach
+workbook/watchlist inputs as snapshots:
+
+```bash
+python -m outreach.shared_discovery \
+  --nightly-summary "../ResumeGenerator v1/discovery/source_validation/<run>-nightly-pipeline-summary.json" \
+  --workspace workspace
+```
+
+The builder rejects an unscoped/stale nightly pointer, normalizes every application
+and startup-company bucket, merges duplicates by conservative company identity, then
+adds approved watchlist and warm-contact evidence. Each JSON/CSV row carries roles,
+source provenance, the recommended action, and one of three gates:
+`ready_for_next_stage`, `human_review_required`, or `buffered`. It never sends and
+never writes a company directly into `jobs.xlsx`.
+
+## Review-Gated Company and News Sources
+
+Public TechCrunch Startups and Crunchbase News RSS feeds now enter the same candidate
+rubric as LinkedIn feed, YC, and Built In signals. Hacker News is available only as an
+explicit opt-in source. Reviewed accelerator/directory exports can be supplied as
+CSV, JSON, or JSONL with `capture-company-news --input-path`; all paths preserve the
+source URL/run and remain pending until a human approves a rubric-qualified candidate.
+
 ## Build Order
 
 1. Keep the current LinkedIn pipeline as the person-discovery and note-generation engine.
 2. Use the workbook as the single local source of truth.
-3. Add importers from existing artifacts and the resume-generator job list.
-4. Add new source-specific discoverers one at a time:
+3. Keep the shared run-stamped queue and importers from existing artifacts and the
+   ResumeGenerator job list healthy.
+4. Add new source-specific discoverers one at a time through the reviewed candidate contract:
    startup directories, USC faculty pages, incubator lists, hacker house lists.
 5. Add email outreach as another touchpoint channel instead of building a parallel system.

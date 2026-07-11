@@ -24,14 +24,22 @@ from outreach.role_surface_monitor import (
     [
         ("Senior Product Manager, AI", RoleFamily.PRODUCT_PM),
         ("Growth Product Manager", RoleFamily.PRODUCT_PM),
+        ("Growth Product Intern", RoleFamily.PRODUCT_PM),
         ("Director of Product Strategy", RoleFamily.PRODUCT_STRATEGY),
+        ("Product Strategist", RoleFamily.PRODUCT_STRATEGY),
         ("Business Operations Manager", RoleFamily.BIZOPS_STRATEGY),
         ("Chief of Staff to the CEO", RoleFamily.BIZOPS_STRATEGY),
         ("Technical Program Manager", RoleFamily.PROGRAM_OPERATIONS),
         ("Growth Strategy Lead", RoleFamily.GROWTH_ADJACENT),
         ("Growth Operations Manager", RoleFamily.GROWTH_ADJACENT),
-        ("Head of Growth", RoleFamily.GROWTH_ADJACENT),
+        ("Growth & Operations Associate", RoleFamily.GROWTH_ADJACENT),
+        ("Startup Operations & Growth Intern", RoleFamily.GROWTH_ADJACENT),
+        ("Category User Growth Project Intern", RoleFamily.GROWTH_ADJACENT),
+        ("Head of Growth", RoleFamily.OTHER),
+        ("Business Growth Intern", RoleFamily.OTHER),
+        ("Startup Growth Fellow", RoleFamily.OTHER),
         ("Growth Marketing Manager", RoleFamily.OTHER),
+        ("Growth Strategy Marketing Intern", RoleFamily.OTHER),
         ("Revenue Operations Manager", RoleFamily.OTHER),
         ("Enterprise Account Executive", RoleFamily.OTHER),
     ],
@@ -41,6 +49,50 @@ def test_role_family_classifier_keeps_growth_lane_narrow(
     expected: RoleFamily,
 ) -> None:
     assert classify_role_title(title).family == expected
+
+
+def test_role_surface_counts_production_adjacent_title_shapes() -> None:
+    run_id = "nightly-adjacent-regression"
+    report = build_role_surface_report(
+        run_id=run_id,
+        observations=[
+            RoleObservation(
+                run_id=run_id,
+                source="JobSpy",
+                title="Product Strategist",
+                company="Slalom",
+            ),
+            RoleObservation(
+                run_id=run_id,
+                source="JobSpy",
+                title="Startup Operations & Growth Intern",
+                company="Apprenticely",
+            ),
+            RoleObservation(
+                run_id=run_id,
+                source="LinkedIn",
+                title="Category User Growth Project Intern",
+                company="TikTok",
+            ),
+            RoleObservation(
+                run_id=run_id,
+                source="LinkedIn",
+                title="Business Growth Intern",
+                company="Generic Co",
+            ),
+        ],
+        source_runs=[
+            SourceRun(run_id=run_id, source="JobSpy", status=SourceRunStatus.RAN),
+            SourceRun(run_id=run_id, source="LinkedIn", status=SourceRunStatus.RAN),
+        ],
+    )
+
+    by_family = {item.family: item for item in report.family_coverage}
+    assert by_family[RoleFamily.PRODUCT_STRATEGY].discovered == 1
+    assert by_family[RoleFamily.GROWTH_ADJACENT].discovered == 2
+    assert by_family[RoleFamily.OTHER].discovered == 1
+    assert "Product Strategy" not in report.summary["families_below_floor"]
+    assert "Narrow Growth-adjacent" not in report.summary["families_below_floor"]
 
 
 def test_role_surface_report_is_run_scoped_and_explicit_about_skipped_sources() -> None:

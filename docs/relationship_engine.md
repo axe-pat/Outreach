@@ -240,7 +240,8 @@ not daily scrapers. Their safe path is now explicit:
    This enrichment loader accepts only signed-in, capture-hash-bound PeopleGrove
    data. Public-web corroboration is incompatible with it and must remain a
    separately reviewed/staged relationship batch with its evidence URL and
-   `peoplegrove_public_web` university-directory provenance intact.
+   resolution status plus `peoplegrove_public_web` university-directory
+   provenance intact.
 3. Inspect its curated relationship-lead CSV and JSON decision audit. The audit
    records category, score, source identity, and an explicit rejection reason for
    every captured profile.

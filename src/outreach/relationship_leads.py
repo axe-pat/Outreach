@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from outreach.company_enrichment import format_notes_parts, parse_notes_parts
 from outreach.tracking import (
@@ -1120,6 +1120,13 @@ def _relationship_identity_tokens(lead: RelationshipLead) -> set[str]:
         tokens.add(f"linkedin:{_canonical_url_identity(lead.linkedin_url)}")
     if lead.email:
         tokens.add(f"email:{lead.email.strip().lower()}")
+    tokens.update(
+        _relationship_source_identity_tokens(
+            source_type=lead.source_type,
+            source_record_id=lead.source_record_id,
+            source_url=lead.source_url,
+        )
+    )
     if lead.full_name and lead.company:
         tokens.add(
             f"name-company:{_identity_text(lead.full_name)}|{_identity_text(lead.company)}"
@@ -1129,7 +1136,13 @@ def _relationship_identity_tokens(lead: RelationshipLead) -> set[str]:
 
 def _relationship_dedupe_key(lead: RelationshipLead) -> str:
     tokens = _relationship_identity_tokens(lead)
-    for prefix in ("linkedin:", "email:", "name-company:"):
+    for prefix in (
+        "linkedin:",
+        "email:",
+        "source-record:",
+        "source-url:",
+        "name-company:",
+    ):
         for token in sorted(tokens):
             if token.startswith(prefix):
                 return token
@@ -1510,8 +1523,22 @@ def _matching_contacts(
     linkedin = _canonical_url_identity(lead.linkedin_url) if lead.linkedin_url else ""
     email = lead.email.strip().lower()
     full_name = _identity_text(lead.full_name)
+    lead_source_identities = _relationship_source_identity_tokens(
+        source_type=lead.source_type,
+        source_record_id=lead.source_record_id,
+        source_url=lead.source_url,
+    )
     matches: dict[str, ContactRecord] = {}
     for contact in contacts:
+        _, contact_metadata = parse_notes_parts(contact.notes)
+        contact_source_identities = _relationship_source_identity_tokens(
+            source_type=contact_metadata.get("relationship_source_type", ""),
+            source_record_id=contact_metadata.get(
+                "relationship_source_record_id",
+                "",
+            ),
+            source_url=contact_metadata.get("relationship_evidence_url", ""),
+        )
         if (
             (
                 linkedin
@@ -1519,6 +1546,7 @@ def _matching_contacts(
                 and _canonical_url_identity(contact.linkedin_url) == linkedin
             )
             or (email and contact.email and contact.email.strip().lower() == email)
+            or bool(lead_source_identities & contact_source_identities)
             or (
                 contact.organization_id == organization_id
                 and _identity_text(contact.full_name) == full_name
@@ -1526,6 +1554,66 @@ def _matching_contacts(
         ):
             matches[contact.contact_id] = contact
     return list(matches.values())
+
+
+def _relationship_source_identity_tokens(
+    *,
+    source_type: str,
+    source_record_id: str,
+    source_url: str,
+) -> set[str]:
+    """Return stable person identities preserved in relationship provenance.
+
+    Source record IDs are scoped because different directories can reuse short
+    identifiers. Evidence URLs are used only when no record ID is available,
+    except for PeopleGrove profile URLs whose ``userProfile`` query parameter
+    is itself a stable person identity. This avoids treating shared directory
+    pages (for example, one advisory-board page listing many people) as one
+    contact.
+    """
+
+    tokens: set[str] = set()
+    record_id = _clean(source_record_id).casefold()
+    if record_id:
+        tokens.add(
+            "source-record:"
+            f"{_relationship_source_identity_scope(source_type)}|{record_id}"
+        )
+
+    url_identity, peoplegrove_profile = _relationship_source_url_identity(source_url)
+    if url_identity and (not record_id or peoplegrove_profile):
+        tokens.add(f"source-url:{url_identity}")
+    return tokens
+
+
+def _relationship_source_identity_scope(source_type: str) -> str:
+    normalized = _normalized_source_type(source_type)
+    # Public corroboration is a review/evidence mode over the same signed-in
+    # PeopleGrove identity, not a different person namespace.
+    if normalized.startswith("peoplegrove"):
+        return "peoplegrove"
+    return normalized
+
+
+def _relationship_source_url_identity(value: str) -> tuple[str, bool]:
+    if not value:
+        return "", False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return value.strip().casefold(), False
+    profile_value = next(
+        (
+            item_value
+            for key, item_value in parse_qsl(parts.query, keep_blank_values=False)
+            if key.casefold() == "userprofile" and item_value.strip()
+        ),
+        "",
+    )
+    base = _canonical_url_identity(value)
+    if profile_value:
+        return f"{base}?userprofile={profile_value.strip().casefold()}", True
+    return base, False
 
 
 def _batch_source_kind(leads: list[RelationshipLead]) -> SourceKind:

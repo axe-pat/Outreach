@@ -137,7 +137,9 @@ paths visible instead of accidentally filtering them out.
   LinkedIn expansion pass for
   `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
-  - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`, `USC`, `Marshall`, plus `Product`, `hiring`, and product leadership terms
+  - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`,
+    `USC`, `Marshall`, `Thapar`, `Hevo`, and `Optum`, plus role-family-specific
+    product, hiring, leadership, strategy, operations, and narrow growth terms
   - raise per-company caps from 3 to at most 5 only when actual scored affinity
     candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
@@ -145,7 +147,8 @@ paths visible instead of accidentally filtering them out.
     runtime, partial-send reservation, and no-oversend tests pass against a live
     canary
 - [x] Add a merged daily queue that combines:
-  - apply-backed outreach from `ResumeGenerator v1/discovery/jobs.xlsx`
+  - apply-backed outreach from the exact ResumeGenerator current-run action
+    queue, ultimately derived from `ResumeGenerator v1/discovery/jobs.xlsx`
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
 - [x] Use a separate shared module/artifact rather than another workbook. The

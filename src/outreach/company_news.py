@@ -393,6 +393,103 @@ def company_news_signal_id(signal: CandidateCompanySignal) -> str:
     return f"company-news-{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:18]}"
 
 
+def company_news_capture_snapshots(
+    signals: Iterable[CandidateCompanySignal],
+) -> tuple[list[dict[str, object]], str]:
+    """Serialize one capture's signals so later replay never consults the mutable ledger."""
+
+    by_id: dict[str, dict[str, object]] = {}
+    for signal in signals:
+        signal_id = company_news_signal_id(signal)
+        snapshot = {
+            "signal_id": signal_id,
+            "signal": signal.model_dump(mode="json"),
+        }
+        previous = by_id.get(signal_id)
+        if previous is not None and previous != snapshot:
+            raise ValueError(
+                f"Company-news capture produced conflicting snapshots for {signal_id!r}"
+            )
+        by_id[signal_id] = snapshot
+    snapshots = [by_id[signal_id] for signal_id in sorted(by_id)]
+    return snapshots, _snapshot_sha256(snapshots)
+
+
+def load_company_news_capture_snapshots(
+    payload: Mapping[str, object],
+    *,
+    artifact_label: str = "company-news capture artifact",
+) -> list[CandidateCompanySignal]:
+    """Load immutable exact-run evidence, failing closed for ID-only legacy captures."""
+
+    raw_ids = payload.get("captured_signal_ids")
+    if not isinstance(raw_ids, list) or any(not isinstance(item, str) for item in raw_ids):
+        raise ValueError(f"{artifact_label} has invalid captured_signal_ids")
+    captured_ids = [clean_text(item) for item in raw_ids]
+    if any(not item for item in captured_ids) or len(captured_ids) != len(set(captured_ids)):
+        raise ValueError(f"{artifact_label} has blank or duplicate captured_signal_ids")
+
+    raw_snapshots = payload.get("captured_signal_snapshots")
+    if raw_snapshots is None:
+        if captured_ids:
+            raise ValueError(
+                f"{artifact_label} predates immutable signal snapshots; recapture it "
+                "instead of replaying IDs from the mutable company-news ledger"
+            )
+        return []
+    if not isinstance(raw_snapshots, list):
+        raise ValueError(f"{artifact_label} captured_signal_snapshots must be a list")
+    expected_sha256 = clean_text(payload.get("captured_signal_snapshots_sha256"))
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise ValueError(
+            f"{artifact_label} is missing a valid captured_signal_snapshots_sha256"
+        )
+    if _snapshot_sha256(raw_snapshots) != expected_sha256:
+        raise ValueError(f"{artifact_label} immutable signal snapshot hash does not match")
+
+    signals: list[CandidateCompanySignal] = []
+    snapshot_ids: list[str] = []
+    for index, raw_snapshot in enumerate(raw_snapshots):
+        if not isinstance(raw_snapshot, dict):
+            raise ValueError(f"{artifact_label} snapshot {index} must be an object")
+        signal_id = clean_text(raw_snapshot.get("signal_id"))
+        signal_payload = raw_snapshot.get("signal")
+        if not signal_id or not isinstance(signal_payload, dict):
+            raise ValueError(
+                f"{artifact_label} snapshot {index} is missing signal_id or signal"
+            )
+        try:
+            signal = CandidateCompanySignal.model_validate(signal_payload)
+        except ValueError as exc:
+            raise ValueError(
+                f"{artifact_label} snapshot {signal_id!r} has an invalid signal: {exc}"
+            ) from exc
+        if company_news_signal_id(signal) != signal_id:
+            raise ValueError(
+                f"{artifact_label} snapshot {signal_id!r} does not match its signal identity"
+            )
+        snapshot_ids.append(signal_id)
+        signals.append(signal)
+
+    if len(snapshot_ids) != len(set(snapshot_ids)):
+        raise ValueError(f"{artifact_label} has duplicate immutable signal snapshots")
+    if set(snapshot_ids) != set(captured_ids):
+        raise ValueError(
+            f"{artifact_label} captured_signal_ids do not match its immutable snapshots"
+        )
+    return signals
+
+
+def _snapshot_sha256(snapshots: object) -> str:
+    encoded = json.dumps(
+        snapshots,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 _COMPANY_VERB_PATTERN = re.compile(
     r"^(?P<company>.{2,80}?)\s+(?:reportedly\s+|just\s+)?"
     r"(?P<verb>raises?|raised|lands?|landed|secures?|secured|closes?|closed|"

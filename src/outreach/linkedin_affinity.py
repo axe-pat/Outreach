@@ -60,6 +60,22 @@ _RELEVANT_ROLE_PATTERN = re.compile(
     r")\b",
     flags=re.I,
 )
+_ROUTING_ROLE_BUCKETS = {
+    "Product",
+    "Engineering",
+    "Recruiting",
+    "University Recruiting",
+}
+_FOUNDER_TITLE_PATTERN = re.compile(
+    r"\b(?:founder|co[ -]?founder|chief executive officer|ceo)\b",
+    flags=re.I,
+)
+_ROUTING_TITLE_EXCLUSIONS = re.compile(
+    r"\b(?:executive assistant|administrative assistant|executive business partner|"
+    r"chief information security officer|ciso)\b",
+    flags=re.I,
+)
+_DEFAULT_RECOMMENDATION_BASE_CAP = 3
 
 
 @dataclass(frozen=True)
@@ -263,6 +279,58 @@ def high_affinity_candidate_signals(candidate: Mapping[str, object]) -> tuple[st
     return tuple(_dedupe_terms(signals))
 
 
+def affinity_candidate_qualified_for_lift(
+    candidate: Mapping[str, object],
+    *,
+    min_score: int = 35,
+    target_role_family: str = "",
+) -> bool:
+    """Return whether a candidate can justify an incremental affinity slot.
+
+    A search-pass match alone is deliberately insufficient.  Incremental
+    volume requires a sendable person, a concrete warm path, and enough target
+    role/routing evidence to explain why this recipient is useful for the
+    opportunity being pursued.
+    """
+
+    if _as_bool(candidate.get("existing_connection")):
+        return False
+    if not high_affinity_candidate_signals(candidate):
+        return False
+    linkedin_url = str(candidate.get("linkedin_url") or "").strip().casefold()
+    if "linkedin.com/in/" not in linkedin_url:
+        return False
+    score = _optional_int(candidate.get("score"))
+    if score is None or score < min_score:
+        return False
+    quality = candidate.get("polished_note_qc") or candidate.get("note_qc") or {}
+    if not isinstance(quality, Mapping) or quality.get("verdict") != "send":
+        return False
+
+    family = str(candidate.get("target_role_family") or "").strip().casefold()
+    expected_family = target_role_family.strip().casefold()
+    if (
+        not _as_bool(candidate.get("target_role_is_concrete"))
+        or family not in _ROLE_QUERY_TERMS
+        or (expected_family and family != expected_family)
+        or str(candidate.get("target_role_source") or "").strip().casefold()
+        == "product_primary_default"
+    ):
+        return False
+
+    title = str(candidate.get("title") or "").strip()
+    role_bucket = str(candidate.get("role_bucket") or "").strip()
+    if not title or _ROUTING_TITLE_EXCLUSIONS.search(title):
+        return False
+    if role_bucket in _ROUTING_ROLE_BUCKETS:
+        return True
+    if role_bucket == "Founder":
+        return _FOUNDER_TITLE_PATTERN.search(title) is not None
+    if role_bucket == "Adjacent":
+        return _RELEVANT_ROLE_PATTERN.search(title) is not None
+    return False
+
+
 def recommend_affinity_send_cap(
     candidates: Iterable[Mapping[str, object]],
     *,
@@ -274,25 +342,23 @@ def recommend_affinity_send_cap(
     """Bound a send-cap lift to actual, sendable affinity results.
 
     The planner never raises volume merely because affinity searches ran.  It
-    requires at least two non-connected candidates whose cards contain a real
-    USC/Marshall or shared-history signal and whose existing score clears the
-    normal send floor.
+    requires at least two candidates that pass the complete incremental-volume
+    gate: non-connected, concrete affinity, valid profile URL, normal score and
+    send-QC floors, plus a concrete target role and defensible recipient route.
     """
 
     base = max(0, base_cap)
     ceiling = max(base, max_cap)
     if not plan.eligible:
         return base
-    qualified = 0
-    for candidate in candidates:
-        if _as_bool(candidate.get("existing_connection")):
-            continue
-        if not high_affinity_candidate_signals(candidate):
-            continue
-        score = _optional_int(candidate.get("score"))
-        if score is None or score < min_score:
-            continue
-        qualified += 1
+    qualified = sum(
+        affinity_candidate_qualified_for_lift(
+            candidate,
+            min_score=min_score,
+            target_role_family=plan.target_role_family,
+        )
+        for candidate in candidates
+    )
     if qualified < 2:
         return base
     return min(ceiling, max(base, qualified))
@@ -316,7 +382,15 @@ def allocate_affinity_invite_cap(
     base = max(0, planned_cap)
     remaining = max(0, remaining_invites)
     headroom = max(0, affinity_headroom)
-    extra = min(max(0, recommended_cap - base), headroom)
+    # ``recommend_affinity_send_cap`` reports the ordinary three-person cap
+    # when there is no evidence-backed lift.  A smaller daily-plan allocation
+    # must remain smaller in that case; three is not an implicit floor.
+    target = (
+        base
+        if recommended_cap <= _DEFAULT_RECOMMENDATION_BASE_CAP
+        else max(base, recommended_cap)
+    )
+    extra = min(max(0, target - base), headroom)
     remaining += extra
     return min(base + extra, remaining), remaining, headroom - extra
 

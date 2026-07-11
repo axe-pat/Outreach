@@ -53,6 +53,7 @@ from outreach.story_fit_targets import (
 )
 from outreach.intelligence_commands import register_intelligence_commands
 from outreach.linkedin_affinity import (
+    affinity_candidate_qualified_for_lift,
     affinity_pass_candidate_relevant,
     allocate_affinity_invite_cap,
     filter_affinity_pass_definitions,
@@ -163,6 +164,12 @@ def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> 
     recruiter_keywords = ["recruiter", "sourcer", "talent", "campus recruiting", "university recruiting"]
     university_keywords = ["usc", "university", "campus", "marshall school of business", "career center"]
     adjacent_override_keywords = ["solution engineer", "solutions engineer", "solutions architect", "solution architect"]
+    executive_office_keywords = [
+        "office of the ceo",
+        "office of ceo",
+        "ceo's office",
+        "chief executive office",
+    ]
     founder_keywords = ["founder", "co-founder", "cofounder", "chief executive officer", " ceo", "ceo ", "founding member"]
     startup_operator_keywords = [
         "chief of staff",
@@ -182,6 +189,11 @@ def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> 
         if any(keyword in raw_text_lower for keyword in university_keywords):
             return "University Recruiting"
         return "Recruiting"
+
+    # Working in the CEO's office is an adjacent/operator route, not evidence
+    # that the person is the CEO or a founder.
+    if any(keyword in title_lower for keyword in executive_office_keywords):
+        return "Adjacent"
 
     if any(keyword in title_lower for keyword in founder_keywords):
         return "Founder"
@@ -231,11 +243,24 @@ def detect_shared_history_signals(raw_text: str, settings: OutreachSettings) -> 
     return list(dict.fromkeys(signals))
 
 
+_LINKEDIN_COMPANY_SEARCH_NAMES = {
+    # The application/company source uses the shorter website brand, while
+    # LinkedIn exposes the exact typeahead identity under the legal name.
+    "globalization partners": "Globalization Partners International",
+    "parsec automation": "Parsec Automation, LLC",
+}
+
+
+def linkedin_company_search_name(company: str) -> str:
+    cleaned = " ".join(company.split()).strip()
+    return _LINKEDIN_COMPANY_SEARCH_NAMES.get(cleaned.casefold(), cleaned)
+
+
 def company_search_aliases(company: str) -> list[str]:
     cleaned = " ".join(company.split()).strip()
     if not cleaned:
         return []
-    aliases = [cleaned]
+    aliases = [cleaned, linkedin_company_search_name(cleaned)]
     suffix_patterns = [
         r"\s+inc\.?$",
         r"\s+incorporated$",
@@ -391,6 +416,16 @@ def effective_send_min_score(payload: dict, requested_min_score: int, adaptive: 
 
 
 def _is_startup_founder_title(title_lower: str) -> bool:
+    if any(
+        signal in title_lower
+        for signal in [
+            "office of the ceo",
+            "office of ceo",
+            "ceo's office",
+            "chief executive office",
+        ]
+    ):
+        return False
     return any(
         signal in title_lower
         for signal in [
@@ -1762,7 +1797,7 @@ def execute_linkedin_company_run(
         "coverage_only": False,
         "search_company": company,
     }
-    search_company = company
+    search_company = linkedin_company_search_name(company)
     if company_mode == "startup":
         preflight_limit = settings.search.startup_preflight_limit
         preflight_pages = settings.search.startup_preflight_max_pages
@@ -1967,6 +2002,12 @@ def execute_linkedin_company_run(
                 }
             )
             typer.echo(f"- Pass {pass_name}: failed ({exc})")
+            # Every pass applies the same exact-company typeahead filter. If
+            # the very first filter cannot resolve the company, retrying the
+            # identical lookup for every affinity/role pass only turns one
+            # deterministic miss into many minutes of repeated browser waits.
+            # A later isolated failure remains non-terminal because an earlier
+            # pass already proved that LinkedIn can resolve this company.
             if should_stop_after_company_filter_error(
                 error_text,
                 successful_filtered_passes=successful_filtered_passes,
@@ -2065,6 +2106,13 @@ def execute_linkedin_company_run(
                 bool(high_affinity_candidate_signals(candidate))
                 for candidate in scored_candidates
             ),
+            "qualified_affinity_candidate_count": sum(
+                affinity_candidate_qualified_for_lift(
+                    candidate,
+                    target_role_family=affinity_plan.target_role_family,
+                )
+                for candidate in scored_candidates
+            ),
             "recommended_send_cap": (
                 recommend_affinity_send_cap(
                     scored_candidates,
@@ -2081,6 +2129,7 @@ def execute_linkedin_company_run(
         "dry-run-pipeline",
         {
             "company": company,
+            "search_company": search_company,
             "company_mode": company_mode,
             "dry_run": dry_run,
             "passes": pass_definitions,
@@ -2139,6 +2188,80 @@ def select_invite_candidates(
             item["note"] = item["polished_note"]
         eligible.append(item)
     return eligible[start_at : start_at + limit]
+
+
+def select_invite_candidates_with_affinity_lift(
+    candidates: list[dict],
+    *,
+    verdict: str = "send",
+    min_score: int = 35,
+    planned_limit: int,
+    effective_limit: int,
+    target_role_family: str = "",
+) -> list[dict]:
+    """Preserve the planned top-N and reserve every lifted slot for affinity.
+
+    ``effective_limit`` may exceed ``planned_limit`` only because the affinity
+    allocator found daily headroom.  The base slice therefore keeps the normal
+    global ranking, while the incremental slice is drawn solely from candidates
+    that independently satisfy the affinity lift gate.
+    """
+
+    planned = max(0, min(planned_limit, effective_limit))
+    effective = max(0, effective_limit)
+    eligible = select_invite_candidates(
+        candidates,
+        verdict=verdict,
+        min_score=min_score,
+        limit=len(candidates),
+        start_at=0,
+    )
+    base = eligible[:planned]
+    lift_slots = max(0, effective - planned)
+    if lift_slots == 0:
+        return base
+
+    selected_urls = {
+        str(candidate.get("linkedin_url") or "").strip().casefold()
+        for candidate in base
+    }
+    affinity_fill = [
+        candidate
+        for candidate in eligible
+        if str(candidate.get("linkedin_url") or "").strip().casefold()
+        not in selected_urls
+        and affinity_candidate_qualified_for_lift(
+            candidate,
+            min_score=min_score,
+            target_role_family=target_role_family,
+        )
+    ]
+    return [*base, *affinity_fill[:lift_slots]]
+
+
+def summarize_linkedin_mapping_artifact(payload: dict[str, object]) -> dict[str, object]:
+    """Expose per-company browser failures instead of calling every run successful."""
+
+    raw_passes = payload.get("pass_summaries")
+    passes = [item for item in raw_passes if isinstance(item, dict)] if isinstance(raw_passes, list) else []
+    errors = [str(item.get("error") or "") for item in passes if item.get("error")]
+    try:
+        candidate_count = int(payload.get("count") or 0)
+    except (TypeError, ValueError):
+        candidate_count = 0
+    explicit_filter_failure = str(payload.get("company_filter_status") or "").startswith(
+        "failed"
+    )
+    if errors or explicit_filter_failure:
+        status = "partial" if candidate_count else "failed"
+    else:
+        status = "completed"
+    return {
+        "status": status,
+        "candidate_count": candidate_count,
+        "pass_failure_count": len(errors),
+        "pass_errors": list(dict.fromkeys(errors)),
+    }
 
 
 def persist_invite_send_results(
@@ -9161,32 +9284,78 @@ def run_track_2_daily_plan_cmd(
             for item in mapping_items:
                 org = org_by_id.get(str(item.get("organization_id") or ""))
                 company = str(item.get("company") or "")
-                artifact = execute_linkedin_company_run(
-                    settings=settings,
-                    company=company,
-                    dry_run=True,
-                    company_mode=_company_mode_for_org(org) if org else "default",
-                    include_pass=TRACK_2_MAPPING_PASSES,
-                    target_role_title=str(item.get("target_role") or ""),
-                )
-                import_summary = workbook.import_linkedin_artifact(
-                    artifact_path=artifact,
-                    target_lists="referrals;linkedin;track-2",
-                    organization_type=(org.organization_type if org else OrganizationType.COMPANY),
-                    touchpoint_status="Prepared",
-                )
-                mapping_result["runs"].append(
-                    {
-                        "company": company,
-                        "artifact": str(artifact),
-                        "organization_id": import_summary.organization_id,
-                        "source_id": import_summary.source_id,
-                        "contacts_added": import_summary.contacts_added,
-                        "touchpoints_added": import_summary.touchpoints_added,
-                        "search_passes": list(TRACK_2_MAPPING_PASSES),
-                    }
-                )
-            mapping_result["status"] = "ran"
+                try:
+                    artifact = execute_linkedin_company_run(
+                        settings=settings,
+                        company=company,
+                        dry_run=True,
+                        company_mode=_company_mode_for_org(org) if org else "default",
+                        include_pass=TRACK_2_MAPPING_PASSES,
+                        target_role_title=str(item.get("target_role") or ""),
+                    )
+                except Exception as exc:
+                    mapping_result["runs"].append(
+                        {
+                            "company": company,
+                            "artifact": "",
+                            "status": "failed",
+                            "candidate_count": 0,
+                            "pass_failure_count": 1,
+                            "pass_errors": [f"{type(exc).__name__}: {exc}"],
+                        }
+                    )
+                    continue
+                with artifact.open(encoding="utf-8") as handle:
+                    artifact_payload = json.load(handle)
+                run_summary = summarize_linkedin_mapping_artifact(artifact_payload)
+                run_entry: dict[str, object] = {
+                    "company": company,
+                    "artifact": str(artifact),
+                    "search_passes": list(TRACK_2_MAPPING_PASSES),
+                    "organization_id": org.organization_id if org else "",
+                    "source_id": "",
+                    "contacts_added": 0,
+                    "touchpoints_added": 0,
+                    **run_summary,
+                }
+                if int(run_summary.get("candidate_count") or 0) > 0:
+                    import_summary = workbook.import_linkedin_artifact(
+                        artifact_path=artifact,
+                        target_lists="referrals;linkedin;track-2",
+                        organization_type=(
+                            org.organization_type
+                            if org
+                            else OrganizationType.COMPANY
+                        ),
+                        touchpoint_status="Prepared",
+                    )
+                    run_entry.update(
+                        {
+                            "organization_id": import_summary.organization_id,
+                            "source_id": import_summary.source_id,
+                            "contacts_added": import_summary.contacts_added,
+                            "touchpoints_added": import_summary.touchpoints_added,
+                        }
+                    )
+                mapping_result["runs"].append(run_entry)
+            mapping_runs = [
+                run
+                for run in list(mapping_result.get("runs") or [])
+                if isinstance(run, dict)
+            ]
+            mapping_result["completed_count"] = sum(
+                run.get("status") == "completed" for run in mapping_runs
+            )
+            mapping_result["partial_count"] = sum(
+                run.get("status") == "partial" for run in mapping_runs
+            )
+            mapping_result["failed_count"] = sum(
+                run.get("status") == "failed" for run in mapping_runs
+            )
+            if mapping_result["failed_count"] or mapping_result["partial_count"]:
+                mapping_result["status"] = "partial_failed"
+            else:
+                mapping_result["status"] = "ran"
         elif execute:
             mapping_result["status"] = "queued"
             mapping_result["detail"] = "Live LinkedIn is disabled; mapping is queued for an attended run."
@@ -9258,12 +9427,15 @@ def run_track_2_daily_plan_cmd(
                     requested_min_score=invite_min_score,
                     adaptive=adaptive_invite_min_score,
                 )
-                batch = select_invite_candidates(
+                batch = select_invite_candidates_with_affinity_lift(
                     list(payload.get("results") or []),
                     verdict=invite_verdict,
                     min_score=effective_min_score_value,
-                    limit=per_company_limit,
-                    start_at=0,
+                    planned_limit=min(planned_company_cap, per_company_limit),
+                    effective_limit=per_company_limit,
+                    target_role_family=str(
+                        affinity_summary.get("target_role_family") or ""
+                    ),
                 )
                 batch = attach_search_urls_to_candidates(payload, batch)
                 run_entry: dict[str, object] = {
@@ -10934,12 +11106,24 @@ def run(
     if not affinity_summary.get("eligible") or affinity_auto_limit <= 3:
         affinity_auto_limit = 0
     auto_limit = send_limit or max(adaptive_auto_limit, affinity_auto_limit)
-    batch = select_invite_candidates(
-        payload["results"],
-        verdict="send",
-        min_score=effective_min_score,
-        limit=auto_limit,
-    )
+    if send_limit:
+        batch = select_invite_candidates(
+            payload["results"],
+            verdict="send",
+            min_score=effective_min_score,
+            limit=auto_limit,
+        )
+    else:
+        batch = select_invite_candidates_with_affinity_lift(
+            payload["results"],
+            verdict="send",
+            min_score=effective_min_score,
+            planned_limit=min(adaptive_auto_limit, auto_limit),
+            effective_limit=auto_limit,
+            target_role_family=str(
+                affinity_summary.get("target_role_family") or ""
+            ),
+        )
     batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
         typer.echo(f"Auto-send skipped: no eligible candidates with send verdict and score >= {effective_min_score}.")

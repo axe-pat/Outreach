@@ -2,9 +2,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from outreach.cli import apply_raw_candidate, execute_linkedin_company_run
+from outreach.cli import (
+    apply_raw_candidate,
+    execute_linkedin_company_run,
+    infer_role_bucket,
+    select_invite_candidates_with_affinity_lift,
+)
 from outreach.config import OutreachSettings
 from outreach.linkedin_affinity import (
+    affinity_candidate_qualified_for_lift,
     allocate_affinity_invite_cap,
     filter_affinity_pass_definitions,
     high_affinity_candidate_signals,
@@ -21,6 +27,24 @@ def _product_application_context() -> dict[str, object]:
         "target_role_family": "product_pm",
         "target_role_is_concrete": True,
     }
+
+
+def _sendable_candidate(**overrides: object) -> dict[str, object]:
+    candidate: dict[str, object] = {
+        "name": "Warm Product Leader",
+        "title": "Senior Product Manager",
+        "role_bucket": "Product",
+        "score": 80,
+        "linkedin_url": "https://www.linkedin.com/in/warm-product-leader/",
+        "existing_connection": False,
+        "shared_history_signals": ["Intuit"],
+        "note_qc": {"verdict": "send"},
+        "target_role_family": "product_pm",
+        "target_role_source": "explicit_title",
+        "target_role_is_concrete": True,
+    }
+    candidate.update(overrides)
+    return candidate
 
 
 def test_application_plus_outreach_plan_runs_bounded_history_and_role_passes() -> None:
@@ -113,11 +137,11 @@ def test_affinity_passes_honor_existing_include_and_exclude_controls() -> None:
 def test_send_cap_lift_requires_actual_scored_affinity_candidates() -> None:
     plan = plan_high_affinity_expansion(_product_application_context())
     candidates = [
-        {
-            "score": 80,
-            "shared_history_signals": [company],
-            "existing_connection": False,
-        }
+        _sendable_candidate(
+            name=f"Warm {company}",
+            linkedin_url=f"https://www.linkedin.com/in/warm-{company.casefold()}/",
+            shared_history_signals=[company],
+        )
         for company in ("Intuit", "Gojek", "Hevo", "Optum", "Thapar")
     ]
     candidates.extend(
@@ -146,6 +170,25 @@ def test_send_cap_stays_at_base_without_real_affinity_evidence() -> None:
     ) == 3
 
 
+def test_affinity_lift_gate_requires_every_sendability_field() -> None:
+    valid = _sendable_candidate()
+    invalid_candidates = [
+        _sendable_candidate(existing_connection=True),
+        _sendable_candidate(shared_history_signals=[]),
+        _sendable_candidate(linkedin_url=""),
+        _sendable_candidate(score=34),
+        _sendable_candidate(note_qc={"verdict": "blocked"}),
+        _sendable_candidate(target_role_is_concrete=False),
+        _sendable_candidate(target_role_source="product_primary_default"),
+    ]
+
+    assert affinity_candidate_qualified_for_lift(valid) is True
+    assert all(
+        not affinity_candidate_qualified_for_lift(candidate)
+        for candidate in invalid_candidates
+    )
+
+
 def test_affinity_cap_uses_only_unallocated_daily_headroom() -> None:
     company_cap, remaining, headroom = allocate_affinity_invite_cap(
         planned_cap=3,
@@ -162,6 +205,99 @@ def test_affinity_cap_uses_only_unallocated_daily_headroom() -> None:
 
     assert (company_cap, remaining, headroom) == (5, 8, 2)
     assert (no_room_cap, no_room_remaining, no_room_headroom) == (3, 6, 0)
+
+
+def test_generic_three_person_recommendation_does_not_raise_smaller_plan() -> None:
+    company_cap, remaining, headroom = allocate_affinity_invite_cap(
+        planned_cap=1,
+        recommended_cap=3,
+        remaining_invites=1,
+        affinity_headroom=4,
+    )
+
+    assert (company_cap, remaining, headroom) == (1, 1, 4)
+
+
+def test_delinea_shaped_candidates_require_real_affinity_and_defensible_route() -> None:
+    plan = plan_high_affinity_expansion(_product_application_context())
+    nick = _sendable_candidate(
+        name="Nick B.",
+        title="Sr. Product Manager",
+        score=48,
+        shared_history_signals=[],
+    )
+    kinjal = _sendable_candidate(
+        name="Kinjal S.",
+        title=(
+            "Strategic Partner to Enterprise Clients | Driving Growth, Retention "
+            "& Trust | Business Strategy"
+        ),
+        role_bucket="Adjacent",
+        score=35,
+        usc=True,
+        shared_history_signals=[],
+    )
+    alexanne = _sendable_candidate(
+        name="Alexanne M. Labrador",
+        title="Executive Business Partner, Office of the CEO",
+        role_bucket="Adjacent",
+        score=56,
+        shared_history_signals=["Intuit"],
+    )
+
+    assert infer_role_bucket(
+        str(alexanne["title"]),
+        str(alexanne["title"]),
+        OutreachSettings(),
+    ) == "Adjacent"
+    assert affinity_candidate_qualified_for_lift(nick) is False
+    assert affinity_candidate_qualified_for_lift(kinjal) is True
+    assert affinity_candidate_qualified_for_lift(alexanne) is False
+    assert recommend_affinity_send_cap([nick, kinjal, alexanne], plan=plan) == 3
+
+
+def test_lift_slots_are_filled_only_by_qualified_affinity_candidates() -> None:
+    ranked = [
+        _sendable_candidate(
+            name="Base One",
+            linkedin_url="https://www.linkedin.com/in/base-one/",
+            shared_history_signals=[],
+        ),
+        _sendable_candidate(
+            name="Base Two",
+            linkedin_url="https://www.linkedin.com/in/base-two/",
+            shared_history_signals=[],
+        ),
+        _sendable_candidate(
+            name="Ordinary Three",
+            linkedin_url="https://www.linkedin.com/in/ordinary-three/",
+            shared_history_signals=[],
+        ),
+        _sendable_candidate(
+            name="Affinity Four",
+            linkedin_url="https://www.linkedin.com/in/affinity-four/",
+            shared_history_signals=["Gojek"],
+        ),
+        _sendable_candidate(
+            name="Affinity Five",
+            linkedin_url="https://www.linkedin.com/in/affinity-five/",
+            usc=True,
+            shared_history_signals=[],
+        ),
+    ]
+
+    batch = select_invite_candidates_with_affinity_lift(
+        ranked,
+        planned_limit=2,
+        effective_limit=4,
+    )
+
+    assert [candidate["name"] for candidate in batch] == [
+        "Base One",
+        "Base Two",
+        "Affinity Four",
+        "Affinity Five",
+    ]
 
 
 def test_history_pass_preserves_match_when_compact_card_omits_past_employer() -> None:

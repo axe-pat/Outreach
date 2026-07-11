@@ -509,6 +509,13 @@ Current cycle config is `offcycle_light`:
 - Track 2 is the primary relationship lane and runs with up to `25` new
   LinkedIn invites, `25` LinkedIn follow-ups/replies, `15` company mapping
   tasks, and `10` LinkedIn Contact Info/email research tasks.
+- The live inbox is scanned whenever the LinkedIn refresh lane is enabled, even
+  when the campaign planner selected zero follow-up companies. Unanswered
+  inbound replies are processed first; unmatched threads are surfaced as
+  contact-mapping/user actions instead of disappearing.
+- Track 2 mapping uses a bounded cross-functional search pass set and imports
+  the resulting contacts with exact per-company counts. Full affinity expansion
+  remains an invite-campaign concern, not a 15-company maintenance multiplier.
 - The old ResumeGenerator follow-up sender is skipped in nightly mode so Track
   2 owns follow-up execution and the tracker remains the source of truth.
 - Switch the nightly pipeline to `--cycle-config normal` when app volume returns;

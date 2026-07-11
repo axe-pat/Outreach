@@ -2859,7 +2859,10 @@ def build_linkedin_message_reconcile_results(
                     "detail": "Message thread did not match a workbook contact.",
                     "thread_url": thread.get("thread_url", ""),
                     "latest_message": thread.get("latest_message", ""),
+                    "last_sender": thread.get("last_sender", ""),
+                    "timestamp_text": thread.get("timestamp_text", ""),
                     "message_window": message_window,
+                    "unread": bool(thread.get("unread")),
                     "is_new_thread": is_new_thread,
                     "thread_changed": thread_changed,
                     "thread_signature": current_signature,
@@ -6997,20 +7000,62 @@ def write_artifact_daily_report(
     auto_handled: list[dict[str, object]] = []
     manual_outbound_by_contact: dict[str, dict[str, object]] = {}
     reconcile_runs: list[dict[str, object]] = []
+    unmatched_thread_items: list[dict[str, object]] = []
     for path in exact_artifacts["reconcile"]:
         payload = _load_json_file(path)
+        reconcile_results = [
+            item for item in list(payload.get("results") or []) if isinstance(item, dict)
+        ]
+        unmatched_results = [
+            item
+            for item in list(payload.get("unmatched_results") or [])
+            if isinstance(item, dict)
+        ]
         reconcile_runs.append(
             {
                 "artifact": str(path),
                 "thread_count": int(payload.get("thread_count") or 0),
                 "new_result_count": int(payload.get("new_result_count") or 0),
-                "filtered_result_count": int(payload.get("filtered_result_count") or len(list(payload.get("results") or []))),
-                "status_counts": _count_statuses(list(payload.get("results") or [])),
+                "filtered_result_count": int(
+                    payload.get("execution_result_count")
+                    or payload.get("filtered_result_count")
+                    or len(reconcile_results)
+                ),
+                "unmatched_result_count": int(
+                    payload.get("unmatched_result_count") or len(unmatched_results)
+                ),
+                "status_counts": _count_statuses([*reconcile_results, *unmatched_results]),
             }
         )
-        for item in list(payload.get("results") or []):
-            if not isinstance(item, dict):
+        for item in unmatched_results:
+            sender = str(item.get("last_sender") or "").strip().casefold()
+            if sender in {"you", "akshat", "akshat pathak"}:
                 continue
+            message = str(item.get("latest_message") or "").strip()
+            action_type, priority, recommended_action, email = (
+                _inbound_action_details(message)
+            )
+            if action_type == "inbound_reply":
+                action_type = "map_unmatched_linkedin_thread"
+                recommended_action = (
+                    "Map this LinkedIn thread to the correct tracker contact, then decide and send the reply."
+                )
+            unmatched_thread_items.append(
+                {
+                    "action_type": action_type,
+                    "priority": priority,
+                    "company": "",
+                    "person": str(item.get("name") or "Unknown LinkedIn sender"),
+                    "contact_id": "",
+                    "message": message,
+                    "recommended_action": recommended_action,
+                    "email": email,
+                    "thread_url": str(item.get("thread_url") or ""),
+                    "source": str(path),
+                    "scope": "this_run",
+                }
+            )
+        for item in reconcile_results:
             contact_id = str(item.get("contact_id") or "")
             latest_message = str(item.get("latest_message") or "").strip()
             last_sender = str(item.get("last_sender") or item.get("live_last_sender") or "").strip().lower()
@@ -7380,6 +7425,17 @@ def write_artifact_daily_report(
         if action.get("action_type") != "inbound_reply"
         or action.get("contact_id") not in review_contact_ids
     ]
+    seen_unmatched_actions: set[tuple[str, str, str]] = set()
+    for action in unmatched_thread_items:
+        key = (
+            str(action.get("person") or "").casefold(),
+            normalize_dedupe_text(str(action.get("message") or "")),
+            str(action.get("thread_url") or ""),
+        )
+        if key in seen_unmatched_actions:
+            continue
+        seen_unmatched_actions.add(key)
+        what_needs_you.append(action)
 
     linkedin_actions: list[dict[str, object]] = []
     for run in invite_runs:
@@ -7401,11 +7457,12 @@ def write_artifact_daily_report(
                 "action": "linkedin_inbox_refresh",
                 "status": "ran",
                 "count": run["thread_count"],
-                "detail": (
-                    f"{run['thread_count']} threads scanned; {run['new_result_count']} results detected; "
-                    f"{run['filtered_result_count']} retained for this lane; "
-                    f"statuses {_render_status_counts(run['status_counts'])}."
-                ),
+                    "detail": (
+                        f"{run['thread_count']} threads scanned; {run['new_result_count']} results detected; "
+                        f"{run['filtered_result_count']} retained for this lane; "
+                        f"{run['unmatched_result_count']} unmatched threads require mapping; "
+                        f"statuses {_render_status_counts(run['status_counts'])}."
+                    ),
                 "artifact": run["artifact"],
             }
         )
@@ -8470,13 +8527,25 @@ def run_track_2_daily_plan_cmd(
         daily_plan,
         phase_prefixes=("1_continue_live_conversations", "2_follow_up_warm_accepts"),
     )
-    followup_budget = int((daily_plan.get("used") or {}).get("linkedin_followups") or 0)
+    planned_followup_budget = int(
+        (daily_plan.get("used") or {}).get("linkedin_followups") or 0
+    )
+    # Inbox work is an operational lane, not just a campaign-plan lane.  A
+    # real inbound reply must be seen even when the planner happened to select
+    # zero warm companies today.  The explicit channel cap remains the hard
+    # bound for replies/follow-ups.
+    followup_budget = (
+        max(0, int(max_linkedin_followups))
+        if should_refresh_linkedin
+        else planned_followup_budget
+    )
     if followup_budget:
         followup_result: dict[str, object] = {
             "phase": "1_2_linkedin_followups",
             "planned_companies": sorted(
                 org_by_id[org_id].name for org_id in followup_org_ids if org_id in org_by_id
             ),
+            "planned_budget": planned_followup_budget,
             "budget": followup_budget,
             "status": "planned",
             "artifacts": [],
@@ -8531,6 +8600,11 @@ def run_track_2_daily_plan_cmd(
                 if str(item.get("normalized_status") or "").casefold() == "replied"
                 and str(item.get("last_sender") or "").casefold() not in {"you", "akshat"}
             ]
+            unmatched_results = [
+                item
+                for item in list(reconcile_result.get("results") or [])
+                if str(item.get("action") or "").casefold() == "missing_contact"
+            ]
 
             execution_results: list[dict[str, object]] = []
             execution_keys: set[str] = set()
@@ -8551,7 +8625,10 @@ def run_track_2_daily_plan_cmd(
 
             profile_reconcile_artifact: Path | None = None
             profile_reconcile_count = 0
-            remaining_profile_budget = max(0, followup_budget - len(execution_results))
+            remaining_profile_budget = min(
+                planned_followup_budget,
+                max(0, followup_budget - len(execution_results)),
+            )
             if remaining_profile_budget and followup_org_ids:
                 profile_candidates = [
                     item
@@ -8609,7 +8686,9 @@ def run_track_2_daily_plan_cmd(
                     "planned_company_result_count": len(planned_message_results),
                     "profile_reconcile_count": profile_reconcile_count,
                     "execution_result_count": len(execution_results),
+                    "unmatched_result_count": len(unmatched_results),
                     "results": execution_results,
+                    "unmatched_results": unmatched_results,
                     "summary": reconcile_result.get("summary", {}),
                 },
             )
@@ -8639,7 +8718,13 @@ def run_track_2_daily_plan_cmd(
             )
             followup_result.update(
                 {
-                    "status": "drafted",
+                    "status": (
+                        "drafted"
+                        if drafts
+                        else "completed_unmatched_review_required"
+                        if unmatched_results
+                        else "completed_zero_actions"
+                    ),
                     "thread_count": len(threads),
                     "detected_count": len(message_results),
                     "persistent_inbound_count": len(persisted_inbound_results),
@@ -8647,6 +8732,7 @@ def run_track_2_daily_plan_cmd(
                     "planned_company_result_count": len(planned_message_results),
                     "profile_reconcile_count": profile_reconcile_count,
                     "execution_result_count": len(execution_results),
+                    "unmatched_thread_count": len(unmatched_results),
                     "draft_count": len(drafts),
                     "cadence_allowed_count": len(cadence_allowed_drafts),
                     "cadence_held_count": len(cadence_held_drafts),

@@ -1274,6 +1274,219 @@ def test_run_track_2_daily_plan_execute_is_cron_safe_without_live_linkedin(
     assert "5_send_linkedin_invites | status=queued" in result.output
 
 
+def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    fake_plan = {
+        "selected_count": 0,
+        "budget": {},
+        "used": {"linkedin_followups": 0, "total_actions": 0},
+        "summary": {},
+        "phase_summary": {},
+        "selected": [],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+
+    class FakeLinkedInScraper:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def require_live_cdp_session(self) -> None:
+            return None
+
+        def snapshot_message_threads(self, *, limit: int, deep: bool):
+            assert limit == 75
+            assert deep is True
+            return []
+
+    monkeypatch.setattr("outreach.cli.LinkedInScraper", FakeLinkedInScraper)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--refresh-linkedin",
+            "--max-total-actions",
+            "0",
+            "--max-linkedin-followups",
+            "2",
+            "--max-linkedin-invites",
+            "0",
+            "--max-company-mapping",
+            "0",
+            "--max-email-research",
+            "0",
+            "--max-context-enrichment",
+            "0",
+            "--max-email-drafts",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_artifact = sorted((tmp_path / "artifacts").glob("*-track-2-daily-run.json"))[-1]
+    payload = json.loads(run_artifact.read_text(encoding="utf-8"))
+    followup = payload["phase_results"][0]
+    assert followup["phase"] == "1_2_linkedin_followups"
+    assert followup["planned_budget"] == 0
+    assert followup["budget"] == 2
+    assert followup["thread_count"] == 0
+    assert followup["status"] == "completed_zero_actions"
+
+
+def test_track_2_unmatched_inbound_thread_surfaces_as_report_action(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    fake_plan = {
+        "selected_count": 0,
+        "budget": {},
+        "used": {"linkedin_followups": 0, "total_actions": 0},
+        "summary": {},
+        "phase_summary": {},
+        "selected": [],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+
+    class FakeLinkedInScraper:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def require_live_cdp_session(self) -> None:
+            return None
+
+        def snapshot_message_threads(self, *, limit: int, deep: bool):
+            return [
+                SimpleNamespace(
+                    thread_id="thread-mystery",
+                    thread_url="https://www.linkedin.com/messaging/thread/mystery/",
+                    name="Mystery Recruiter",
+                    latest_message="Please send your resume to mystery@example.com.",
+                    last_sender="Mystery Recruiter",
+                    timestamp_text="Today",
+                    unread=True,
+                )
+            ]
+
+    monkeypatch.setattr("outreach.cli.LinkedInScraper", FakeLinkedInScraper)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--refresh-linkedin",
+            "--max-total-actions",
+            "0",
+            "--max-linkedin-followups",
+            "2",
+            "--max-linkedin-invites",
+            "0",
+            "--max-company-mapping",
+            "0",
+            "--max-email-research",
+            "0",
+            "--max-context-enrichment",
+            "0",
+            "--max-email-drafts",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_artifact = sorted((tmp_path / "artifacts").glob("*-track-2-daily-run.json"))[-1]
+    run_payload = json.loads(run_artifact.read_text(encoding="utf-8"))
+    followup = run_payload["phase_results"][0]
+    assert followup["status"] == "completed_unmatched_review_required"
+    assert followup["unmatched_thread_count"] == 1
+    reconcile_artifact = next(
+        Path(path)
+        for path in followup["artifacts"]
+        if "message-reconcile" in Path(path).name
+    )
+    reconcile_payload = json.loads(reconcile_artifact.read_text(encoding="utf-8"))
+    assert reconcile_payload["unmatched_result_count"] == 1
+    assert reconcile_payload["unmatched_results"][0]["last_sender"] == "Mystery Recruiter"
+
+    source_metrics = tmp_path / "source-metrics.json"
+    source_metrics.write_text(
+        json.dumps({"sources": {}, "stage_metrics": {}, "action_queue": {"counts": {}}}),
+        encoding="utf-8",
+    )
+    action_queue = tmp_path / "action-queue.json"
+    action_queue.write_text(json.dumps({"counts": {}}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "manifest_schema": "resume_generator.daily_engine_run_manifest",
+                "manifest_version": 1,
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "artifacts": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "daily_engine_returncode": 0,
+                "daily_engine_manifest": str(manifest),
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "generation_selected_count": 0,
+                "generation_ran": False,
+                "failures": [],
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 0,
+                    "track_2_daily_run_artifact": str(run_artifact),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=tmp_path / "artifacts",
+        resolved_tracking_workspace_dir=workspace,
+    )
+    report_summary, _markdown, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+    report_payload = json.loads(report_summary.read_text(encoding="utf-8"))
+    unmatched_actions = [
+        item
+        for item in report_payload["what_needs_you"]
+        if item.get("person") == "Mystery Recruiter"
+    ]
+    assert len(unmatched_actions) == 1
+    assert unmatched_actions[0]["action_type"] == "email_resume_requested"
+    assert unmatched_actions[0]["email"] == "mystery@example.com"
+
+
 def test_run_supervised_e2e_send_linkedin_requires_execute(tmp_path: Path) -> None:
     runner = CliRunner()
 

@@ -153,6 +153,10 @@ class OutreachSettings(BaseSettings):
         default=Path("workspace"),
         alias="TRACKING_WORKSPACE_DIR",
     )
+    artifact_output_dir: Path = Field(
+        default=Path("artifacts"),
+        alias="OUTREACH_ARTIFACTS_DIR",
+    )
     max_candidates_per_company: int = 40
     scoring: ScoringWeights = Field(default_factory=ScoringWeights)
     search: SearchStrategy = Field(default_factory=SearchStrategy)
@@ -166,7 +170,7 @@ class OutreachSettings(BaseSettings):
 
     @property
     def artifacts_dir(self) -> Path:
-        return Path("artifacts")
+        return self.artifact_output_dir
 
     @property
     def fallback_linkedin_user_data_dir(self) -> Path:

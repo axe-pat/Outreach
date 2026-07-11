@@ -7623,11 +7623,19 @@ def _source_summary(row: dict[str, object]) -> str:
     if source == "LinkedIn":
         return "LinkedIn job discovery; outreach activity is reported separately below."
     if source == "LinkedIn home feed":
-        return (
+        summary = (
             f"{int(details.get('captured') or 0)} posts captured; "
             f"{int(details.get('added') or 0)} new signals; "
             f"{int(details.get('workspace_pending_review') or 0)} pending review."
         )
+        captured = int(details.get("unique_in_capture") or details.get("captured") or 0)
+        if captured:
+            summary += (
+                f" Stable post URLs {int(details.get('post_url_count') or 0)}/{captured}."
+            )
+        if details.get("reason"):
+            summary += f" Quality gate: {details['reason']}."
+        return summary
     if source == "LinkedIn profile viewers":
         return str(details.get("reason") or "Passive context only.")
     if source == "Company/news feeds":
@@ -7659,6 +7667,16 @@ def _source_summary(row: dict[str, object]) -> str:
                 f"unresolved companies {len(list(app_invites.get('unresolved_companies') or []))}."
             )
         return summary
+    if source == "Handshake":
+        reason = str(details.get("reason") or "").strip()
+        if reason == "raw_count_not_recorded_for_run":
+            return (
+                "No exact structured Handshake artifact/count was bound to this run; "
+                "the displayed zero is not claimed as a successful zero-result run."
+            )
+        if reason:
+            return reason.replace("_", " ")
+        return ""
     if source == "Cold email channel":
         blockers = details.get("blockers") if isinstance(details.get("blockers"), list) else []
         summary = (
@@ -7671,9 +7689,7 @@ def _source_summary(row: dict[str, object]) -> str:
     if source == "Track 2 imports / maintenance":
         actual = details.get("actual_actions") if isinstance(details.get("actual_actions"), dict) else {}
         status = str(row.get("status") or "not_run")
-        if status not in {"completed", "completed_zero_actions"}:
-            return f"Track 2 status: {status}; planned work is never presented as executed."
-        return (
+        summary = (
             f"{int(actual.get('linkedin_invites_sent') or 0)} invites sent; "
             f"{int(actual.get('linkedin_messages_sent') or 0)} messages sent; "
             f"mapping {int(actual.get('companies_mapped') or 0)}/"
@@ -7683,6 +7699,12 @@ def _source_summary(row: dict[str, object]) -> str:
             f"{int(actual.get('contacts_added') or 0)} contacts added; "
             f"{int(actual.get('profiles_inspected_for_email') or 0)} profiles inspected for email."
         )
+        if status not in {"completed", "completed_zero_actions"}:
+            summary += (
+                f" Track 2 status is {status}; only exact completed actions are counted, "
+                "never the plan budget."
+            )
+        return summary
     return ""
 
 

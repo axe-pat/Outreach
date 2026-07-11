@@ -75,6 +75,7 @@ from outreach.cli import (
     _app_invite_report_status,
     _apply_linkedin_cadence_guards,
     _required_source_failures,
+    _source_summary,
     _track_2_actual_actions,
     _track_2_execution_status,
     _write_comms_learning_artifact,
@@ -464,6 +465,33 @@ def test_source_breakdown_does_not_present_missing_handshake_metrics_as_zero(
     assert handshake["status"] == "incomplete"
     assert handshake["raw"] == 0
     assert handshake["details"]["reason"] == "raw_count_not_recorded_for_run"
+    assert "not claimed as a successful zero-result run" in _source_summary(handshake)
+
+
+def test_source_summary_keeps_partial_track_2_exact_actions_visible() -> None:
+    summary = _source_summary(
+        {
+            "source": "Track 2 imports / maintenance",
+            "status": "partial_failed",
+            "details": {
+                "actual_actions": {
+                    "linkedin_invites_sent": 7,
+                    "linkedin_messages_sent": 0,
+                    "company_mapping_attempted": 15,
+                    "companies_mapped": 14,
+                    "company_mapping_failed": 1,
+                    "linkedin_profiles_mapped": 77,
+                    "contacts_added": 76,
+                    "profiles_inspected_for_email": 10,
+                }
+            },
+        }
+    )
+
+    assert "7 invites sent" in summary
+    assert "mapping 14/15 companies completed (1 failed)" in summary
+    assert "77 profiles mapped" in summary
+    assert "status is partial_failed" in summary
 
 
 def test_source_breakdown_uses_only_referenced_company_news_capture(tmp_path: Path) -> None:

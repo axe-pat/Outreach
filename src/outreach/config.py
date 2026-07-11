@@ -33,6 +33,9 @@ class SearchStrategy(BaseModel):
     note_generation_limit: int = 15
     hard_company_limit: int = 40
     invite_candidate_timeout_seconds: int = 45
+    # Parent-process watchdog. This must exceed the in-worker soft timer enough
+    # to allow Playwright startup/cleanup, while still bounding a C/greenlet hang.
+    invite_worker_timeout_seconds: int = 60
     broad_fallback_min_pool_size: int = 18
     max_pages_high_value: int = 2
     max_pages_default: int = 1
@@ -118,6 +121,16 @@ class SearchStrategy(BaseModel):
             "broad_fallback": {"query": "", "limit": 6, "priority": 8, "use_us_location": True, "connection_degree": "2nd", "enabled": True, "run_if_below_pool_size": 18},
         }
     )
+
+    @property
+    def effective_invite_worker_timeout_seconds(self) -> int:
+        """Keep the parent watchdog outside the 45s in-worker attempt budget."""
+
+        soft_attempt_budget = max(0, self.invite_candidate_timeout_seconds)
+        return max(
+            self.invite_worker_timeout_seconds,
+            soft_attempt_budget + 15,
+        )
 
 
 class OutreachSettings(BaseSettings):

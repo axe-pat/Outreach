@@ -129,6 +129,9 @@ rubric as LinkedIn feed, YC, and Built In signals. Hacker News is available only
 explicit opt-in source. Reviewed accelerator/directory exports can be supplied as
 CSV, JSON, or JSONL with `capture-company-news --input-path`; all paths preserve the
 source URL/run and remain pending until a human approves a rubric-qualified candidate.
+Each exact capture embeds canonical signal snapshots plus a SHA-256 binding, so replay
+cannot silently read newer rows from the mutable ledger. Approved watchlist entries are
+durable across idempotent rebuilds; an explicit rejection still removes one.
 
 ## Build Order
 

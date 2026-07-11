@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, quote_plus, urlencode, urljoin, urlparse, ur
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Locator, Page, sync_playwright
 
 from outreach.artifacts import artifact_timestamp
 from outreach.config import OutreachSettings
@@ -95,6 +95,7 @@ class InviteSendResult:
     detail: str
     note: str
     screenshot_path: str | None = None
+    reservation_reused: bool = False
 
 
 @dataclass
@@ -2302,7 +2303,7 @@ class LinkedInScraper:
         self._click_filter_control(page, trigger_text)
         self._human_pause(page)
 
-        active_input = page.locator('input[aria-label*="Add"], input[placeholder*="Add"]').last
+        active_input = self._select_filter_typeahead_input(page, trigger_text)
         active_input.fill(value)
         self._human_pause(page)
 
@@ -2345,6 +2346,55 @@ class LinkedInScraper:
         else:
             page.keyboard.press("Enter")
         self._human_pause(page)
+
+    def _select_filter_typeahead_input(self, page: Page, trigger_text: str) -> Locator:
+        inputs = page.locator(
+            'input[aria-label*="Add" i], input[placeholder*="Add" i]'
+        )
+        requested_trigger = normalize_typeahead_text(trigger_text)
+        visible_inputs: list[Locator] = []
+        exact_inputs: list[Locator] = []
+        try:
+            input_count = inputs.count()
+        except Exception as exc:
+            raise PlaywrightTimeoutError(
+                f"Could not inspect typeahead inputs for '{trigger_text}'."
+            ) from exc
+
+        for index in range(input_count):
+            candidate = inputs.nth(index)
+            try:
+                if not candidate.is_visible() or not candidate.is_editable():
+                    continue
+                labels = (
+                    candidate.get_attribute("aria-label") or "",
+                    candidate.get_attribute("placeholder") or "",
+                )
+            except Exception:
+                continue
+            visible_inputs.append(candidate)
+            if any(
+                normalize_typeahead_text(label) == requested_trigger
+                for label in labels
+            ):
+                exact_inputs.append(candidate)
+
+        if len(exact_inputs) == 1:
+            return exact_inputs[0]
+        if len(exact_inputs) > 1:
+            raise PlaywrightTimeoutError(
+                f"Found multiple visible, editable inputs matching '{trigger_text}'."
+            )
+        if len(visible_inputs) == 1:
+            return visible_inputs[0]
+        if not visible_inputs:
+            raise PlaywrightTimeoutError(
+                f"Could not find a visible, editable typeahead input for '{trigger_text}'."
+            )
+        raise PlaywrightTimeoutError(
+            f"Could not safely choose a typeahead input for '{trigger_text}'; "
+            f"found {len(visible_inputs)} visible, editable Add inputs."
+        )
 
     def _extract_visible_people(self, page: Page, limit: int) -> list[RawSearchCandidate]:
         script = """

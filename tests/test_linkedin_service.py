@@ -1,6 +1,9 @@
 from outreach.config import OutreachSettings
 from contextlib import contextmanager
 
+import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 import outreach.services.linkedin as linkedin_module
 from outreach.services.linkedin import (
     InviteCandidateTimeoutError,
@@ -186,6 +189,96 @@ class _StubPage:
 
     def close(self):
         return None
+
+
+class _TypeaheadInput:
+    def __init__(
+        self,
+        *,
+        aria_label: str = "",
+        placeholder: str = "",
+        visible: bool = True,
+        editable: bool = True,
+    ) -> None:
+        self.aria_label = aria_label
+        self.placeholder = placeholder
+        self.visible = visible
+        self.editable = editable
+        self.filled_value = ""
+
+    def is_visible(self) -> bool:
+        return self.visible
+
+    def is_editable(self) -> bool:
+        return self.editable
+
+    def get_attribute(self, name: str):
+        if name == "aria-label":
+            return self.aria_label
+        if name == "placeholder":
+            return self.placeholder
+        return None
+
+    def fill(self, value: str) -> None:
+        self.filled_value = value
+
+
+class _TypeaheadPage(_StubPage):
+    def __init__(self, inputs: list[_TypeaheadInput]) -> None:
+        super().__init__()
+        self.inputs = inputs
+
+    def locator(self, selector: str, *_args, **_kwargs):
+        if selector.startswith("input["):
+            return _LocatorList(self.inputs)
+        return super().locator(selector, *_args, **_kwargs)
+
+
+def test_fill_filter_typeahead_uses_unique_visible_exact_input(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    hidden_location = _TypeaheadInput(aria_label="Add a location", visible=False)
+    hidden_company = _TypeaheadInput(placeholder="Add a company", visible=False)
+    visible_location = _TypeaheadInput(placeholder="Add a location")
+    page = _TypeaheadPage([hidden_location, hidden_company, visible_location])
+    monkeypatch.setattr(scraper, "_click_filter_control", lambda *_args: None)
+    monkeypatch.setattr(scraper, "_human_pause", lambda *_args: None)
+
+    scraper._fill_filter_typeahead(page, "Add a location", "United States")
+
+    assert visible_location.filled_value == "United States"
+    assert hidden_location.filled_value == ""
+    assert hidden_company.filled_value == ""
+
+
+def test_fill_filter_typeahead_uses_unique_visible_fallback(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    hidden_exact = _TypeaheadInput(aria_label="Add a school", visible=False)
+    visible_generic = _TypeaheadInput(aria_label="Add")
+    page = _TypeaheadPage([hidden_exact, visible_generic])
+    monkeypatch.setattr(scraper, "_click_filter_control", lambda *_args: None)
+    monkeypatch.setattr(scraper, "_human_pause", lambda *_args: None)
+
+    scraper._fill_filter_typeahead(page, "Add a school", "USC Marshall")
+
+    assert visible_generic.filled_value == "USC Marshall"
+
+
+def test_fill_filter_typeahead_fails_clearly_without_visible_input(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    page = _TypeaheadPage(
+        [
+            _TypeaheadInput(aria_label="Add a location", visible=False),
+            _TypeaheadInput(placeholder="Add a company", visible=False),
+        ]
+    )
+    monkeypatch.setattr(scraper, "_click_filter_control", lambda *_args: None)
+    monkeypatch.setattr(scraper, "_human_pause", lambda *_args: None)
+
+    with pytest.raises(
+        PlaywrightTimeoutError,
+        match="Could not find a visible, editable typeahead input for 'Add a location'",
+    ):
+        scraper._fill_filter_typeahead(page, "Add a location", "United States")
 
 
 class _MessageConfirmationPage:

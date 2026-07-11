@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from outreach.shared_discovery import (
+    BUFFERED,
     READY,
     REVIEW_REQUIRED,
     build_shared_daily_queue,
@@ -32,6 +33,7 @@ def _action_queue(**overrides: object) -> dict[str, object]:
         "application_plus_outreach": [],
         "application_only": [],
         "scored_application_selected": [],
+        "scored_application_not_selected": [],
         "unscored_coverage_candidates": [],
         "outreach_only_today": [],
         "relationship_buffer": [],
@@ -247,6 +249,218 @@ def test_warm_startup_without_live_role_is_added_but_nonstartup_is_not(
     assert queue.items[0].roles == []
     assert queue.source_coverage["yc_builtin_company_sources"]["status"] == "zero"
     assert queue.source_coverage["approved_company_watchlist"]["status"] == "skipped"
+
+
+def test_strategic_company_without_current_role_remains_on_company_role_watch(
+    tmp_path: Path,
+) -> None:
+    workspace, workbook = _workspace(tmp_path)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-strategic",
+            name="Strategic Platform",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="strategic;wishlist;track-2",
+            status="Strategic target",
+            website="https://strategic.example",
+            source_kind=SourceKind.MANUAL,
+            source_url="https://strategic.example/about",
+        )
+    )
+    organizations_before = (workspace / "organizations.csv").read_text(encoding="utf-8")
+
+    queue = build_shared_daily_queue(
+        action_queue_payload=_action_queue(),
+        run_id="role-watch-empty",
+        action_queue_path=tmp_path / "role-watch-empty.json",
+        workspace=workspace,
+        limit=None,
+        generated_at="2026-07-11T09:00:00+00:00",
+    )
+
+    assert (workspace / "organizations.csv").read_text(encoding="utf-8") == organizations_before
+    assert len(queue.items) == 1
+    item = queue.items[0]
+    assert item.company == "Strategic Platform"
+    assert item.primary_action == "role_watch"
+    assert item.recommended_actions == ["role_watch"]
+    assert item.gate == BUFFERED
+    assert item.role_watch_state == "watching"
+    assert item.roles == []
+    assert "outreach_strategic_account" in item.source_types
+    coverage = queue.source_coverage["strategic_account_role_watch"]
+    assert coverage["accounts_watched"] == 1
+    assert coverage["triggered_accounts"] == 0
+
+
+def test_strategic_role_watch_recovers_all_strong_adjacent_families_with_provenance(
+    tmp_path: Path,
+) -> None:
+    workspace, workbook = _workspace(tmp_path)
+    roles = {
+        "Product Strategy Co": ("Product Strategy Lead", "product_strategy"),
+        "BizOps Co": ("Business Operations Manager", "bizops_strategy"),
+        "Program Co": ("Program Manager", "program_operations"),
+        "Growth Co": ("Growth Strategy Manager", "growth_adjacent"),
+    }
+    for company in roles:
+        workbook.upsert_organization(
+            OrganizationRecord(
+                organization_id=workbook.make_organization_id(company),
+                name=company,
+                organization_type=OrganizationType.COMPANY,
+                target_lists="strategic;wishlist;track-2",
+                status="Strategic target",
+                source_kind=SourceKind.MANUAL,
+            )
+        )
+    omitted_rows = []
+    for index, (company, (title, _family)) in enumerate(roles.items(), start=1):
+        omitted_rows.append(
+            {
+                "company": company,
+                "role_title": title,
+                "url": f"https://jobs.example/strategic-{index}",
+                "source": "linkedin_live_jobs_v1",
+                "fit_score": "8.4",
+                "decision": "Proceed",
+                "write_gate": "accepted",
+                "post_score_status": "queued",
+            }
+        )
+
+    queue = build_shared_daily_queue(
+        action_queue_payload=_action_queue(
+            scored_application_not_selected=omitted_rows,
+        ),
+        run_id="role-watch-triggered",
+        action_queue_path=tmp_path / "role-watch-triggered.json",
+        workspace=workspace,
+        limit=None,
+        generated_at="2026-07-11T09:05:00+00:00",
+    )
+
+    assert len(queue.items) == 4
+    by_company = {item.company: item for item in queue.items}
+    for index, (company, (title, family)) in enumerate(roles.items(), start=1):
+        item = by_company[company]
+        assert item.primary_action == "application_research"
+        assert item.gate == REVIEW_REQUIRED
+        assert item.role_watch_state == "triggered"
+        assert set(item.recommended_actions) == {"application_research", "role_watch"}
+        assert len(item.roles) == 1
+        role = item.roles[0]
+        assert role.title == title
+        assert role.role_family == family
+        assert role.strong_adjacent_role is True
+        assert role.source == "linkedin_live_jobs_v1"
+        assert role.source_url == f"https://jobs.example/strategic-{index}"
+        assert role.queue_bucket == "scored_application_not_selected"
+        matching_provenance = [
+            value for value in item.provenance if value.source_url == role.source_url
+        ]
+        assert len(matching_provenance) == 1
+        assert matching_provenance[0].source_run_id == "role-watch-triggered"
+        assert f"role={title}" in matching_provenance[0].context
+    coverage = queue.source_coverage["strategic_account_role_watch"]
+    assert coverage["candidate_rows_scanned"] == 4
+    assert coverage["candidate_rows_added"] == 4
+    assert coverage["triggered_accounts"] == 4
+
+
+def test_selected_strategic_adjacent_role_triggers_without_recovery_bucket(
+    tmp_path: Path,
+) -> None:
+    workspace, workbook = _workspace(tmp_path)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-selected-strategic",
+            name="Selected Strategic",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="strategic;wishlist",
+            status="Strategic target",
+        )
+    )
+    queue = build_shared_daily_queue(
+        action_queue_payload=_action_queue(
+            scored_application_selected=[
+                {
+                    "company": "Selected Strategic",
+                    "role_title": "Strategic Operations Manager",
+                    "url": "https://jobs.example/selected-strategic-ops",
+                    "source": "linkedin_live_jobs_v1",
+                    "fit_score": "8.0",
+                    "decision": "Proceed",
+                    "write_gate": "accepted",
+                }
+            ]
+        ),
+        run_id="role-watch-selected",
+        action_queue_path=tmp_path / "role-watch-selected.json",
+        workspace=workspace,
+        limit=None,
+    )
+
+    item = queue.items[0]
+    assert item.primary_action == "application_research"
+    assert item.role_watch_state == "triggered"
+    assert item.roles[0].role_family == "bizops_strategy"
+    assert item.roles[0].queue_bucket == "scored_application_selected"
+    coverage = queue.source_coverage["strategic_account_role_watch"]
+    assert coverage["candidate_rows_scanned"] == 0
+    assert coverage["candidate_rows_added"] == 0
+    assert coverage["triggered_accounts"] == 1
+
+
+def test_strategic_role_watch_rejects_generic_or_upstream_rejected_noise(
+    tmp_path: Path,
+) -> None:
+    workspace, workbook = _workspace(tmp_path)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-noise",
+            name="Noise Co",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="strategic;wishlist",
+            status="Strategic target",
+        )
+    )
+    queue = build_shared_daily_queue(
+        action_queue_payload=_action_queue(
+            scored_application_not_selected=[
+                {
+                    "company": "Noise Co",
+                    "role_title": "Growth Marketing Manager",
+                    "url": "https://jobs.example/growth-marketing",
+                    "source": "jobspy_filtered_v1",
+                    "fit_score": "9.0",
+                    "decision": "Proceed",
+                    "write_gate": "accepted",
+                },
+                {
+                    "company": "Noise Co",
+                    "role_title": "Program Manager",
+                    "url": "https://jobs.example/rejected-program",
+                    "source": "linkedin_live_jobs_v1",
+                    "fit_score": "9.0",
+                    "decision": "Deprioritize",
+                    "write_gate": "dropped",
+                },
+            ]
+        ),
+        run_id="role-watch-noise",
+        action_queue_path=tmp_path / "role-watch-noise.json",
+        workspace=workspace,
+        limit=None,
+    )
+
+    item = queue.items[0]
+    assert item.primary_action == "role_watch"
+    assert item.role_watch_state == "watching"
+    assert item.roles == []
+    coverage = queue.source_coverage["strategic_account_role_watch"]
+    assert coverage["candidate_rows_scanned"] == 2
+    assert coverage["candidate_rows_added"] == 0
 
 
 def test_existing_outreach_follow_up_is_not_mislabeled_as_a_warm_contact(

@@ -4,8 +4,12 @@ import csv
 import hashlib
 import html
 import json
+import os
 import re
+import signal
 import subprocess
+import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -32,7 +36,19 @@ from outreach.services.email_finder import (
     EmailResearchCandidate,
     build_email_finder_service,
 )
-from outreach.services.linkedin import FilterRunResult, LinkedInFollowupSendResult, LinkedInScraper
+from outreach.services.linkedin import (
+    FilterRunResult,
+    InviteSendResult,
+    LinkedInFollowupSendResult,
+    LinkedInScraper,
+)
+from outreach.invite_reservations import (
+    atomic_write_json,
+    finalize_invite_attempt,
+    reconcile_invite_reservation,
+    reservation_ledger_path,
+    reserve_invite_attempt,
+)
 from outreach.services.notes import NoteGenerator
 from outreach.messaging_roles import (
     TargetRoleContext,
@@ -297,30 +313,150 @@ def company_search_aliases(company: str) -> list[str]:
 
 
 def candidate_mentions_company(raw, aliases: list[str]) -> bool:
-    title = str(getattr(raw, "title", "") or "")
-    snippet = str(getattr(raw, "snippet", "") or "")
-    raw_text = str(getattr(raw, "raw_text", "") or "")
-    text = re.sub(r"\s+", " ", " ".join([title, snippet, raw_text]).lower()).strip()
-    if not text:
-        return False
+    """Require independent, current-employer-shaped evidence.
+
+    LinkedIn occasionally returns an unfiltered people pool even after the UI
+    appears to accept a company filter. A pass label, candidate name, or company
+    name in an ``ex-``/``Past:`` fragment is not current-employer evidence.
+    """
+
+    def field(name: str) -> str:
+        if isinstance(raw, dict):
+            return str(raw.get(name) or "")
+        return str(getattr(raw, name, "") or "")
+
+    # These fields are explicitly employer-shaped when supplied by a structured
+    # source. LinkedIn compact-card ``subtitle`` is deliberately excluded: the
+    # scraper stores the person's name there, which made Julia (Gromis) Feuer
+    # look like an employee of the target company Julia.
+    structured_employers = [
+        field("current_company"),
+        field("current_employer"),
+        field("employer"),
+        field("company"),
+    ]
+    evidence_fields = [field("title"), field("headline"), field("snippet"), field("raw_text")]
     for alias in aliases:
         normalized = " ".join(alias.lower().split()).strip()
         if len(normalized) < 4:
             continue
         alias_tokens = [token for token in re.split(r"[^a-z0-9]+", normalized) if token]
-        if len(alias_tokens) == 1:
-            single_word_boundary = r"(?![a-z0-9]|\s+[a-z0-9])"
-            structured_patterns = [
-                rf"(?:@|at\s+|current:\s*|past:\s*){re.escape(normalized)}{single_word_boundary}",
-                rf"(?:founder|co-founder|ceo|cto|cpo|head of product|product)\s+(?:of\s+|at\s+|@\s*|[-—]\s*){re.escape(normalized)}{single_word_boundary}",
-                rf"(?<![a-z0-9]){re.escape(normalized)}\s*(?:\||·|-|—|$)",
-            ]
-            if any(re.search(pattern, text, flags=re.I) for pattern in structured_patterns):
-                return True
+        if not alias_tokens:
             continue
-        if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", text):
+        normalized_alias = normalize_dedupe_text(alias)
+        if any(
+            normalize_dedupe_text(employer) == normalized_alias
+            for employer in structured_employers
+            if employer.strip()
+        ):
+            return True
+        alias_pattern = r"\s+".join(re.escape(token) for token in alias_tokens)
+        # Do not let a short brand match a longer company (Bloom vs Bloom
+        # Energy), while still allowing punctuation and YC suffixes.
+        end_boundary = r"(?=$|\s*(?:[|·,;()]|[-—]\s)|\.(?:\s|$))"
+        structured_patterns = (
+            rf"(?:@\s*|\bat\s+){alias_pattern}{end_boundary}",
+            rf"\b(?:founder|co-founder|ceo|cto|cpo|head\s+of\s+product|product)"
+            rf"\s+(?:of\s+|at\s+|@\s*|[-—]\s*){alias_pattern}{end_boundary}",
+            rf"\bcurrent:\s*[^|;]{{0,120}}?{alias_pattern}{end_boundary}",
+        )
+        for raw_text in evidence_fields:
+            text = re.sub(r"\s+", " ", raw_text.lower()).strip()
+            if not text:
+                continue
+            for pattern in structured_patterns:
+                match = re.search(pattern, text, flags=re.I)
+                if match is None:
+                    continue
+                segment_start = max(
+                    text.rfind("|", 0, match.start()),
+                    text.rfind("·", 0, match.start()),
+                    text.rfind(";", 0, match.start()),
+                    text.rfind(",", 0, match.start()),
+                )
+                prefix = text[segment_start + 1 : match.start()]
+                if re.search(r"\b(?:ex|former|formerly|past|previously)\b", prefix):
+                    continue
+                return True
+    return False
+
+
+def candidate_has_target_company_evidence(candidate: object, company: str) -> bool:
+    """Return whether candidate fields independently name the current employer.
+
+    Cached ``target_company_match`` and pass metadata are reporting annotations,
+    never attestations. Re-evaluating the raw structured fields at selection
+    time prevents a polluted discovery pass from authorizing a live send.
+    """
+
+    if not normalize_dedupe_text(company):
+        return False
+    return candidate_mentions_company(candidate, company_search_aliases(company))
+
+
+def invite_payload_company_filter_failed(payload: dict | None) -> bool:
+    """Fail closed when the source artifact could not prove an exact filter."""
+
+    if not isinstance(payload, dict):
+        return False
+    status = str(payload.get("company_filter_status") or "").strip().casefold()
+    if status.startswith("failed"):
+        return True
+    error = str(payload.get("company_filter_error") or "")
+    if "Could not find an exact company suggestion for" in error:
+        return True
+    # Compatibility for older fallback artifacts that predate the top-level
+    # company_filter_status field.
+    for summary in payload.get("pass_summaries") or []:
+        if not isinstance(summary, dict):
+            continue
+        if summary.get("pass_name") != "startup_company_coverage":
+            continue
+        alias_errors = " | ".join(str(item) for item in summary.get("alias_errors") or [])
+        if summary.get("fallback_used") and "Could not find an exact company suggestion for" in alias_errors:
             return True
     return False
+
+
+def invite_payload_is_coverage_only(payload: dict | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    pool = payload.get("startup_pool")
+    if isinstance(pool, dict) and bool(pool.get("coverage_only")):
+        return True
+    return any(
+        isinstance(summary, dict)
+        and (
+            summary.get("pass_name") == "startup_company_coverage"
+            or bool(summary.get("coverage_only"))
+        )
+        for summary in payload.get("pass_summaries") or []
+    )
+
+
+def candidate_is_send_safe_for_company(
+    candidate: dict,
+    *,
+    company: str,
+    company_mode: str,
+    source_payload: dict | None = None,
+) -> bool:
+    if invite_payload_company_filter_failed(source_payload):
+        return False
+    passes = {
+        str(item)
+        for item in candidate.get("passes") or []
+        if str(item).strip()
+    }
+    independent_evidence_required = (
+        str(company_mode or "").strip().casefold() == "startup"
+        or invite_payload_is_coverage_only(source_payload)
+        or "startup_company_coverage" in passes
+    )
+    return not independent_evidence_required or candidate_has_target_company_evidence(
+        candidate,
+        company,
+    )
 
 
 def startup_pool_mode(raw_count: int | None) -> str:
@@ -372,7 +508,8 @@ def startup_pool_metadata(payload: dict) -> dict[str, int | str | bool | None]:
         (
             item
             for item in payload.get("pass_summaries") or []
-            if item.get("pass_name") == "startup_preflight"
+            if item.get("pass_name")
+            in {"startup_preflight", "startup_company_coverage"}
         ),
         None,
     )
@@ -618,6 +755,8 @@ def apply_raw_candidate(
     )
     candidate_score = scored.score + relationship_boost
     candidate_triggers = [*scored.triggers, *relationship_triggers]
+    target_company_match = candidate_has_target_company_evidence(raw, company)
+    target_company_key = normalize_dedupe_text(company)
     key = raw.linkedin_url or f"{raw.name}:{title}"
     entry = deduped.get(
         key,
@@ -639,9 +778,27 @@ def apply_raw_candidate(
             "usc": profile.usc_alumni,
             "shared_history": profile.shared_history,
             "shared_history_signals": shared_history_signals,
+            "target_company_match": target_company_match,
+            "target_company_evidence_company": target_company_key,
+            "target_company_evidence_passes": (
+                [pass_name] if target_company_match else []
+            ),
         },
     )
     entry["passes"] = sorted(set([*entry["passes"], pass_name]))
+    if target_company_match:
+        entry["target_company_match"] = True
+        entry["target_company_evidence_company"] = target_company_key
+        entry["target_company_evidence_passes"] = sorted(
+            {
+                *entry.get("target_company_evidence_passes", []),
+                pass_name,
+            }
+        )
+    else:
+        entry.setdefault("target_company_match", False)
+        entry.setdefault("target_company_evidence_company", target_company_key)
+        entry.setdefault("target_company_evidence_passes", [])
     if candidate_score > entry["score"]:
         entry.update(
             {
@@ -1850,6 +2007,9 @@ def execute_linkedin_company_run(
                     + detail
                 )
             preflight_fallback_used = True
+            terminal_company_filter_error = " | ".join(preflight_errors) or (
+                f"Could not find an exact company suggestion for '{company}'."
+            )
             preflight_run = FilterRunResult(
                 candidates=fallback_candidates[:preflight_limit],
                 final_url="",
@@ -2097,25 +2257,48 @@ def execute_linkedin_company_run(
     )
     scored_candidates = [*noted_candidates, *scored_candidates[settings.search.note_generation_limit :]]
 
+    pipeline_send_context = {
+        "company_filter_status": (
+            "failed_exact_company_suggestion"
+            if terminal_company_filter_error
+            else "completed"
+        ),
+        "company_filter_error": terminal_company_filter_error,
+        "startup_pool": startup_pool,
+        "pass_summaries": pass_summaries,
+    }
+    send_scope_candidates = [
+        candidate
+        for candidate in scored_candidates
+        if candidate_is_send_safe_for_company(
+            candidate,
+            company=company,
+            company_mode=company_mode,
+            source_payload=pipeline_send_context,
+        )
+    ]
     affinity_summary = affinity_plan.as_dict()
     affinity_summary.update(
         {
             "feature_enabled": enable_affinity_expansion,
             "enabled_passes": list(affinity_passes),
+            "target_company_evidence_count": len(send_scope_candidates),
+            "target_company_rejected_count": len(scored_candidates)
+            - len(send_scope_candidates),
             "high_affinity_candidate_count": sum(
                 bool(high_affinity_candidate_signals(candidate))
-                for candidate in scored_candidates
+                for candidate in send_scope_candidates
             ),
             "qualified_affinity_candidate_count": sum(
                 affinity_candidate_qualified_for_lift(
                     candidate,
                     target_role_family=affinity_plan.target_role_family,
                 )
-                for candidate in scored_candidates
+                for candidate in send_scope_candidates
             ),
             "recommended_send_cap": (
                 recommend_affinity_send_cap(
-                    scored_candidates,
+                    send_scope_candidates,
                     plan=affinity_plan,
                 )
                 if enable_affinity_expansion
@@ -2134,16 +2317,13 @@ def execute_linkedin_company_run(
             "dry_run": dry_run,
             "passes": pass_definitions,
             "pass_summaries": pass_summaries,
-            "company_filter_status": (
-                "failed_exact_company_suggestion"
-                if terminal_company_filter_error
-                else "completed"
-            ),
+            "company_filter_status": pipeline_send_context["company_filter_status"],
             "company_filter_error": terminal_company_filter_error,
             "affinity_expansion": affinity_summary,
             "startup_pool": startup_pool,
             "note_context": note_context,
             "count": len(scored_candidates),
+            "send_safe_candidate_count": len(send_scope_candidates),
             "notes_generated_count": len(noted_candidates),
             "results": scored_candidates,
         },
@@ -2166,9 +2346,21 @@ def select_invite_candidates(
     min_score: int = 35,
     limit: int = 10,
     start_at: int = 0,
+    target_company: str = "",
+    company_mode: str = "default",
+    source_payload: dict | None = None,
 ) -> list[dict]:
+    if invite_payload_company_filter_failed(source_payload):
+        return []
     eligible: list[dict] = []
     for item in candidates:
+        if not candidate_is_send_safe_for_company(
+            item,
+            company=target_company,
+            company_mode=company_mode,
+            source_payload=source_payload,
+        ):
+            continue
         qc = item.get("polished_note_qc") or item.get("note_qc") or {}
         item_verdict = qc.get("verdict")
         if verdict and item_verdict != verdict:
@@ -2198,6 +2390,9 @@ def select_invite_candidates_with_affinity_lift(
     planned_limit: int,
     effective_limit: int,
     target_role_family: str = "",
+    target_company: str = "",
+    company_mode: str = "default",
+    source_payload: dict | None = None,
 ) -> list[dict]:
     """Preserve the planned top-N and reserve every lifted slot for affinity.
 
@@ -2215,6 +2410,9 @@ def select_invite_candidates_with_affinity_lift(
         min_score=min_score,
         limit=len(candidates),
         start_at=0,
+        target_company=target_company,
+        company_mode=company_mode,
+        source_payload=source_payload,
     )
     base = eligible[:planned]
     lift_slots = max(0, effective - planned)
@@ -2318,11 +2516,11 @@ def persist_invite_send_results(
         )
         if created:
             contacts_added += 1
-        elif sent_at:
+        elif sent_at or result.status == "send_unknown_reserved":
             updated_contact = workbook.update_contact(
                 contact.contact_id,
                 status=contact_status_from_invite_result(result.status),
-                last_contacted_at=sent_at,
+                last_contacted_at=sent_at or utc_now_iso(),
             )
             if updated_contact is not None:
                 contact = updated_contact
@@ -2375,6 +2573,8 @@ def contact_status_from_invite_result(status: str) -> str:
         "unavailable": "No connect path",
         "navigation_error": "Navigation error",
         "send_error": "Invite error",
+        "send_unknown_reserved": "Invite uncertain",
+        "send_already_reserved": "Invite already reserved",
         "skipped": "Skipped",
     }
     return mapping.get(status, "Invite processed")
@@ -2389,9 +2589,153 @@ def touchpoint_status_from_invite_result(status: str) -> str:
         "unavailable": "Unavailable",
         "navigation_error": "Navigation error",
         "send_error": "Error",
+        "send_unknown_reserved": "Unknown reserved",
+        "send_already_reserved": "Already reserved",
         "skipped": "Skipped",
     }
     return mapping.get(status, "Processed")
+
+
+def _unknown_reserved_result(
+    candidate: dict,
+    detail: str,
+    *,
+    reservation_reused: bool = False,
+) -> InviteSendResult:
+    return InviteSendResult(
+        name=str(candidate.get("name") or "Unknown"),
+        linkedin_url=str(candidate.get("linkedin_url") or ""),
+        status="send_unknown_reserved",
+        detail=detail,
+        note=str(candidate.get("note") or ""),
+        screenshot_path=None,
+        reservation_reused=reservation_reused,
+    )
+
+
+def _terminate_invite_worker(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    try:
+        proc.communicate(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.communicate()
+
+
+def _run_invite_candidate_worker(
+    *,
+    candidate: dict,
+    timeout_seconds: float,
+    working_dir: Path,
+    worker_command: list[str] | None = None,
+) -> InviteSendResult:
+    """Run one live invite in a child that the parent can kill unconditionally."""
+
+    working_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".linkedin-invite-worker-",
+        dir=working_dir,
+    ) as raw_temp_dir:
+        temp_dir = Path(raw_temp_dir)
+        input_path = temp_dir / "input.json"
+        output_path = temp_dir / "output.json"
+        atomic_write_json(
+            input_path,
+            {
+                "schema_version": 1,
+                "execute": True,
+                "candidate": candidate,
+            },
+        )
+        command = [
+            *(worker_command or [sys.executable, "-m", "outreach.linkedin_invite_worker"]),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ]
+        proc = subprocess.Popen(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=max(0.1, timeout_seconds))
+        except subprocess.TimeoutExpired:
+            _terminate_invite_worker(proc)
+            return _unknown_reserved_result(
+                candidate,
+                (
+                    f"Invite worker exceeded the hard {timeout_seconds:g}s timeout and was "
+                    "killed. Delivery is unknown; the slot remains reserved until signed-in "
+                    "reconciliation."
+                ),
+            )
+        if proc.returncode != 0:
+            diagnostic = " ".join((stderr or stdout or "").split())[-600:]
+            return _unknown_reserved_result(
+                candidate,
+                (
+                    f"Invite worker exited with code {proc.returncode}. Delivery is unknown; "
+                    "the slot remains reserved until signed-in reconciliation."
+                    + (f" Worker output: {diagnostic}" if diagnostic else "")
+                ),
+            )
+        try:
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            raw_result = payload.get("result") if isinstance(payload, dict) else None
+            if not isinstance(raw_result, dict):
+                raise ValueError("worker output is missing result")
+            result = InviteSendResult(
+                name=str(raw_result.get("name") or candidate.get("name") or "Unknown"),
+                linkedin_url=str(
+                    raw_result.get("linkedin_url") or candidate.get("linkedin_url") or ""
+                ),
+                status=str(raw_result.get("status") or ""),
+                detail=str(raw_result.get("detail") or ""),
+                note=str(raw_result.get("note") or candidate.get("note") or ""),
+                screenshot_path=(
+                    str(raw_result.get("screenshot_path"))
+                    if raw_result.get("screenshot_path")
+                    else None
+                ),
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return _unknown_reserved_result(
+                candidate,
+                (
+                    f"Invite worker returned no trustworthy result ({type(exc).__name__}: {exc}). "
+                    "Delivery is unknown; the slot remains reserved until signed-in reconciliation."
+                ),
+            )
+        known_statuses = {
+            "sent",
+            "sent_without_note",
+            "already_connected",
+            "unavailable",
+            "navigation_error",
+            "skipped",
+        }
+        if result.status not in known_statuses:
+            return _unknown_reserved_result(
+                candidate,
+                (
+                    f"Invite worker returned ambiguous status {result.status or '(blank)'!r}: "
+                    f"{result.detail}. Delivery is unknown; the slot remains reserved until "
+                    "signed-in reconciliation."
+                ),
+            )
+        return result
 
 
 def execute_invite_batch(
@@ -2406,13 +2750,52 @@ def execute_invite_batch(
     verdict: str,
     min_score: int,
 ) -> tuple[Path, Path, dict[str, int], int, int]:
-    scraper = LinkedInScraper(settings)
+    if execute:
+        try:
+            source_payload = json.loads(source_artifact_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Live invite source artifact is unreadable: {source_artifact_path}"
+            ) from exc
+        if not isinstance(source_payload, dict):
+            raise ValueError("Live invite source artifact must contain a JSON object")
+        if invite_payload_company_filter_failed(source_payload):
+            raise ValueError(
+                "Live invite send blocked: exact target-company filter failed in the "
+                "source artifact."
+            )
+        source_company_mode = str(source_payload.get("company_mode") or "default")
+        unsafe_candidates = [
+            candidate
+            for candidate in batch
+            if not candidate_is_send_safe_for_company(
+                candidate,
+                company=company,
+                company_mode=source_company_mode,
+                source_payload=source_payload,
+            )
+        ]
+        if unsafe_candidates:
+            names = ", ".join(
+                str(candidate.get("name") or "Unknown")
+                for candidate in unsafe_candidates[:5]
+            )
+            raise ValueError(
+                "Live invite send blocked: coverage-only candidates lack independent "
+                f"structured current-employer evidence for {company}: {names}"
+            )
+
     workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
-    progress_artifact = settings.artifacts_dir / f"{source_artifact_path.stem}-{artifact_timestamp()}-invite-progress.json"
+    progress_stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+    progress_artifact = settings.artifacts_dir / (
+        f"{source_artifact_path.stem}-{progress_stamp}-invite-progress.json"
+    )
     progress_artifact.parent.mkdir(parents=True, exist_ok=True)
+    reservation_path = reservation_ledger_path(settings.resolved_tracking_workspace_dir)
     status_counts: dict[str, int] = {}
     contacts_added = 0
     touchpoints_added = 0
+    attempts: list[dict[str, object]] = []
 
     def _write_progress(results: list) -> None:
         payload = {
@@ -2424,14 +2807,23 @@ def execute_invite_batch(
             "verdict": verdict,
             "min_score": min_score,
             "count": len(results),
+            "attempts": attempts,
+            "reconciliation_required_count": sum(
+                result.status == "send_unknown_reserved" for result in results
+            ),
             "results": [result.__dict__ for result in results],
         }
-        progress_artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        atomic_write_json(progress_artifact, payload)
 
     def _on_result(candidate: dict, result, results: list) -> None:
         nonlocal contacts_added, touchpoints_added
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
-        if execute:
+        # The run artifact is the recovery source of truth if workbook
+        # persistence fails. Publish the worker result before touching CSVs so
+        # a known/unknown delivery outcome never regresses to the earlier
+        # pre-launch checkpoint.
+        _write_progress(results)
+        if execute and not result.reservation_reused:
             added_contacts, added_touchpoints = persist_invite_send_results(
                 workbook=workbook,
                 company=company,
@@ -2442,9 +2834,116 @@ def execute_invite_batch(
             )
             contacts_added += added_contacts
             touchpoints_added += added_touchpoints
-        _write_progress(results)
 
-    results = scraper.send_connection_requests(batch, execute=execute, on_result=_on_result)
+    if not execute:
+        results = LinkedInScraper(settings).send_connection_requests(
+            batch,
+            execute=False,
+            on_result=_on_result,
+        )
+    else:
+        results: list[InviteSendResult] = []
+        for index, candidate in enumerate(batch):
+            reservation, should_attempt = reserve_invite_attempt(
+                reservation_path,
+                company=company,
+                candidate=candidate,
+                source_artifact=str(source_artifact_path),
+                progress_artifact=str(progress_artifact),
+            )
+            attempt = {
+                "index": index,
+                "name": str(candidate.get("name") or "Unknown"),
+                "linkedin_url": str(candidate.get("linkedin_url") or ""),
+                "reservation_key": str(reservation.get("reservation_key") or ""),
+                "attempt_id": str(reservation.get("attempt_id") or ""),
+                "status": str(reservation.get("status") or "attempt_reserved"),
+                "checkpointed_at": str(reservation.get("updated_at") or ""),
+            }
+            attempts.append(attempt)
+            # This checkpoint is published before the child can reach LinkedIn.
+            _write_progress(results)
+            if not should_attempt:
+                reserved_status = str(reservation.get("status") or "")
+                if reserved_status in {"attempt_reserved", "send_unknown_reserved"}:
+                    result = _unknown_reserved_result(
+                        candidate,
+                        str(reservation.get("detail") or "Invite delivery remains unknown."),
+                        reservation_reused=True,
+                    )
+                else:
+                    result = InviteSendResult(
+                        name=str(candidate.get("name") or "Unknown"),
+                        linkedin_url=str(candidate.get("linkedin_url") or ""),
+                        status="send_already_reserved",
+                        detail=(
+                            f"Automatic retry blocked by durable reservation status "
+                            f"{reserved_status or '(blank)'}."
+                        ),
+                        note=str(candidate.get("note") or ""),
+                        reservation_reused=True,
+                    )
+                results.append(result)
+                attempt.update(
+                    {
+                        "status": result.status,
+                        "detail": result.detail,
+                        "reservation_reused": True,
+                    }
+                )
+                _on_result(candidate, result, results)
+                continue
+
+            try:
+                result = _run_invite_candidate_worker(
+                    candidate=candidate,
+                    timeout_seconds=(
+                        settings.search.effective_invite_worker_timeout_seconds
+                    ),
+                    working_dir=progress_artifact.parent,
+                )
+            except Exception as exc:
+                result = _unknown_reserved_result(
+                    candidate,
+                    (
+                        "Invite worker orchestration failed after the slot was reserved "
+                        f"({type(exc).__name__}: {exc}). Delivery is unknown until signed-in "
+                        "reconciliation."
+                    ),
+                )
+            try:
+                finalized = finalize_invite_attempt(
+                    reservation_path,
+                    reservation_key_value=str(reservation["reservation_key"]),
+                    attempt_id=str(reservation["attempt_id"]),
+                    status=result.status,
+                    detail=result.detail,
+                )
+            except Exception as exc:
+                result = _unknown_reserved_result(
+                    candidate,
+                    (
+                        f"Invite result could not be committed to the durable reservation ledger "
+                        f"({type(exc).__name__}: {exc}). Delivery is unknown until signed-in "
+                        "reconciliation."
+                    ),
+                )
+                finalized = {
+                    "status": "send_unknown_reserved",
+                    "reconciliation_required": True,
+                }
+            results.append(result)
+            attempt.update(
+                {
+                    "status": result.status,
+                    "detail": result.detail,
+                    "reservation_reused": False,
+                    "reconciliation_required": bool(
+                        finalized.get("reconciliation_required")
+                    ),
+                }
+            )
+            _on_result(candidate, result, results)
     artifact = write_artifact(
         settings.artifacts_dir,
         "invite-send-batch",
@@ -2458,6 +2957,11 @@ def execute_invite_batch(
             "verdict": verdict,
             "min_score": min_score,
             "count": len(results),
+            "reservation_ledger": str(reservation_path) if execute else "",
+            "attempts": attempts,
+            "reconciliation_required_count": sum(
+                result.status == "send_unknown_reserved" for result in results
+            ),
             "results": [result.__dict__ for result in results],
         },
     )
@@ -2503,7 +3007,7 @@ def build_linkedin_reconcile_queue_items(
     organizations: list[OrganizationRecord],
     contacts: list[ContactRecord],
     touchpoints: list[TouchpointRecord],
-    include_statuses: tuple[str, ...] = ("Invited",),
+    include_statuses: tuple[str, ...] = ("Invited", "Invite uncertain"),
     max_age_days: int = 14,
     min_age_hours: int = 12,
     now: datetime | None = None,
@@ -2543,9 +3047,14 @@ def build_linkedin_reconcile_queue_items(
             if last_touch_at is not None
             else None
         )
-        if age_hours is not None and age_hours < min_age_hours:
+        uncertain_invite = (contact.status or "").strip().casefold() == "invite uncertain"
+        if age_hours is not None and age_hours < min_age_hours and not uncertain_invite:
             continue
-        if age_hours is not None and age_hours > max_age_days * 24:
+        if (
+            age_hours is not None
+            and age_hours > max_age_days * 24
+            and not uncertain_invite
+        ):
             continue
 
         organization = organization_map.get(contact.organization_id)
@@ -2646,6 +3155,7 @@ def apply_linkedin_reconcile_results(
         "updated_contacts": 0,
         "touchpoints_added": 0,
         "manual_outbound_touchpoints_added": 0,
+        "reservations_reconciled": 0,
     }
 
     for raw in results:
@@ -2694,12 +3204,29 @@ def apply_linkedin_reconcile_results(
             message_text = str(raw.get("message_text") or raw.get("reply_text") or "LinkedIn reply detected.").strip()
         elif status == "pending":
             summary["pending"] += 1
+            if existing_status == "invite uncertain":
+                action = "mark_invited_after_uncertain_send"
+                new_contact_status = "Invited"
         elif status == "not_connected":
             summary["not_connected"] += 1
+            if existing_status == "invite uncertain":
+                action = "mark_not_sent_after_uncertain_send"
+                new_contact_status = "Invite not sent"
         else:
             summary["unknown"] += 1
 
-        applied = False
+        reservation_reconciled = None
+        if apply_changes and status in {"connected", "replied", "pending", "not_connected"}:
+            reservation_reconciled = reconcile_invite_reservation(
+                reservation_ledger_path(workbook.base_dir),
+                linkedin_url=contact.linkedin_url or str(raw.get("linkedin_url") or ""),
+                status=status,
+                detail=str(raw.get("detail") or ""),
+            )
+            if reservation_reconciled is not None:
+                summary["reservations_reconciled"] += 1
+
+        applied = reservation_reconciled is not None
         if apply_changes and (new_contact_status or message_text):
             if new_contact_status:
                 updated = workbook.update_contact(
@@ -2783,6 +3310,12 @@ def apply_linkedin_reconcile_results(
                 "action": action,
                 "new_contact_status": new_contact_status,
                 "needs_follow_up": status == "connected" and connected_result_needs_follow_up(raw),
+                "reservation_reconciled": reservation_reconciled is not None,
+                "reservation_status": (
+                    str(reservation_reconciled.get("status") or "")
+                    if reservation_reconciled is not None
+                    else ""
+                ),
                 "applied": applied,
             }
         )
@@ -8920,7 +9453,7 @@ def run_track_2_daily_plan_cmd(
                         organizations=workbook.list_organizations(),
                         contacts=workbook.list_contacts(),
                         touchpoints=workbook.list_touchpoints(),
-                        include_statuses=("Invited", "Connected"),
+                        include_statuses=("Invited", "Connected", "Invite uncertain"),
                         max_age_days=21,
                         min_age_hours=12,
                     )
@@ -9391,16 +9924,33 @@ def run_track_2_daily_plan_cmd(
                 if planned_company_cap <= 0:
                     continue
                 org = org_by_id.get(str(item.get("organization_id") or ""))
-                pipeline_artifact = execute_linkedin_company_run(
-                    settings=settings,
-                    company=company,
-                    dry_run=True,
-                    company_mode=_company_mode_for_org(org) if org else "default",
-                    enable_affinity_expansion=enable_affinity_expansion,
-                    target_role_title=str(item.get("target_role") or ""),
-                )
-                with pipeline_artifact.open(encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                try:
+                    pipeline_artifact = execute_linkedin_company_run(
+                        settings=settings,
+                        company=company,
+                        dry_run=True,
+                        company_mode=_company_mode_for_org(org) if org else "default",
+                        enable_affinity_expansion=enable_affinity_expansion,
+                        target_role_title=str(item.get("target_role") or ""),
+                    )
+                    with pipeline_artifact.open(encoding="utf-8") as handle:
+                        payload = json.load(handle)
+                    if not isinstance(payload, dict):
+                        raise ValueError("LinkedIn pipeline artifact must contain a JSON object")
+                except Exception as exc:
+                    invite_result["runs"].append(
+                        {
+                            "company": company,
+                            "pipeline_artifact": "",
+                            "candidate_count": 0,
+                            "planned_company_cap": planned_company_cap,
+                            "target_role": str(item.get("target_role") or ""),
+                            "sent": False,
+                            "status": "discovery_failed",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
                 affinity_summary = (
                     payload.get("affinity_expansion")
                     if isinstance(payload.get("affinity_expansion"), dict)
@@ -9436,6 +9986,35 @@ def run_track_2_daily_plan_cmd(
                     target_role_family=str(
                         affinity_summary.get("target_role_family") or ""
                     ),
+                    target_company=company,
+                    company_mode=str(payload.get("company_mode") or "default"),
+                    source_payload=payload,
+                )
+                raw_results = [
+                    candidate
+                    for candidate in list(payload.get("results") or [])
+                    if isinstance(candidate, dict)
+                ]
+                startup_company_mode = str(payload.get("company_mode") or "") == "startup"
+                company_filter_failed = invite_payload_company_filter_failed(payload)
+                company_evidence_rejected_count = (
+                    sum(
+                        not candidate_is_send_safe_for_company(
+                            candidate,
+                            company=company,
+                            company_mode=str(
+                                payload.get("company_mode") or "default"
+                            ),
+                            source_payload=payload,
+                        )
+                        for candidate in raw_results
+                    )
+                    if (
+                        startup_company_mode
+                        or invite_payload_is_coverage_only(payload)
+                        or company_filter_failed
+                    )
+                    else 0
                 )
                 batch = attach_search_urls_to_candidates(payload, batch)
                 run_entry: dict[str, object] = {
@@ -9448,6 +10027,13 @@ def run_track_2_daily_plan_cmd(
                     "effective_company_cap": per_company_limit,
                     "target_role": str(item.get("target_role") or ""),
                     "sent": False,
+                    "status": (
+                        "send_blocked_company_filter"
+                        if company_filter_failed
+                        else ("prepared" if batch else "no_eligible_candidates")
+                    ),
+                    "company_filter_failed": company_filter_failed,
+                    "target_company_evidence_rejected_count": company_evidence_rejected_count,
                 }
                 # Reserve the prepared batch before attempting a live send. A
                 # send exception can occur after partial progress was persisted,
@@ -9478,9 +10064,24 @@ def run_track_2_daily_plan_cmd(
                             }
                         )
                     else:
+                        unknown_reserved_count = int(
+                            status_counts.get("send_unknown_reserved") or 0
+                        )
+                        processed_count = sum(int(value or 0) for value in status_counts.values())
+                        known_sent_count = int(status_counts.get("sent") or 0) + int(
+                            status_counts.get("sent_without_note") or 0
+                        )
+                        if unknown_reserved_count and processed_count > unknown_reserved_count:
+                            run_status = "partial_send_unknown_reserved"
+                        elif unknown_reserved_count:
+                            run_status = "send_unknown_reserved"
+                        else:
+                            run_status = "send_completed"
                         run_entry.update(
                             {
-                                "sent": True,
+                                "sent": known_sent_count > 0,
+                                "status": run_status,
+                                "unknown_reserved_count": unknown_reserved_count,
                                 "send_artifact": str(send_artifact),
                                 "progress_artifact": str(progress_artifact),
                                 "status_counts": status_counts,
@@ -9507,23 +10108,73 @@ def run_track_2_daily_plan_cmd(
                 initial_affinity_headroom - affinity_headroom
             )
             invite_result["remaining_budget"] = remaining_invites
-            if send_linkedin:
-                failed_runs = [
-                    run
-                    for run in list(invite_result.get("runs") or [])
-                    if isinstance(run, dict) and run.get("status") == "send_failed"
-                ]
-                sent_runs = [
-                    run
-                    for run in list(invite_result.get("runs") or [])
-                    if isinstance(run, dict) and run.get("sent")
-                ]
-                if failed_runs and sent_runs:
-                    invite_result["status"] = "partial_send_failed"
-                elif failed_runs:
-                    invite_result["status"] = "send_failed"
-                else:
-                    invite_result["status"] = "sent"
+            invite_runs = [
+                run
+                for run in list(invite_result.get("runs") or [])
+                if isinstance(run, dict)
+            ]
+            discovery_failed_runs = [
+                run for run in invite_runs if run.get("status") == "discovery_failed"
+            ]
+            send_failed_runs = [
+                run for run in invite_runs if run.get("status") == "send_failed"
+            ]
+            unknown_reserved_runs = [
+                run
+                for run in invite_runs
+                if run.get("status")
+                in {"send_unknown_reserved", "partial_send_unknown_reserved"}
+            ]
+            partial_unknown_runs = [
+                run
+                for run in invite_runs
+                if run.get("status") == "partial_send_unknown_reserved"
+            ]
+            nonfailed_runs = [
+                run
+                for run in invite_runs
+                if run.get("status")
+                not in {
+                    "discovery_failed",
+                    "send_failed",
+                    "send_unknown_reserved",
+                    "partial_send_unknown_reserved",
+                }
+            ]
+            invite_result["discovery_failed_count"] = len(discovery_failed_runs)
+            invite_result["send_failed_count"] = len(send_failed_runs)
+            invite_result["unknown_reserved_company_count"] = len(
+                unknown_reserved_runs
+            )
+            invite_result["unknown_reserved_count"] = sum(
+                int(run.get("unknown_reserved_count") or 0)
+                for run in unknown_reserved_runs
+            )
+            invite_result["completed_company_count"] = len(nonfailed_runs)
+            actual_sent_count = sum(
+                int((run.get("status_counts") or {}).get("sent") or 0)
+                + int((run.get("status_counts") or {}).get("sent_without_note") or 0)
+                for run in invite_runs
+            )
+            invite_result["sent_count"] = actual_sent_count
+            invite_result["company_filter_failed_count"] = sum(
+                bool(run.get("company_filter_failed")) for run in invite_runs
+            )
+            failed_runs = [*discovery_failed_runs, *send_failed_runs]
+            if failed_runs and nonfailed_runs:
+                invite_result["status"] = "partial_failed"
+            elif failed_runs:
+                invite_result["status"] = (
+                    "partial_failed" if unknown_reserved_runs else "failed"
+                )
+            elif partial_unknown_runs or (unknown_reserved_runs and nonfailed_runs):
+                invite_result["status"] = "partial_send_unknown_reserved"
+            elif unknown_reserved_runs:
+                invite_result["status"] = "send_unknown_reserved"
+            elif send_linkedin:
+                invite_result["status"] = (
+                    "sent" if actual_sent_count else "completed_no_sends"
+                )
             else:
                 invite_result["status"] = "prepared"
         elif execute:
@@ -11112,6 +11763,9 @@ def run(
             verdict="send",
             min_score=effective_min_score,
             limit=auto_limit,
+            target_company=str(payload.get("company") or company),
+            company_mode=str(payload.get("company_mode") or company_mode),
+            source_payload=payload,
         )
     else:
         batch = select_invite_candidates_with_affinity_lift(
@@ -11123,6 +11777,9 @@ def run(
             target_role_family=str(
                 affinity_summary.get("target_role_family") or ""
             ),
+            target_company=str(payload.get("company") or company),
+            company_mode=str(payload.get("company_mode") or company_mode),
+            source_payload=payload,
         )
     batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:
@@ -11227,6 +11884,10 @@ def generate_notes(
             "source_artifact": str(artifact_path),
             "company": company,
             "company_mode": company_mode,
+            "company_filter_status": payload.get("company_filter_status", ""),
+            "company_filter_error": payload.get("company_filter_error", ""),
+            "startup_pool": payload.get("startup_pool") or {},
+            "pass_summaries": payload.get("pass_summaries") or [],
             "note_context": note_context,
             "count": len(annotated),
             "qc_summary": summary,
@@ -12205,7 +12866,10 @@ def build_linkedin_reconcile_queue(
     limit: Annotated[int, typer.Option(help="Maximum invited contacts to include")] = 50,
     include_status: Annotated[
         list[str] | None,
-        typer.Option("--include-status", help="Contact statuses to check, default: Invited"),
+        typer.Option(
+            "--include-status",
+            help="Contact statuses to check, default: Invited and Invite uncertain",
+        ),
     ] = None,
     max_age_days: Annotated[
         int,
@@ -12222,7 +12886,7 @@ def build_linkedin_reconcile_queue(
         organizations=workbook.list_organizations(),
         contacts=workbook.list_contacts(),
         touchpoints=workbook.list_touchpoints(),
-        include_statuses=tuple(include_status or ["Invited"]),
+        include_statuses=tuple(include_status or ["Invited", "Invite uncertain"]),
         max_age_days=max_age_days,
         min_age_hours=min_age_hours,
     )[:limit]
@@ -12234,7 +12898,7 @@ def build_linkedin_reconcile_queue(
             "count": len(items),
             "filters": {
                 "limit": limit,
-                "include_status": include_status or ["Invited"],
+                "include_status": include_status or ["Invited", "Invite uncertain"],
                 "max_age_days": max_age_days,
                 "min_age_hours": min_age_hours,
             },
@@ -12837,6 +13501,9 @@ def send_invites(
         min_score=effective_min_score,
         limit=limit,
         start_at=start_at,
+        target_company=str(company),
+        company_mode=str(payload.get("company_mode") or "default"),
+        source_payload=payload,
     )
     batch = attach_search_urls_to_candidates(payload, batch)
     if not batch:

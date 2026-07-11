@@ -259,12 +259,15 @@ rewrites its input. No email is guessed, and staging/review never writes the
 company/contact tracker.
 
 Existing July 4 PeopleGrove rows remain valid tracker history, but the 28-profile set
-is only an early seed. The July 11 signed-in capture and curation are complete: 1,845
-unique profiles across 12 queries produced 153 curated candidates and 1,692 explicit
-rejections. Seven exact-count surfaces were exhausted and five high-volume surfaces
-were deliberately bounded best-match samples. The 104-approved/49-rejected manual
-partition must still be reconciled into one complete SHA-bound decision artifact;
-the July 11 staged batch is not approved for import until that reconciliation passes.
+is only an early seed. The July 11 signed-in pull captured 1,845 unique profiles
+across 12 targeted queries: seven exact-count surfaces were exhausted and five
+high-volume surfaces were deliberately bounded best-match samples. Structural
+curation retained 154 and rejected 1,691; final signed-in review approved 104 and
+rejected 50. A separate public-corroboration batch approved 31 more profiles from
+111 researched ambiguous cards. The 135 reviewed people have passed the complete
+SHA-bound stage/review/import gate and are in the tracker without guessed contact
+fields. Exact reruns added or updated zero rows. Including the earlier USC/MBA seeds,
+the tracker now holds 174 relationship-source contacts. Keep this source low-frequency.
 
 ### 1. LinkedIn Reconcile
 

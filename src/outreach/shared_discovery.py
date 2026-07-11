@@ -15,10 +15,15 @@ from typing import Any, Iterable
 
 from pydantic import BaseModel, Field
 
+from outreach.role_surface_monitor import (
+    ROLE_FAMILY_LABELS,
+    RoleFamily,
+    classify_role_title,
+)
 from outreach.tracking import ContactRecord, OrganizationRecord, OrganizationType, OutreachWorkbook
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 # This queue is a planning boundary, not a send boundary. "ready_for_next_stage"
 # means the item can move to the existing draft/review flow; it never authorizes a send.
@@ -36,16 +41,31 @@ STARTUP_TARGET_TAGS = {
     "company_watchlist",
     "company-watchlist",
 }
+STRATEGIC_ACCOUNT_TAGS = {"strategic", "wishlist", "dream"}
+ADJACENT_ROLE_FAMILIES = {
+    RoleFamily.PRODUCT_STRATEGY,
+    RoleFamily.BIZOPS_STRATEGY,
+    RoleFamily.PROGRAM_OPERATIONS,
+    RoleFamily.GROWTH_ADJACENT,
+}
+STRONG_ADJACENT_MIN_FIT_SCORE = 7.0
+STRONG_ROLE_BUCKETS = {
+    "application_plus_outreach",
+    "application_only",
+    "scored_application_selected",
+}
 
 ACTION_PRIORITY = {
     "application_plus_outreach": 100,
     "follow_up_warm_contact": 95,
     "follow_up_existing_outreach": 90,
     "application_only": 85,
+    "application_research": 82,
     "warm_company_outreach": 80,
     "company_outreach": 70,
     "application_review": 60,
     "research_company": 40,
+    "role_watch": 25,
 }
 
 # ResumeGenerator already performs source-specific scoring and gating. This map
@@ -79,6 +99,12 @@ class SharedRole(BaseModel):
     source: str = ""
     source_url: str = ""
     queue_bucket: str = ""
+    role_family: str = ""
+    role_family_label: str = ""
+    classification_rule: str = ""
+    decision: str = ""
+    write_gate: str = ""
+    strong_adjacent_role: bool = False
 
 
 class WarmContact(BaseModel):
@@ -108,6 +134,7 @@ class SharedDailyQueueItem(BaseModel):
     priority_reasons: list[str]
     roles: list[SharedRole] = Field(default_factory=list)
     warm_contacts: list[WarmContact] = Field(default_factory=list)
+    role_watch_state: str = ""
     review_state: str = ""
     source_types: list[str] = Field(default_factory=list)
     provenance: list[DiscoveryProvenance] = Field(default_factory=list)
@@ -151,6 +178,8 @@ class _CompanyAccumulator:
     provenance: dict[tuple[str, ...], DiscoveryProvenance] = field(default_factory=dict)
     evidence_scores: list[float] = field(default_factory=list)
     observation_count: int = 0
+    strategic_role_watch: bool = False
+    adjacent_role_trigger_ids: set[str] = field(default_factory=set)
 
     def add_provenance(self, value: DiscoveryProvenance) -> None:
         key = (
@@ -320,6 +349,13 @@ def build_shared_daily_queue(
             source_observation_counts[source_type] += 1
             if source_type == "startup_company_source":
                 startup_observations += 1
+            role = _add_role(accumulator, row, bucket=bucket, source=source)
+            role_context = ""
+            if role is not None:
+                role_context = (
+                    f"; role={role.title}; role_family={role.role_family}; "
+                    f"strong_adjacent={str(role.strong_adjacent_role).lower()}"
+                )
             accumulator.add_provenance(
                 DiscoveryProvenance(
                     source_name=source,
@@ -327,7 +363,7 @@ def build_shared_daily_queue(
                     source_run_id=run_id,
                     source_url=_first(row, "url", "company_url", "source_item_url"),
                     observed_at=_clean(action_queue_payload.get("generated_at")),
-                    context=f"ResumeGenerator daily queue bucket={bucket}",
+                    context=f"ResumeGenerator daily queue bucket={bucket}{role_context}",
                 )
             )
             accumulator.reasons.extend(_string_list(row.get("reasons")))
@@ -335,7 +371,6 @@ def build_shared_daily_queue(
             score = _first_float(row, "fit_score", "relationship_score")
             if score is not None:
                 accumulator.evidence_scores.append(score)
-            _add_role(accumulator, row, bucket=bucket, source=source)
             accumulator.company_url = accumulator.company_url or _first(
                 row,
                 "company_url",
@@ -348,6 +383,7 @@ def build_shared_daily_queue(
         "organizations_scanned": 0,
         "warm_contacts_scanned": 0,
         "warm_company_observations": 0,
+        "strategic_accounts_watched": 0,
     }
     if workspace is not None and workspace.exists():
         workbook = OutreachWorkbook(workspace)
@@ -361,6 +397,31 @@ def build_shared_daily_queue(
             workspace=workspace,
             include_warm_targets=include_warm_targets,
             warm_startups_only=warm_startups_only,
+        )
+
+    role_watch_stats: dict[str, object] = {
+        "status": workbook_stats.get("status", "skipped"),
+        "artifact": str(workspace or ""),
+        "accounts_watched": workbook_stats.get("strategic_accounts_watched", 0),
+        "candidate_rows_scanned": 0,
+        "candidate_rows_added": 0,
+        "triggered_accounts": sum(
+            1 for accumulator in accumulators.values() if accumulator.adjacent_role_trigger_ids
+        ),
+    }
+    if workbook_stats.get("status") == "loaded":
+        candidate_stats = _merge_strategic_role_candidates(
+            accumulators,
+            action_queue_payload=action_queue_payload,
+            run_id=run_id,
+        )
+        candidate_rows_added = int(candidate_stats["candidate_rows_added"])
+        action_observations += candidate_rows_added
+        bucket_counts["scored_application_not_selected"] += candidate_rows_added
+        source_observation_counts["resume_generator_role"] += candidate_rows_added
+        role_watch_stats.update(candidate_stats)
+        role_watch_stats["triggered_accounts"] = sum(
+            1 for accumulator in accumulators.values() if accumulator.adjacent_role_trigger_ids
         )
 
     watchlist_stats: dict[str, object] = {
@@ -390,6 +451,9 @@ def build_shared_daily_queue(
 
     action_counts = Counter(item.primary_action for item in all_items)
     gate_counts = Counter(item.gate for item in all_items)
+    role_watch_counts = Counter(
+        item.role_watch_state for item in all_items if item.role_watch_state
+    )
     source_type_counts = Counter(
         source_type for item in all_items for source_type in item.source_types
     )
@@ -419,6 +483,7 @@ def build_shared_daily_queue(
             "observations": startup_observations,
         },
         "outreach_warm_companies": workbook_stats,
+        "strategic_account_role_watch": role_watch_stats,
         "approved_company_watchlist": {
             **watchlist_stats,
             "artifact": str(watchlist_path or ""),
@@ -438,6 +503,7 @@ def build_shared_daily_queue(
         ),
         "primary_action_counts": dict(sorted(action_counts.items())),
         "gate_counts": dict(sorted(gate_counts.items())),
+        "role_watch_state_counts": dict(sorted(role_watch_counts.items())),
         "source_type_counts": dict(sorted(source_type_counts.items())),
     }
     scope_parts = ["run_scoped_resume_generator_queue"]
@@ -513,6 +579,46 @@ def _merge_workbook_state(
         if organization is not None:
             _merge_organization(accumulator, organization)
 
+    # Strategic companies remain company-level tracker rows even when no live
+    # PM opening exists. Represent that durable state as a low-priority watch
+    # task in the shared queue rather than creating another mutable tracker.
+    strategic_accounts_watched = 0
+    for organization in organization_list:
+        if not _is_strategic_account(organization):
+            continue
+        normalized = normalize_company_name(organization.name)
+        if not normalized:
+            continue
+        accumulator = accumulators.setdefault(
+            normalized,
+            _CompanyAccumulator(normalized_company=normalized),
+        )
+        accumulator.company_names.append(organization.name)
+        _merge_organization(accumulator, organization)
+        accumulator.strategic_role_watch = True
+        accumulator.actions.add("role_watch")
+        accumulator.observation_count += 1
+        strategic_accounts_watched += 1
+        accumulator.reasons.append("strategic_account_role_watch")
+        accumulator.add_provenance(
+            DiscoveryProvenance(
+                source_name="Outreach strategic account tracker",
+                source_type="outreach_strategic_account",
+                source_run_id=run_id,
+                source_url=(
+                    organization.source_url
+                    or organization.linkedin_url
+                    or organization.website
+                ),
+                observed_at=organization.last_updated_at,
+                context=(
+                    "Company-level strategic account remains active while the "
+                    "exact ResumeGenerator run is watched for strong adjacent roles"
+                ),
+            )
+        )
+        _refresh_strategic_role_watch(accumulator)
+
     warm_observations = 0
     if include_warm_targets:
         for organization_id, warm_contacts in warm_by_org.items():
@@ -569,6 +675,10 @@ def _merge_workbook_state(
         "organizations_scanned": len(organization_list),
         "warm_contacts_scanned": warm_count,
         "warm_company_observations": warm_observations,
+        "strategic_accounts_watched": strategic_accounts_watched,
+        "strategic_adjacent_role_triggers": sum(
+            1 for accumulator in accumulators.values() if accumulator.adjacent_role_trigger_ids
+        ),
         "warm_startups_only": warm_startups_only,
     }
 
@@ -657,19 +767,72 @@ def _merge_organization(
     accumulator.target_lists.update(_tags(organization.target_lists))
 
 
+def _merge_strategic_role_candidates(
+    accumulators: dict[str, _CompanyAccumulator],
+    *,
+    action_queue_payload: dict[str, object],
+    run_id: str,
+) -> dict[str, object]:
+    """Recover only strong adjacent roles omitted from the normal queue surface."""
+
+    bucket = "scored_application_not_selected"
+    rows = _dict_rows(action_queue_payload.get(bucket))
+    added = 0
+    for row in rows:
+        company = _first(row, "company", "organization_name", "company_name")
+        accumulator = accumulators.get(normalize_company_name(company))
+        if accumulator is None or not accumulator.strategic_role_watch:
+            continue
+        if not _is_strong_adjacent_role(row, bucket=bucket):
+            continue
+        source = _first(row, "source", "lane_source") or bucket
+        role = _add_role(accumulator, row, bucket=bucket, source=source)
+        if role is None:
+            continue
+        accumulator.company_names.append(company)
+        accumulator.observation_count += 1
+        added += 1
+        if role.fit_score is not None:
+            accumulator.evidence_scores.append(role.fit_score)
+        accumulator.reasons.extend(_string_list(row.get("reasons")))
+        accumulator.reasons.append(
+            f"role_watch_recovered={role.role_family_label}: {role.title}"
+        )
+        accumulator.add_provenance(
+            DiscoveryProvenance(
+                source_name=source,
+                source_type="resume_generator_role",
+                source_run_id=run_id,
+                source_url=role.source_url,
+                observed_at=_clean(action_queue_payload.get("generated_at")),
+                context=(
+                    f"Strategic role watch bucket={bucket}; role={role.title}; "
+                    f"role_family={role.role_family}; fit_score={role.fit_score}; "
+                    f"decision={role.decision}; write_gate={role.write_gate}"
+                ),
+            )
+        )
+        _refresh_strategic_role_watch(accumulator)
+    return {
+        "candidate_rows_scanned": len(rows),
+        "candidate_rows_added": added,
+    }
+
+
 def _add_role(
     accumulator: _CompanyAccumulator,
     row: dict[str, Any],
     *,
     bucket: str,
     source: str,
-) -> None:
+) -> SharedRole | None:
     title = _first(row, "role_title", "title", "job_title")
     if not title:
-        return
+        return None
     source_url = _first(row, "url", "source_url", "job_url")
     role_key = _normalize_url(source_url) or re.sub(r"\W+", "", title.casefold())
     role_id_seed = source_url or f"{accumulator.normalized_company}|{title}"
+    classification = classify_role_title(title)
     role = SharedRole(
         role_id="role-" + hashlib.sha1(role_id_seed.encode("utf-8")).hexdigest()[:12],
         title=title,
@@ -679,10 +842,56 @@ def _add_role(
         source=source,
         source_url=source_url,
         queue_bucket=bucket,
+        role_family=classification.family.value,
+        role_family_label=ROLE_FAMILY_LABELS[classification.family],
+        classification_rule=classification.matched_rule,
+        decision=_first(row, "decision"),
+        write_gate=_first(row, "write_gate"),
+        strong_adjacent_role=_is_strong_adjacent_role(row, bucket=bucket),
     )
     existing = accumulator.roles.get(role_key)
     if existing is None or (role.fit_score or -1) > (existing.fit_score or -1):
         accumulator.roles[role_key] = role
+        return role
+    return existing
+
+
+def _is_strong_adjacent_role(row: dict[str, Any], *, bucket: str) -> bool:
+    title = _first(row, "role_title", "title", "job_title")
+    source_url = _first(row, "url", "source_url", "job_url")
+    if not title or not source_url:
+        return False
+    classification = classify_role_title(title)
+    if classification.family not in ADJACENT_ROLE_FAMILIES:
+        return False
+    if bucket in STRONG_ROLE_BUCKETS:
+        return True
+    if bucket != "scored_application_not_selected":
+        return False
+    reasons = {value.casefold() for value in _string_list(row.get("reasons"))}
+    if any("blocklisted_company" in value for value in reasons):
+        return False
+    return bool(
+        _normalize_status(row.get("decision")) == "proceed"
+        and _normalize_status(row.get("write_gate")) == "accepted"
+        and (_first_float(row, "fit_score") or 0) >= STRONG_ADJACENT_MIN_FIT_SCORE
+    )
+
+
+def _refresh_strategic_role_watch(accumulator: _CompanyAccumulator) -> None:
+    if not accumulator.strategic_role_watch:
+        return
+    strong_roles = [
+        role for role in accumulator.roles.values() if role.strong_adjacent_role
+    ]
+    if not strong_roles:
+        return
+    accumulator.actions.add("application_research")
+    for role in strong_roles:
+        accumulator.adjacent_role_trigger_ids.add(role.role_id)
+        accumulator.reasons.append(
+            f"strong_adjacent_role={role.role_family_label}: {role.title}"
+        )
 
 
 def _finalize(accumulator: _CompanyAccumulator) -> SharedDailyQueueItem:
@@ -692,9 +901,13 @@ def _finalize(accumulator: _CompanyAccumulator) -> SharedDailyQueueItem:
         reverse=True,
     )
     primary_action = actions[0] if actions else "research_company"
-    if primary_action == "research_company":
+    if primary_action in {"research_company", "role_watch"}:
         gate = BUFFERED
-    elif primary_action in {"application_review", "follow_up_existing_outreach"}:
+    elif primary_action in {
+        "application_research",
+        "application_review",
+        "follow_up_existing_outreach",
+    }:
         gate = REVIEW_REQUIRED
     elif (
         primary_action == "company_outreach"
@@ -749,6 +962,11 @@ def _finalize(accumulator: _CompanyAccumulator) -> SharedDailyQueueItem:
         priority_reasons=reasons,
         roles=roles,
         warm_contacts=warm_contacts,
+        role_watch_state=(
+            "triggered"
+            if accumulator.adjacent_role_trigger_ids
+            else ("watching" if accumulator.strategic_role_watch else "")
+        ),
         review_state=accumulator.review_state,
         source_types=sorted(accumulator.source_types),
         provenance=provenance,
@@ -797,8 +1015,10 @@ def _write_queue_csv(path: Path, queue: SharedDailyQueue) -> None:
         "gate",
         "priority_score",
         "review_state",
+        "role_watch_state",
         "role_count",
         "top_roles",
+        "role_provenance_json",
         "warm_contact_count",
         "warm_contacts",
         "source_types",
@@ -826,8 +1046,13 @@ def _write_queue_csv(path: Path, queue: SharedDailyQueue) -> None:
                 "gate": item.gate,
                 "priority_score": item.priority_score,
                 "review_state": item.review_state,
+                "role_watch_state": item.role_watch_state,
                 "role_count": len(item.roles),
                 "top_roles": " | ".join(role.title for role in item.roles[:3]),
+                "role_provenance_json": json.dumps(
+                    [value.model_dump(mode="json") for value in item.roles],
+                    separators=(",", ":"),
+                ),
                 "warm_contact_count": len(item.warm_contacts),
                 "warm_contacts": " | ".join(
                     f"{contact.full_name} ({contact.status})"
@@ -907,6 +1132,14 @@ def _is_startup_target(organization: OrganizationRecord) -> bool:
     }:
         return True
     return bool(_tags(organization.target_lists).intersection(STARTUP_TARGET_TAGS))
+
+
+def _is_strategic_account(organization: OrganizationRecord) -> bool:
+    if _tags(organization.target_lists).intersection(STRATEGIC_ACCOUNT_TAGS):
+        return True
+    if _normalize_status(organization.status) == "strategic target":
+        return True
+    return "seed_source=built_in_strategic_accounts" in organization.notes.casefold()
 
 
 def _warm_contact_weight(status: str) -> int:

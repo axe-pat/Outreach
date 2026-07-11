@@ -16,6 +16,8 @@ from outreach.cadence import (
 )
 from outreach.company_watchlist import (
     CandidateCompanySignal,
+    CompanyReviewDecision,
+    ReviewState,
     build_candidate_review_queue,
     build_company_watchlist,
     company_discovery_summary,
@@ -236,7 +238,18 @@ def build_company_discovery_review_cmd(
     news_ledger_path = workspace / DEFAULT_COMPANY_NEWS_LEDGER.name
     output_dir = workspace / "company_discovery"
     review_path = output_dir / "company_discovery_review.csv"
-    known_companies = [item.name for item in OutreachWorkbook(workspace).list_organizations()]
+    workbook = OutreachWorkbook(workspace)
+    organizations = workbook.list_organizations()
+    durable_watchlist_organizations = [
+        item for item in organizations if _organization_has_durable_watchlist_approval(item)
+    ]
+    # Approved watchlist companies remain discovery inputs even after promotion.
+    # Otherwise known-company filtering erases their signals and a routine
+    # rebuild rewrites the durable watchlist to an empty set.
+    durable_ids = {item.organization_id for item in durable_watchlist_organizations}
+    known_companies = [
+        item.name for item in organizations if item.organization_id not in durable_ids
+    ]
     historical_signals = _load_historical_company_signals(
         output_dir / "company_discovery_candidates.json",
         known_companies=known_companies,
@@ -310,7 +323,10 @@ def build_company_discovery_review_cmd(
         *news_ledger_signals,
         *source_signals,
     ]
-    reviews = load_company_review_decisions(review_path)
+    reviews = _merge_durable_watchlist_reviews(
+        load_company_review_decisions(review_path),
+        durable_watchlist_organizations,
+    )
     artifacts = write_company_discovery_artifacts(
         output_dir,
         run_id=run_id,
@@ -351,6 +367,54 @@ def build_company_discovery_review_cmd(
     typer.echo(f"Approved/promoted: {workspace_summary.get('promoted_to_watchlist', 0)}/{promoted}")
     typer.echo(f"Review CSV: {artifacts.review_queue_csv}")
     typer.echo(f"Artifact: {artifact}")
+
+
+def _organization_has_durable_watchlist_approval(
+    organization: OrganizationRecord,
+) -> bool:
+    target_lists = {
+        item.strip().casefold()
+        for item in organization.target_lists.split(";")
+        if item.strip()
+    }
+    _, metadata = parse_notes_parts(organization.notes)
+    return (
+        "company-watchlist" in target_lists
+        and str(metadata.get("watchlist_review_state") or "").casefold() == "approved"
+    )
+
+
+def _merge_durable_watchlist_reviews(
+    explicit: list[CompanyReviewDecision],
+    organizations: list[OrganizationRecord],
+) -> list[CompanyReviewDecision]:
+    """Recover approvals from promoted organizations without overriding CSV decisions."""
+
+    merged = list(explicit)
+    explicit_names = {
+        "".join(character for character in item.company_name.casefold() if character.isalnum())
+        for item in explicit
+        if item.company_name
+    }
+    for organization in organizations:
+        name_key = "".join(
+            character for character in organization.name.casefold() if character.isalnum()
+        )
+        if not name_key or name_key in explicit_names:
+            continue
+        _, metadata = parse_notes_parts(organization.notes)
+        merged.append(
+            CompanyReviewDecision(
+                company_name=organization.name,
+                website=organization.website,
+                review_state=ReviewState.APPROVED,
+                reviewer=str(metadata.get("watchlist_reviewer") or "promoted-watchlist"),
+                reviewed_at=str(metadata.get("watchlist_reviewed_at") or ""),
+                reviewer_notes=str(metadata.get("watchlist_reviewer_notes") or ""),
+            )
+        )
+        explicit_names.add(name_key)
+    return merged
 
 
 def _load_json(path: Path | None) -> dict[str, object]:

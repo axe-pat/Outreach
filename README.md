@@ -163,6 +163,17 @@ authorizes a send or writes back into `jobs.xlsx`; every row carries its gate,
 recommended action, and source provenance. The nightly runner now refreshes this
 queue after its current-run action queue is available.
 
+Strategic companies stay company-level tracker rows even when no current PM role
+exists. The shared queue mirrors them as low-priority, buffered `role_watch` tasks.
+If the exact ResumeGenerator run surfaces a strong Product Strategy,
+BizOps/Strategy, Program/Operations, or narrowly defined Growth-adjacent opening,
+the same company row becomes a human-gated `application_research` task. Each role
+records its family, classification rule, source, source URL, upstream queue bucket,
+decision, and write gate. The fail-closed recovery path considers an omitted scored
+role only when it has an exact URL, fit score of at least 7, and upstream
+`Proceed`/`accepted` evidence; generic growth marketing, blocklisted, dropped, and
+rejected rows do not trigger the watch.
+
 In the combined **Recruiting Engine**, this repo is the **Outreach Lane**:
 relationship targets come from application-plus-outreach jobs, startup org
 discovery, and the relationship buffer; Outreach handles people search, note
@@ -292,17 +303,18 @@ The source-key templates create clean one-time capture files and companion guide
 - `workspace/relationship_leads_peoplegrove_usc.csv` for PeopleGrove/Trojan Network/USC founders, operators, product leaders, and recruiters
 - `workspace/relationship_leads_recent_mba_pm.csv` for recent MBA grads who moved into PM/product/product strategy
 
-Current baseline: the 28 USC profiles imported on July 4 are an early
-proof-of-flow seed, not complete PeopleGrove coverage. A separate July 11
-official-public-source batch imported 11 reviewed leads (6 USC and 5 recent
-MBA-to-product) with source URLs and no guessed emails. The signed-in July 11
-capture and curation are complete: 1,845 unique profiles across 12 role/education
-queries became 153 curated candidates and 1,692 explicit rejections. Seven
-exact-count queries were exhausted; five broad queries remain bounded best-match
-samples and must not be described as exhaustive. The live 104-approved/49-rejected
-manual partition still needs reconciliation into one complete SHA-bound decision
-artifact before staging can be resealed or anything can be imported. This remains
-a low-frequency source pull, not a daily scraper.
+Current baseline: the earlier 28-profile USC proof-of-flow seed and 11-profile
+public USC/MBA seed remain valid history. The July 11 signed-in pull captured
+1,845 unique profiles across 12 targeted role/education queries; seven exact-count
+queries were exhausted and five broad queries remain bounded best-match samples,
+not exhaustive directory coverage. Structural curation retained 154 and rejected
+1,691. Final signed-in review approved 104 and rejected 50; a separate public
+corroboration pass approved 31 additional profiles from 111 researched ambiguous
+cards. All 135 reviewed people are now imported without guessed emails or
+LinkedIn URLs. Exact import reruns made zero organization/contact changes. The
+tracker now contains 174 relationship-source contacts including the prior seeds,
+while 1,710 profiles from the capture remain excluded. This stays a low-frequency
+source pull, not a daily scraper.
 
 ## Communication Style
 
@@ -423,7 +435,16 @@ nightly runner and standalone company runs; enable it deliberately with
 `--enable-affinity-expansion` during a bounded validation run. When enabled, a
 per-company invite cap can rise from 3 to at most 5 only when real scored
 affinity candidates exist and the Track 2 daily budget has unused headroom.
-Mapping never enables these expansion passes.
+Lifted slots additionally require structured current-company evidence and a
+defensible role route; past-company matches, executive-support/CISO routes, and
+polluted off-company results fail closed. Mapping never enables these expansion
+passes. The same employer gate protects the standalone, app-queue, and Track 2
+send surfaces: an exact-company filter failure blocks the batch, while startup or
+coverage-only candidates need independent structured current-employer evidence.
+Candidate names, cached match flags, and search pass labels are not evidence. The
+July 11 Delinea dry-run found four raw affinity hits, only two of
+which qualified for lift, so its recommendation correctly stayed at the base
+cap of three.
 
 ### Role-family coverage
 

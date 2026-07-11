@@ -187,3 +187,84 @@ def test_company_discovery_artifacts_are_reusable_and_do_not_touch_account_track
     assert load_company_review_decisions(artifacts.review_queue_csv)[0].reviewer == "Akshat"
     assert not (tmp_path / "organizations.csv").exists()
     assert "1 approved and promoted" in concise_company_discovery_summary(payload["summary"])
+
+
+def test_approved_watchlist_survives_idempotent_rebuild_after_company_is_known(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "company_discovery"
+    signal = CandidateCompanySignal(
+        company_name="Durable AI",
+        website="https://durable.example",
+        rubric=_rubric(domain=3, quality=3),
+        provenance=[_provenance("company_news", "https://news.example/durable")],
+    )
+    candidate = build_candidate_review_queue([signal])[0]
+    approval = CompanyReviewDecision(
+        candidate_id=candidate.candidate_id,
+        company_name=candidate.company_name,
+        website=candidate.website,
+        review_state=ReviewState.APPROVED,
+        reviewer="Akshat",
+        reviewed_at="2026-07-10T09:30:00+00:00",
+    )
+    first = write_company_discovery_artifacts(
+        output_dir,
+        run_id="first",
+        signals=[signal],
+        review_decisions=[approval],
+        generated_at="2026-07-10T10:00:00+00:00",
+    )
+    original_entry = json.loads(first.watchlist_json.read_text(encoding="utf-8"))["entries"][0]
+
+    second = write_company_discovery_artifacts(
+        output_dir,
+        run_id="second",
+        signals=[],
+        review_decisions=[],
+        generated_at="2026-07-11T10:00:00+00:00",
+    )
+
+    watchlist = json.loads(second.watchlist_json.read_text(encoding="utf-8"))
+    summary = json.loads(second.summary_json.read_text(encoding="utf-8"))
+    with second.watchlist_csv.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert watchlist["run_id"] == "second"
+    assert watchlist["entries"] == [original_entry]
+    assert [row["company_name"] for row in rows] == ["Durable AI"]
+    assert summary["promoted_to_watchlist"] == 1
+
+
+def test_explicit_rejection_removes_prior_cumulative_watchlist_entry(tmp_path: Path) -> None:
+    output_dir = tmp_path / "company_discovery"
+    signal = CandidateCompanySignal(
+        company_name="Reconsidered AI",
+        website="https://reconsidered.example",
+        rubric=_rubric(domain=3, quality=3),
+        provenance=[_provenance("company_news", "https://news.example/reconsidered")],
+    )
+    candidate = build_candidate_review_queue([signal])[0]
+    approval = CompanyReviewDecision(
+        candidate_id=candidate.candidate_id,
+        company_name=candidate.company_name,
+        website=candidate.website,
+        review_state=ReviewState.APPROVED,
+        reviewer="Akshat",
+        reviewed_at="2026-07-10T09:30:00+00:00",
+    )
+    write_company_discovery_artifacts(
+        output_dir,
+        run_id="first",
+        signals=[signal],
+        review_decisions=[approval],
+    )
+    rejection = approval.model_copy(update={"review_state": ReviewState.REJECTED})
+
+    second = write_company_discovery_artifacts(
+        output_dir,
+        run_id="second",
+        signals=[],
+        review_decisions=[rejection],
+    )
+
+    assert json.loads(second.watchlist_json.read_text(encoding="utf-8"))["entries"] == []

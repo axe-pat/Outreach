@@ -71,8 +71,10 @@ from outreach.cli import (
     touchpoint_status_from_invite_result,
     _source_breakdown,
     _run_invite_candidate_worker,
+    _app_invite_report_status,
     _apply_linkedin_cadence_guards,
     _track_2_actual_actions,
+    _track_2_execution_status,
     _write_comms_learning_artifact,
     TRACK_2_MAPPING_PASSES,
     write_artifact_daily_report,
@@ -856,6 +858,15 @@ def test_daily_report_track_2_company_counts_are_actual_not_planned(tmp_path: Pa
                 "source_metrics": str(source_metrics),
                 "action_queue": str(action_queue),
                 "artifacts": {},
+                "app_invites": {
+                    "status": "completed",
+                    "target": 0,
+                    "sent": 0,
+                    "companies_attempted": 0,
+                    "company_runs": [],
+                    "failed_companies": [],
+                    "unresolved_companies": [],
+                },
             }
         ),
         encoding="utf-8",
@@ -1030,6 +1041,7 @@ def test_company_search_aliases_strip_common_startup_suffixes() -> None:
         == "Globalization Partners International"
     )
     assert linkedin_company_search_name("Parsec Automation") == "Parsec Automation, LLC"
+    assert linkedin_company_search_name("Justinian") == "Justinian (YC S26)"
 
 
 def test_exact_company_filter_miss_stops_only_before_any_success() -> None:
@@ -1593,13 +1605,165 @@ def test_track_2_blocks_failed_julia_filter_without_consuming_send_slot(
         for phase in run_payload["phase_results"]
         if phase["phase"] == "5_send_linkedin_invites"
     )
-    assert invite_phase["status"] == "completed_no_sends"
+    assert invite_phase["status"] == "failed"
     assert invite_phase["sent_count"] == 0
     assert invite_phase["company_filter_failed_count"] == 1
     assert invite_phase["remaining_budget"] == 1
     assert invite_phase["runs"][0]["candidate_count"] == 0
     assert invite_phase["runs"][0]["status"] == "send_blocked_company_filter"
     assert invite_phase["runs"][0]["target_company_evidence_rejected_count"] == 1
+
+
+def test_track_2_execution_status_never_marks_unknown_delivery_or_filter_failure_green() -> None:
+    maintenance = {
+        "track_2_daily_run_returncode": 0,
+        "track_2_daily_run_artifact": "/tmp/exact-track-2.json",
+    }
+    unknown = _track_2_execution_status(
+        maintenance,
+        {
+            "execute": True,
+            "phase_results": [
+                {
+                    "phase": "5_send_linkedin_invites",
+                    "status": "send_unknown_reserved",
+                }
+            ],
+        },
+    )
+    blocked = _track_2_execution_status(
+        maintenance,
+        {
+            "execute": True,
+            "phase_results": [
+                {
+                    "phase": "5_send_linkedin_invites",
+                    "status": "completed_no_sends",
+                    "company_filter_failed_count": 1,
+                }
+            ],
+        },
+    )
+
+    assert unknown["status"] == "incomplete"
+    assert blocked["status"] == "failed"
+
+
+def test_app_invite_failure_is_visible_and_makes_exact_report_non_green(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    source_metrics = tmp_path / "source-metrics.json"
+    source_metrics.write_text(
+        json.dumps(
+            {
+                "sources": {},
+                "stage_metrics": {},
+                "action_queue": {"counts": {"application_plus_outreach": 1}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    action_queue = tmp_path / "action-queue.json"
+    action_queue.write_text(
+        json.dumps({"counts": {"application_plus_outreach": 1}}),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    app_invites = {
+        "status": "partial_failed",
+        "target": 5,
+        "sent": 0,
+        "companies_attempted": 1,
+        "failed_companies": ["Justinian"],
+        "unresolved_companies": [],
+        "company_runs": [
+            {
+                "company": "Justinian",
+                "status": "prep_failed",
+                "safe_candidate_count": 0,
+                "sent_count": 0,
+                "prep_returncode": 1,
+                "prep_error": "No exact LinkedIn company suggestion",
+            }
+        ],
+    }
+    manifest.write_text(
+        json.dumps(
+            {
+                "manifest_schema": "resume_generator.daily_engine_run_manifest",
+                "manifest_version": 1,
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "app_invites": app_invites,
+            }
+        ),
+        encoding="utf-8",
+    )
+    track = artifacts / "exact-track-2-daily-run.json"
+    track.write_text(
+        json.dumps(
+            {
+                "execute": True,
+                "phase_results": [
+                    {"phase": "1_2_linkedin_followups", "status": "ran"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "nightly-summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "daily_engine_returncode": 0,
+                "daily_engine_manifest": str(manifest),
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "failures": [],
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 0,
+                    "track_2_daily_run_artifact": str(track),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_summary, markdown, html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_summary.read_text(encoding="utf-8"))
+
+    assert _app_invite_report_status(app_invites) == "failed"
+    assert payload["run_status"] == "failed_or_incomplete"
+    assert payload["app_invite_status"] == "failed"
+    assert next(
+        row
+        for row in payload["source_breakdown"]
+        if row["source"] == "ResumeGenerator / app queue"
+    )["status"] == "failed"
+    action = next(
+        row
+        for row in payload["linkedin_actions"]
+        if row["action"] == "app_queue_linkedin_company_attempt"
+    )
+    assert action["company"] == "Justinian"
+    assert action["status"] == "prep_failed"
+    assert payload["company_execution"][0]["company"] == "Justinian"
+    assert payload["what_needs_you"][0]["action_type"] == "linkedin_company_identity_review"
+    assert "Justinian" in markdown.read_text(encoding="utf-8")
+    assert "prep failed" in html.read_text(encoding="utf-8")
 
 
 def test_track_2_unknown_invite_slot_is_not_reused_and_summary_is_truthful(
@@ -1887,6 +2051,15 @@ def test_track_2_unmatched_inbound_thread_surfaces_as_report_action(
                 "source_metrics": str(source_metrics),
                 "action_queue": str(action_queue),
                 "artifacts": {},
+                "app_invites": {
+                    "status": "completed",
+                    "target": 0,
+                    "sent": 0,
+                    "companies_attempted": 0,
+                    "company_runs": [],
+                    "failed_companies": [],
+                    "unresolved_companies": [],
+                },
             }
         ),
         encoding="utf-8",

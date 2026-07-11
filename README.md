@@ -713,6 +713,12 @@ Open inbox items persist in `workspace/linkedin_inbox_actions.csv` until marked
 done, snoozed, not actionable, or resolved by an exact auto-send result. Track 2
 with no return code/artifact is `not_run`, not `completed`; phase failures and
 queued/planned live work keep the run from being reported as green.
+An exact-company-filter failure and an invite whose delivery is unknown are
+also non-green. Every live invite is reserved before a killable worker attempts
+delivery; an uncertain slot is never retried automatically and appears in
+`What needs you` until signed-in reconciliation resolves it. App-queue prep/send
+failures and zero-send company attempts remain visible in LinkedIn Actions and
+Execution by company even when no send artifact exists.
 
 ### Production promotion contract
 

@@ -34,6 +34,7 @@ workspace/relationship_leads_peoplegrove*.csv
 workspace/relationship_leads_peoplegrove*.summary.json
 workspace/peoplegrove_capture*.json
 workspace/peoplegrove_manual_review_*.json
+workspace/peoplegrove_*decision*.json
 workspace/peoplegrove_manual_corrections_*.json
 workspace/peoplegrove_*enrichment*.json
 workspace/peoplegrove_career_journey*.json
@@ -41,6 +42,7 @@ workspace/relationship_leads_public_web_*.csv
 workspace/relationship_leads_*.staged.csv
 workspace/relationship_leads_*.staged.manifest.json
 workspace/relationship_leads_*.staged.review.json
+workspace/relationship_leads_*.decisions.json
 workspace/relationship_leads_*.staged.md
 workspace/USC resources/
 Consulting/

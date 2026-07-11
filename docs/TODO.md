@@ -11,7 +11,13 @@ paths visible instead of accidentally filtering them out.
    nightly pipeline for several real cycles, then use its run-scoped report to
    correct source failures, review backlog, LinkedIn restrictions, and campaign
    execution. This comes first: every later optimization is noise if it is
-   based on stale snapshots or missing source runs.
+   based on stale snapshots or missing source runs. The production contract is
+   fail-closed: run claims come only from the nightly summary's exact
+   `daily_engine_manifest` and Track 2 phase pointers, never artifact mtimes.
+   Missing manifests/artifacts, a `None` Track 2 return code, queued live phases,
+   or phase failures must remain visibly incomplete/not-run and can never be
+   rendered as completed. `What needs you`, message review, auto-handled sends,
+   system holds, actual company actions, and plans remain separate report data.
 2. **IMPLEMENTED — operate the daily LinkedIn intelligence pass.** The
    configurable home-feed capture records good startups and other interesting
    company, role, hiring, funding, launch, and warm-network signals with post
@@ -33,18 +39,23 @@ paths visible instead of accidentally filtering them out.
    replies/stops, same-day channel suppression, and distinct second LinkedIn
    follow-ups. SMTP delivery exists only behind reviewed drafts, a due cadence
    decision, configured credentials, a bounded limit, and explicit `--execute`.
-   The next step is one small reviewed live batch, not higher volume.
-5. **IMPLEMENTED AND REAL-RUN TUNED — protect adjacent role coverage.**
+   The report keeps email drafts in `Messages to review`, surfaces SMTP/config
+   blockers in `What needs you` and Source Breakdown, and counts only exact
+   delivery results as sends. The next step is one small reviewed live batch,
+   not higher volume.
+5. **IMPLEMENTED MONITOR; TUNING REMAINS — protect adjacent role coverage.**
    A separate run-scoped role-surface report keeps the account tracker
    company-level while showing discovered, scored, surfaced, and acted-on
    Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and narrow
-   Growth-adjacent roles by source. Product remains primary. The July 11
-   current-run replay covered 402 observations, 379 unique roles, and 220
-   companies from six ran sources with zero failures/skips: Product 94
-   discovered and 5 scored/surfaced; Product Strategy 1; BizOps 8 and 2/2;
-   Program/Ops 24 and 5/5; narrow Growth 7 and 2/2. No configured family was
-   below its floor. This is one successful replay, not proof that future runs
-   cannot regress (`artifacts/20260711-124409-role-surface-report.json`).
+   Growth-adjacent roles by source. Product remains primary. A standalone July 11
+   exact-artifact diagnostic replay—not a nightly production run—covered 402
+   observations, 379 unique roles, and 220 companies from six source rows, with
+   no source failure/skip: Product 94 discovered and 5 scored/surfaced; Product
+   Strategy 1; BizOps 8 and 2/2; Program/Ops 24 and 5/5; narrow Growth 7 and 2/2.
+   No configured family was below its floor in that replay
+   (`artifacts/20260711-124409-role-surface-report.json`). Continue tuning and
+   verify several real nightly runs; this diagnostic does not establish ongoing
+   production coverage.
 6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
    LinkedIn intelligence pass checks the viewer ledger every seven days by
    default, dedupes repeated observations, and annotates target-company/role
@@ -60,6 +71,14 @@ paths visible instead of accidentally filtering them out.
 
 ### Remaining Activation and Human Gates
 
+- [x] Add report contract tests proving a concurrent/manual/pytest artifact in
+  the same directory and time window cannot contaminate production run totals.
+- [ ] Require a final daily-engine manifest and exact artifact reconciliation
+  in the scheduled production run before treating its report as green.
+- [ ] Keep new pipeline stages disabled in production until isolated tests and
+  a fixture-backed end-to-end report test pass on a feature branch; merge and
+  enable them only after those gates succeed.
+
 - [x] Validate the signed-in dedicated Chrome session against the current
   LinkedIn feed and profile-viewer pages (live-validated July 10, 2026).
 - [ ] Observe the capture for several scheduled daily cycles before changing
@@ -67,10 +86,11 @@ paths visible instead of accidentally filtering them out.
 - [ ] Review useful feed signals and set dispositions; review the generated
   company CSV and explicitly approve candidates before running
   `build-company-discovery-review --promote-approved`.
-- [x] Pass the current run's ResumeGenerator source-metrics JSON into the role
-  monitor. The July 11 exact-artifact replay is recorded at
-  `artifacts/20260711-124409-role-surface-report.json`; never fill a missing
-  source with an older workspace artifact.
+- [x] Validate the role monitor against one exact ResumeGenerator source-metrics
+  artifact in a standalone diagnostic replay. Never fill a missing source with an
+  older workspace artifact.
+- [ ] Confirm the same exact-pointer contract in several scheduled nightly runs;
+  the standalone replay is not evidence that the production stage ran.
 - [ ] Configure `SMTP_HOST` and `SMTP_FROM_EMAIL` plus the appropriate port,
   username/password, STARTTLS/SSL settings; verify sender authorization outside
   the production batch.
@@ -113,7 +133,8 @@ paths visible instead of accidentally filtering them out.
 - [x] Keep reverse cross-pollination review-first: Outreach-only companies surface
   as company/research actions in the shared queue and never write directly into
   `jobs.xlsx`. A live role remains required before the application lane owns it.
-- [x] Add a high-affinity LinkedIn expansion pass for
+- [ ] Canary and production-validate the implemented, default-off high-affinity
+  LinkedIn expansion pass for
   `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
   - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`,
@@ -122,6 +143,9 @@ paths visible instead of accidentally filtering them out.
   - raise per-company caps from 3 to at most 5 only when actual scored affinity
     candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
+  - keep `--enable-affinity-expansion` off in scheduled production until bounded
+    runtime, partial-send reservation, and no-oversend tests pass against a live
+    canary
 - [x] Add a merged daily queue that combines:
   - apply-backed outreach from the exact ResumeGenerator current-run action
     queue, ultimately derived from `ResumeGenerator v1/discovery/jobs.xlsx`
@@ -196,6 +220,13 @@ paths visible instead of accidentally filtering them out.
   - latest daily HTML lives in `workspace/reports/daily_html/`, with compatibility mirrors in `workspace/reports/` and `workspace/`.
   - scheduled reports are run-scoped: Source Breakdown is anchored to the nightly summary and explicitly marks LinkedIn, Handshake, JobSpy, startup sources, ResumeGenerator/app queue, and Track 2 as ran/skipped. Do not present a workspace snapshot or a newest artifact as evidence for a prior run.
   - keep the report action-first: show actual per-company execution separately from planned campaigns, and surface open inbound LinkedIn actions (for example, resume requests) in `What needs you`. The persistent action queue is `workspace/linkedin_inbox_actions.csv`; it requires a human status update and never auto-sends an email.
+  - the inbox refresh is independent of campaign-plan selection: zero planned
+    follow-up companies must still scan for inbound replies within the 25-message
+    cap. Unmatched threads become explicit mapping/review actions, and a clean
+    zero-draft scan is recorded as completed-zero-actions.
+  - contact mapping persists exact contacts and uses a bounded cross-functional
+    pass set; do not run every affinity/alumni expansion pass for all 15 nightly
+    mapping companies.
   - comms-learning artifacts are persisted under `workspace/comms_learning/`: manual sends are gold, replaced/cleared generated drafts are negative, and approved/automatic drafts actually sent are silver. Use the corpus to improve future messaging rather than merely deleting stale review rows.
   - role-surface counts are run-scoped only when built from that run's source
     metrics. Company review/watchlist, cadence, profile-viewer, and outcome-
@@ -225,17 +256,17 @@ paths visible instead of accidentally filtering them out.
   source URLs and no guessed emails.
 - [x] Require `validate → stage → explicit review → execute` for every later batch.
   Staged batch/row IDs, SHA-256 manifests, provenance, dedupe, tamper detection,
-  and ambiguous workbook-identity conflict checks are implemented.
-- [ ] Finish curation/review/import of the signed-in, hundreds-scale
-  PeopleGrove/Trojan Network capture. The July 11 capture contains 1,845 unique
-  profiles across 12 USC role/education queries; its manifest records seven
-  exact-count queries as exhausted and five high-volume queries as deliberately
-  bounded best-match samples. Do not relabel those broad samples exhaustive.
-  Reject irrelevant students, unrelated functions/companies, malformed current
-  role/company parses, stale/empty cards, duplicates, and other junk, then
-  stage/review/import only outreach-useful people. Record raw,
-  rejected-by-reason, staged, approved, imported, and unchanged-on-rerun counts.
-  Keep the completed source low-frequency; do not make it a daily scraper.
+  finalized-decision locking, complete SHA-bound decision artifacts, non-mutating
+  imports, and ambiguous workbook-identity conflict checks are implemented.
+- [ ] Reconcile and import the already curated signed-in PeopleGrove/Trojan Network
+  batch. Capture and curation are complete: 1,845 unique profiles across 12 USC
+  role/education queries became 153 curated candidates and 1,692 explicit
+  rejections. Its manifest records seven exact-count queries as exhausted and five
+  high-volume queries as deliberately bounded best-match samples. Reconcile the
+  intended 104-approved/49-rejected partition into one complete decision artifact,
+  reseal the staged file, verify exact counts and hashes, then import once and prove
+  an unchanged rerun. Do not import the existing inconsistent staged review or make
+  this low-frequency source a daily scraper.
 
 ## Role-Family Coverage
 
@@ -243,10 +274,10 @@ paths visible instead of accidentally filtering them out.
   that reports whether the discovery/application lanes are surfacing Product
   Strategy, BizOps/Strategy, Program/Operations, and narrowly defined
   Growth/GTM-adjacent roles alongside the primary Product lane.
-- [x] Audit ResumeGenerator title/query filters and scoring so those families
-  are discovered, scored, and surfaced rather than silently treated as generic
+- [x] Audit ResumeGenerator title/query filters and scoring so those families are
+  discovered, scored, and surfaced rather than silently treated as generic
   non-PM roles or deprioritized sales. Product Strategy and narrow Growth query
-  coverage are now explicit; generic sales/marketing growth remains excluded.
+  coverage are explicit; generic sales/marketing growth remains excluded.
 - [ ] Add account-level role-watch tasks for strategic companies: a company can
   remain active even when it has no current PM role, while a good adjacent
   opening should create an application/research action.

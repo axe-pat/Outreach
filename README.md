@@ -268,8 +268,7 @@ python main.py stage-relationship-leads \
 python main.py review-relationship-leads \
   --staged-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
   --reviewer Akshat \
-  --approve-all-ready \
-  --reject-all-blocked
+  --decision-artifact workspace/peoplegrove_review_decisions.json
 python main.py import-relationship-leads \
   --source-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
   --source-key peoplegrove_usc \
@@ -277,10 +276,16 @@ python main.py import-relationship-leads \
 ```
 
 Staging validates required identity/provenance, URL shape, email shape, source
-records, duplicates, and batch fingerprints. The review manifest binds decisions
-to the staged file so later edits cannot silently inherit approval. Imports are
-idempotent and stop on ambiguous identity conflicts instead of merging people or
-companies by guesswork.
+records, duplicates, and batch fingerprints. For a reviewed batch, the decision
+artifact must contain `schema_version`, `batch_id`, the original `source_sha256`,
+the pre-review `staged_sha256`, exact `approved_row_ids`/`rejected_row_ids`, and
+matching `rows_total`/`rows_approved`/`rows_rejected` counts. Those lists must
+partition every staged row exactly once. The review manifest records the
+decision artifact's own SHA-256 and
+its source/stage binding, so later edits fail import. Bulk flags affect only
+pending rows; changing a finalized decision requires the explicit
+`--override-finalized` flag. Imports never create or rewrite their source and
+stop on missing, empty, raw, unreviewed, tampered, or ambiguous inputs.
 
 The source-key templates create clean one-time capture files and companion guides:
 
@@ -291,13 +296,13 @@ Current baseline: the 28 USC profiles imported on July 4 are an early
 proof-of-flow seed, not complete PeopleGrove coverage. A separate July 11
 official-public-source batch imported 11 reviewed leads (6 USC and 5 recent
 MBA-to-product) with source URLs and no guessed emails. The signed-in July 11
-capture is now hundreds-scale and coverage-manifested: 1,845 unique profiles
-across 12 role/education queries, with seven exact-count queries exhausted and
-five broad queries explicitly retained as bounded best-match samples. Curate
-that capture for current-role/company accuracy and company/role usefulness,
-preserve stable source identities, dedupe, and run only the retained rows through
-the staged review gate. Do not claim the five sampled broad surfaces are
-exhaustive. This remains a low-frequency source pull, not a daily scraper.
+capture and curation are complete: 1,845 unique profiles across 12 role/education
+queries became 153 curated candidates and 1,692 explicit rejections. Seven
+exact-count queries were exhausted; five broad queries remain bounded best-match
+samples and must not be described as exhaustive. The live 104-approved/49-rejected
+manual partition still needs reconciliation into one complete SHA-bound decision
+artifact before staging can be resealed or anything can be imported. This remains
+a low-frequency source pull, not a daily scraper.
 
 ## Communication Style
 
@@ -411,14 +416,14 @@ exact current inputs, while the editable review queue remains cumulative.
 
 ### High-affinity LinkedIn expansion
 
-Top, role-backed accounts now keep the exact-company people search as the base
-pass and add bounded Intuit, Gojek, USC, Marshall, Thapar, Hevo, Optum, and
-role-family searches. Product, Product Strategy, BizOps/Strategy,
-Program/Operations, and narrow Growth/GTM targets receive their own search terms.
-The pass preserves why a person surfaced even when LinkedIn omits past-employer
-detail on the compact card. A per-company invite cap can rise from 3 to at most 5
-only when enough real, scored affinity candidates exist and the global daily
-budget has unused headroom; all existing review, cadence, and send gates remain.
+The canary-only affinity mode keeps exact-company search as the base and can add
+bounded Intuit, Gojek, USC, Marshall, Thapar, Hevo, Optum, and role-family
+searches for top role-backed accounts. It is disabled by default in both the
+nightly runner and standalone company runs; enable it deliberately with
+`--enable-affinity-expansion` during a bounded validation run. When enabled, a
+per-company invite cap can rise from 3 to at most 5 only when real scored
+affinity candidates exist and the Track 2 daily budget has unused headroom.
+Mapping never enables these expansion passes.
 
 ### Role-family coverage
 
@@ -617,6 +622,13 @@ Current cycle config is `offcycle_light`:
 - Track 2 is the primary relationship lane and runs with up to `25` new
   LinkedIn invites, `25` LinkedIn follow-ups/replies, `15` company mapping
   tasks, and `10` LinkedIn Contact Info/email research tasks.
+- The live inbox is scanned whenever the LinkedIn refresh lane is enabled, even
+  when the campaign planner selected zero follow-up companies. Unanswered
+  inbound replies are processed first; unmatched threads are surfaced as
+  contact-mapping/user actions instead of disappearing.
+- Track 2 mapping uses a bounded cross-functional search pass set and imports
+  the resulting contacts with exact per-company counts. Full affinity expansion
+  remains an invite-campaign concern, not a 15-company maintenance multiplier.
 - The old ResumeGenerator follow-up sender is skipped in nightly mode so Track
   2 owns follow-up execution and the tracker remains the source of truth.
 - Switch the nightly pipeline to `--cycle-config normal` when app volume returns;
@@ -629,24 +641,68 @@ At the end of that LaunchAgent path, ResumeGenerator now calls:
 python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json>
 ```
 
-That command refreshes the Outreach HTML/Markdown report from exact nightly
-summary pointers plus clearly labeled artifacts observed inside that pipeline's
-time window. It has two modes: the scheduled
+That command refreshes the Outreach HTML/Markdown report from the selected
+nightly summary. In run-scoped mode, `--since` identifies the run start but is
+never used to discover artifacts. Every claimed action must come from one of
+these explicit pointers:
+
+- `nightly_summary.daily_engine_manifest` for ResumeGenerator/app-queue invite,
+  follow-up, reply, and email-send artifacts
+- `nightly_summary.outreach_maintenance.track_2_daily_run_artifact` and that
+  artifact's exact phase/child-artifact pointers
+- named source, maintenance, and intelligence artifacts in the same nightly
+  summary
+
+An unrelated manual command, test, or concurrent run can create an artifact in
+the same directory and time window without affecting the report. It has two
+modes: the scheduled
 run-scoped mode (pass both `--since` and `--nightly-summary`) is the source of
 truth; an ad-hoc mode without them is only for local troubleshooting and is
 clearly labeled as a workspace snapshot. The report has a first-class Source
 Breakdown for LinkedIn, Handshake, JobSpy, startup sources, the
-ResumeGenerator/app queue, and Track 2 imports/maintenance. Sources that did
-not run are shown as `skipped` with zeroes rather than being inferred from old
-artifacts.
+ResumeGenerator/app queue, Track 2 imports/maintenance, and the cold-email
+channel. Sources that did
+not run are shown as `skipped`/`not_run` with zeroes rather than being inferred
+from old artifacts. Startup sources also show adapter and lane stages separately
+(`fetched`, `discovered`, and `selected/new`), so YC/Built In company discovery
+cannot be confused with startup job discovery.
 
 The report is action-first: it separates outcomes actually executed in that
 run (including per-company counts, such as invites sent or contacts mapped)
-from the next campaign plan. Its `What needs you` queue includes inbound
-LinkedIn replies that need a human action, such as a resume request; those open
-items persist in `workspace/linkedin_inbox_actions.csv` until marked done,
-snoozed, or not actionable. It never sends that email or other reply
-automatically.
+from the next campaign plan. It has distinct contracts:
+
+- `What needs you` contains only concrete human actions, such as a resume/email
+  request, routing decision, message-review batch, or explicit SMTP/configuration
+  blocker.
+- `Messages to review` contains unsent drafts behind a human-review gate and
+  shows the channel, recipient, subject/inbound context, draft, gate, and whether
+  it came from this run or the carried-over queue. Track 2 email drafts belong
+  here until approved; a draft is never counted as sent.
+- `Auto-handled messages` contains only exact send results with `status=sent`.
+- `LinkedIn actions` puts invite sends, inbox refresh/triage, follow-ups,
+  replies, mapping, Contact Info research, feed capture, viewer capture,
+  review holds, skips, and failures in one place.
+- `Execution by company` is derived from actual result artifacts; plan budgets
+  and campaign recommendations never count as completed work.
+- `Cold email actions` records reviewed delivery results separately. Email totals
+  increase only from an exact send artifact whose delivery status is `sent`;
+  manifest-reported SMTP blockers and sent/draft-count mismatches stay visible.
+
+Open inbox items persist in `workspace/linkedin_inbox_actions.csv` until marked
+done, snoozed, not actionable, or resolved by an exact auto-send result. Track 2
+with no return code/artifact is `not_run`, not `completed`; phase failures and
+queued/planned live work keep the run from being reported as green.
+
+### Production promotion contract
+
+The scheduled end-to-end path is the protected production path. New stages stay
+disabled there until they have isolated unit/contract tests, a fixture-backed
+end-to-end report test, and an explicit run-manifest schema. Production report
+tests must use temporary artifact/workspace directories and must prove that an
+unreferenced concurrent artifact cannot change totals. After those gates pass,
+the change can be merged and enabled in the scheduled config. A production run
+is complete only when its final nightly summary, daily-engine manifest, required
+stage results, Track 2 phase artifact, and daily report all exist and reconcile.
 
 Each run also writes a small reusable LinkedIn comms-learning corpus under
 `workspace/comms_learning/`: manual messages are `gold`, generated drafts
@@ -688,9 +744,10 @@ This repo now covers:
 - public company/news feeds plus reviewed structured imports through that same
   candidate contract, with source-aware tracker promotion
 - the run-stamped shared ResumeGenerator/Outreach daily company queue
-- bounded high-affinity LinkedIn passes for role-backed priority accounts
+- default-off, bounded high-affinity LinkedIn canary passes for role-backed
+  priority accounts
 - tamper-bound stage/review/import gates for low-frequency relationship-source
-  pulls, with hundreds-scale idempotency coverage
+  pulls, including a synthetic 150-row idempotency regression test
 - run-scoped role-family coverage with explicit source status
 - tracker-enforced LinkedIn/email cadence and explicitly gated SMTP delivery
 - gold/silver/negative communication examples plus advisory outcome learning

@@ -363,6 +363,7 @@ def test_company_run_injects_affinity_passes_and_records_decision(
         company="Priority Product Co",
         dry_run=True,
         company_mode="default",
+        enable_affinity_expansion=True,
         note_context=_product_application_context(),
     )
 
@@ -389,4 +390,52 @@ def test_company_run_injects_affinity_passes_and_records_decision(
     assert any(call.get("search_query") == "Intuit" for call in calls)
     assert any(
         call.get("school") == "USC Marshall School of Business" for call in calls
+    )
+
+
+def test_company_run_keeps_affinity_expansion_off_by_default(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Scraper:
+        def __init__(self, _settings: OutreachSettings) -> None:
+            pass
+
+        def require_live_cdp_session(self) -> None:
+            pass
+
+        def extract_people_with_filters_live(self, **kwargs: object) -> FilterRunResult:
+            calls.append(kwargs)
+            return FilterRunResult(
+                candidates=[],
+                final_url="https://linkedin.test/people",
+                visible_filter_text=[],
+            )
+
+    monkeypatch.setattr("outreach.cli.LinkedInScraper", _Scraper)
+    monkeypatch.setattr(
+        OutreachSettings,
+        "artifacts_dir",
+        property(lambda _self: tmp_path / "artifacts"),
+    )
+    artifact = execute_linkedin_company_run(
+        settings=OutreachSettings(tracking_workspace_dir=tmp_path / "workspace"),
+        company="Priority Product Co",
+        dry_run=True,
+        company_mode="default",
+        note_context=_product_application_context(),
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    affinity = payload["affinity_expansion"]
+    assert affinity["eligible"] is True
+    assert affinity["feature_enabled"] is False
+    assert affinity["enabled_passes"] == []
+    assert affinity["recommended_send_cap"] == 0
+    assert not any(
+        str(call.get("search_query") or "").casefold()
+        in {"intuit", "gojek", "hiring", "head of product"}
+        for call in calls
     )

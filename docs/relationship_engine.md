@@ -240,24 +240,31 @@ not daily scrapers. Their safe path is now explicit:
    This enrichment loader accepts only signed-in, capture-hash-bound PeopleGrove
    data. Public-web corroboration is incompatible with it and must remain a
    separately reviewed/staged relationship batch with its evidence URL and
-   resolution status preserved.
+   resolution status plus `peoplegrove_public_web` university-directory
+   provenance intact.
 3. Inspect its curated relationship-lead CSV and JSON decision audit. The audit
    records category, score, source identity, and an explicit rejection reason for
    every captured profile.
 4. Run `stage-relationship-leads` to normalize, validate, fingerprint, and dedupe.
-5. Review the staged CSV and seal decisions with `review-relationship-leads`.
+5. Reconcile every staged row into one decision JSON containing the batch/source/
+   pre-review staged hashes, complete approved/rejected row-ID lists, and matching
+   counts. Seal it with `review-relationship-leads --decision-artifact ...`.
 6. Run `import-relationship-leads --execute` only against that reviewed staged file.
 
 Execution fails closed on missing provenance, invalid URLs/email shape, edited rows
-after review, duplicate rows, and ambiguous workbook identity conflicts. No email is
-guessed, and staging/review never writes the company/contact tracker. Existing July 4
-PeopleGrove rows remain valid tracker history, but the 28-profile set is only an early
-seed. The July 11 signed-in USC Marshall/Trojan-connection capture contains 1,845
-unique profiles across 12 queries: seven exact-count surfaces were exhausted and five
-high-volume surfaces were deliberately bounded best-match samples. Retain those
-coverage qualifications, stable source record IDs/URLs, and explicit junk-rejection
-reasons, then route only the useful deduped rows through this gate instead of
-importing a raw scrape directly.
+after review, duplicate rows, changed decision artifacts, incomplete row partitions,
+and ambiguous workbook identity conflicts. Bulk decisions affect pending rows only;
+changing a finalized row requires `--override-finalized`. Import never creates or
+rewrites its input. No email is guessed, and staging/review never writes the
+company/contact tracker.
+
+Existing July 4 PeopleGrove rows remain valid tracker history, but the 28-profile set
+is only an early seed. The July 11 signed-in capture and curation are complete: 1,845
+unique profiles across 12 queries produced 153 curated candidates and 1,692 explicit
+rejections. Seven exact-count surfaces were exhausted and five high-volume surfaces
+were deliberately bounded best-match samples. The 104-approved/49-rejected manual
+partition must still be reconciled into one complete SHA-bound decision artifact;
+the July 11 staged batch is not approved for import until that reconciliation passes.
 
 ### 1. LinkedIn Reconcile
 

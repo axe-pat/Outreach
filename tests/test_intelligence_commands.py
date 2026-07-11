@@ -520,7 +520,8 @@ def test_role_cadence_and_learning_commands_emit_artifacts(tmp_path: Path) -> No
     assert (workspace / "comms_learning" / "outcome_learning.json").exists()
 
 
-def test_email_command_holds_unreviewed_drafts(tmp_path: Path) -> None:
+def test_email_command_holds_unreviewed_drafts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     workspace = _workspace(tmp_path)
     draft = tmp_path / "drafts.json"
     draft.write_text(json.dumps({"results": [{"organization_id": "org-a", "contact_id": "ct-a", "email": "a@example.com", "subject": "Hello", "body": "Specific body"}]}), encoding="utf-8")
@@ -603,7 +604,10 @@ def test_verified_marker_cannot_authorize_a_different_artifact_recipient() -> No
     assert _email_is_verified(contact, {"email": "verified@example.com"})
 
 
-def test_email_command_consumes_human_approval_csv_for_preview(tmp_path: Path) -> None:
+def test_email_command_consumes_human_approval_csv_for_preview(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     workspace = _workspace(tmp_path)
     workbook = OutreachWorkbook(workspace)
     workbook.upsert_contact(
@@ -679,6 +683,7 @@ def test_email_command_consumes_human_approval_csv_for_preview(tmp_path: Path) -
 def test_email_execute_records_each_send_before_a_retry_can_advance(
     tmp_path: Path, monkeypatch
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     workspace = _workspace(tmp_path)
     workbook = OutreachWorkbook(workspace)
     workbook.upsert_contact(
@@ -756,6 +761,7 @@ def test_email_execute_records_each_send_before_a_retry_can_advance(
 def test_email_replay_after_ninety_days_appends_a_fresh_touchpoint(
     tmp_path: Path, monkeypatch
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     workspace = _workspace(tmp_path)
     workbook = OutreachWorkbook(workspace)
     workbook.upsert_contact(

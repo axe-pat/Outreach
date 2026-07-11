@@ -2750,14 +2750,17 @@ def execute_invite_batch(
     start_at: int,
     verdict: str,
     min_score: int,
+    source_payload_snapshot: dict | None = None,
 ) -> tuple[Path, Path, dict[str, int], int, int]:
     if execute:
-        try:
-            source_payload = json.loads(source_artifact_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(
-                f"Live invite source artifact is unreadable: {source_artifact_path}"
-            ) from exc
+        source_payload = source_payload_snapshot
+        if source_payload is None:
+            try:
+                source_payload = json.loads(source_artifact_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"Live invite source artifact is unreadable: {source_artifact_path}"
+                ) from exc
         if not isinstance(source_payload, dict):
             raise ValueError("Live invite source artifact must contain a JSON object")
         if invite_payload_company_filter_failed(source_payload):

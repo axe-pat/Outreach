@@ -114,6 +114,57 @@ Use `--min-score` to tighten or loosen that candidate gate. A dry-run
 contacts or touchpoints to the workspace; tracking is written only with
 `--execute`.
 
+#### Cockpit-reviewed one-row execution
+
+The operator cockpit must not call the batch commands directly. Use the
+review-bound module so the artifact and the exact human-reviewed row cannot
+change between review and execution:
+
+```bash
+# 1. Render the exact proposal shown to the reviewer.
+./.venv/bin/python -m outreach.reviewed_linkedin preview \
+  --action followup \
+  --source-artifact /absolute/path/to/linkedin-followup-drafts.json \
+  --row-index 0 \
+  --output /absolute/path/to/proposal.json
+
+# 2. After review, bind the proposal digest into a create-once approval.
+./.venv/bin/python -m outreach.reviewed_linkedin approve \
+  --action followup \
+  --source-artifact /absolute/path/to/linkedin-followup-drafts.json \
+  --row-index 0 \
+  --expect-proposal-sha256 PROPOSAL_SHA256 \
+  --approved-by local-owner \
+  --approval-file /absolute/path/to/approval.json
+
+# 3. Execute exactly that row. The approval is consumed before send code runs.
+./.venv/bin/python -m outreach.reviewed_linkedin execute \
+  --approval-file /absolute/path/to/approval.json \
+  --expect-approval-sha256 APPROVAL_SHA256 \
+  --receipt-file /absolute/path/to/receipt.json \
+  --execute
+```
+
+Use `--action invite` for invite artifacts. If the operator edits the outgoing
+copy, write it to a UTF-8 file and pass the same `--outgoing-message-file` to
+both `preview` and `approve`. The approval binds the source artifact SHA256,
+row index, canonical recipient/profile or thread/contact, company, full latest
+inbound context for follow-ups, and exact outgoing text. Approval and receipt
+files are create-once. The execution ledger is locked and written atomically;
+once reserved, an approval cannot be replayed even when delivery becomes
+unknown and needs signed-in reconciliation.
+
+Follow-up approval requires a real, non-synthetic LinkedIn `thread_id`; the
+reviewed sender never falls back to a name match. Immediately before the live
+call it re-runs the same tracker-backed cadence, duplicate, stop, and learned-
+negative guard used by the public follow-up command. Execution uses the row
+snapshot inside the immutable approval, not the mutable source file. The one
+canonical replay ledger lives under the configured tracker workspace and is
+not caller-selectable. CLI stdout contains status and digests only; the full
+PII-bearing proposal and receipt are written to their explicitly requested
+files. Only exactly one literal `sent` result is complete; every other result
+is blocked or unknown and marked for reconciliation.
+
 ### ResumeGenerator v1 discovery
 
 ```bash

@@ -890,6 +890,7 @@ class LinkedInScraper:
         max_scrolls: int,
     ) -> LinkedInFollowupSendResult:
         expected_latest = str(draft.get("latest_message") or "").strip()
+        reviewed_exact_thread = bool(draft.get("_reviewed_require_exact_thread_id"))
         message = str(draft.get("draft_message") or "").strip()
         base = {
             "contact_id": str(draft.get("contact_id") or ""),
@@ -917,7 +918,11 @@ class LinkedInScraper:
             )
 
         live_latest = live_thread.latest_message.strip()
-        if expected_latest and self._normalize_message_text(live_latest) != self._normalize_message_text(expected_latest):
+        if (
+            reviewed_exact_thread or expected_latest
+        ) and self._normalize_message_text(live_latest) != self._normalize_message_text(
+            expected_latest
+        ):
             return LinkedInFollowupSendResult(
                 **base,
                 status="skipped_latest_changed",
@@ -939,7 +944,11 @@ class LinkedInScraper:
                 thread_url=live_thread.thread_url,
             )
 
-        if not self._click_message_thread(page, live_thread):
+        if not self._click_message_thread(
+            page,
+            live_thread,
+            exact_thread_only=reviewed_exact_thread,
+        ):
             return LinkedInFollowupSendResult(
                 **base,
                 status="send_error",
@@ -1032,6 +1041,11 @@ class LinkedInScraper:
         max_scrolls: int,
     ) -> LinkedInMessageThread | None:
         expected_thread_id = str(draft.get("thread_id") or "").strip()
+        reviewed_exact_thread = bool(draft.get("_reviewed_require_exact_thread_id"))
+        if reviewed_exact_thread and (
+            not expected_thread_id or expected_thread_id.casefold().startswith("synthetic:")
+        ):
+            return None
         expected_name = self._normalize_message_text(str(draft.get("name") or ""))
         expected_first_name = expected_name.split(" ", maxsplit=1)[0] if expected_name else ""
 
@@ -1042,6 +1056,8 @@ class LinkedInScraper:
                 thread_name = self._normalize_message_text(thread.name)
                 if expected_thread_id and thread.thread_id == expected_thread_id:
                     return thread
+                if reviewed_exact_thread:
+                    continue
                 if expected_name and thread_name == expected_name:
                     return thread
                 if expected_first_name and thread_name.split(" ", maxsplit=1)[0] == expected_first_name:
@@ -1052,9 +1068,15 @@ class LinkedInScraper:
                 break
         return None
 
-    def _click_message_thread(self, page: Page, thread: LinkedInMessageThread) -> bool:
+    def _click_message_thread(
+        self,
+        page: Page,
+        thread: LinkedInMessageThread,
+        *,
+        exact_thread_only: bool = False,
+    ) -> bool:
         script = """
-        ({ threadId, name }) => {
+        ({ threadId, name, exactThreadOnly }) => {
           const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim().toLowerCase();
           const containers = Array.from(document.querySelectorAll(
             'li.msg-conversation-listitem, .msg-conversation-listitem, [data-view-name="messages-conversation-list-item"]'
@@ -1071,7 +1093,10 @@ class LinkedInScraper:
               '.msg-conversation-listitem__participant-names, [data-anonymize="person-name"], h3, .entity-result__title-text'
             );
             const candidateName = normalize(nameEl ? nameEl.textContent : container.innerText.split('\\n')[0]);
-            if ((threadId && candidateId === threadId) || (name && candidateName === normalize(name))) {
+            if (
+              (threadId && candidateId === threadId)
+              || (!exactThreadOnly && name && candidateName === normalize(name))
+            ) {
               container.scrollIntoView({ block: 'center' });
               const rect = container.getBoundingClientRect();
               const x = rect.left + Math.min(Math.max(rect.width / 2, 40), rect.width - 12);
@@ -1085,7 +1110,14 @@ class LinkedInScraper:
         }
         """
         try:
-            result = page.evaluate(script, {"threadId": thread.thread_id, "name": thread.name})
+            result = page.evaluate(
+                script,
+                {
+                    "threadId": thread.thread_id,
+                    "name": thread.name,
+                    "exactThreadOnly": exact_thread_only,
+                },
+            )
             if not bool(result.get("ok") if isinstance(result, dict) else result):
                 return False
             page.wait_for_timeout(1000)

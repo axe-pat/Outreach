@@ -243,6 +243,7 @@ def test_fixture_linkedin_timeout_is_non_green_and_visible_in_source_breakdown(
     nightly_summary.write_text(
         json.dumps(
             {
+                "run_id": REPORT_RUN_ID,
                 "daily_engine_returncode": 0,
                 "daily_engine_manifest": str(manifest),
                 "source_metrics": str(source_metrics),
@@ -341,7 +342,14 @@ def test_source_breakdown_uses_referenced_linkedin_run_and_shows_zero_and_skippe
         json.dumps(
             {
                 "observed_at": "2026-07-10T01:05:00-07:00",
-                "feed": {"status": "completed", "captured": 0, "added": 0},
+                "feed": {
+                    "status": "completed",
+                    "captured": 1,
+                    "unique_in_capture": 1,
+                    "post_url_count": 1,
+                    "post_url_missing": 0,
+                    "added": 0,
+                },
                 "profile_viewers": {
                     "status": "skipped",
                     "reason": "not_scheduled_for_this_run",
@@ -364,12 +372,48 @@ def test_source_breakdown_uses_referenced_linkedin_run_and_shows_zero_and_skippe
     by_source = {row["source"]: row for row in rows}
 
     assert by_source["LinkedIn home feed"]["status"] == "completed"
-    assert by_source["LinkedIn home feed"]["raw"] == 0
+    assert by_source["LinkedIn home feed"]["raw"] == 1
     assert by_source["LinkedIn home feed"]["kept"] == 0
     assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
     assert by_source["LinkedIn profile viewers"]["raw"] == 0
     assert by_source["LinkedIn profile viewers"]["details"]["passive_context_only"] is True
     assert all(row["raw"] != 99 for row in rows)
+
+
+def test_source_breakdown_fails_closed_on_empty_or_url_less_feed_capture(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "linkedin-intelligence.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "feed": {
+                    "status": "completed",
+                    "captured": 4,
+                    "unique_in_capture": 4,
+                    "post_url_count": 0,
+                    "post_url_missing": 4,
+                    "added": 4,
+                },
+                "profile_viewers": {"status": "skipped", "captured": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = _source_breakdown(
+        {
+            "outreach_maintenance": {
+                "linkedin_intelligence_returncode": 0,
+                "linkedin_intelligence_artifact": str(artifact),
+            }
+        }
+    )
+    feed = next(row for row in rows if row["source"] == "LinkedIn home feed")
+
+    assert feed["status"] == "partial_failed"
+    assert feed["raw"] == 4
+    assert "0_of_4" in feed["details"]["reason"]
 
 
 def test_source_breakdown_marks_missing_failed_linkedin_capture_as_failed() -> None:
@@ -389,6 +433,37 @@ def test_source_breakdown_marks_missing_failed_linkedin_capture_as_failed() -> N
     assert by_source["LinkedIn home feed"]["details"]["reason"] == "capture_command_failed"
     assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
     assert by_source["LinkedIn profile viewers"]["details"]["reason"] == "linkedin_capture_unavailable"
+
+
+def test_source_breakdown_does_not_present_missing_handshake_metrics_as_zero(
+    tmp_path: Path,
+) -> None:
+    metrics = tmp_path / "metrics.json"
+    metrics.write_text(
+        json.dumps(
+            {
+                "sources": {
+                    "handshake": {
+                        "status": "ran",
+                        "raw_count": None,
+                        "accepted_for_write": 0,
+                        "details": {"artifact": ""},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    handshake = next(
+        row
+        for row in _source_breakdown({"source_metrics": str(metrics)})
+        if row["source"] == "Handshake"
+    )
+
+    assert handshake["status"] == "incomplete"
+    assert handshake["raw"] == 0
+    assert handshake["details"]["reason"] == "raw_count_not_recorded_for_run"
 
 
 def test_source_breakdown_uses_only_referenced_company_news_capture(tmp_path: Path) -> None:
@@ -439,7 +514,14 @@ def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path:
         json.dumps(
             {
                 "observed_at": "2026-07-10T01:05:00-07:00",
-                "feed": {"status": "completed", "captured": 0, "added": 0},
+                "feed": {
+                    "status": "completed",
+                    "captured": 1,
+                    "unique_in_capture": 1,
+                    "post_url_count": 1,
+                    "post_url_missing": 0,
+                    "added": 0,
+                },
                 "profile_viewers": {
                     "status": "skipped",
                     "reason": "not_scheduled_for_this_run",
@@ -496,11 +578,11 @@ def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path:
     assert f"Run ID: `{REPORT_RUN_ID}`" in report_text
     assert f"Run ID {REPORT_RUN_ID}" in html_text
     by_source = {row["source"]: row for row in payload["source_breakdown"]}
-    assert "LinkedIn home feed: `completed` · kept `0` / raw `0`" in report_text
+    assert "LinkedIn home feed: `completed` · kept `0` / raw `1`" in report_text
     assert "LinkedIn profile viewers: `skipped` · kept `0` / raw `0`" in report_text
     assert "LinkedIn home feed" in html_text
     assert "LinkedIn profile viewers" in html_text
-    assert by_source["LinkedIn home feed"]["raw"] == 0
+    assert by_source["LinkedIn home feed"]["raw"] == 1
     assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
     # The stale artifact is not consulted; the temporary pytest path itself may
     # happen to contain the digits "77", so assert against its filename instead.
@@ -620,6 +702,40 @@ def test_daily_report_rejects_run_id_mismatch(tmp_path: Path) -> None:
             nightly_summary_path=nightly_summary,
             run_id="20260711-020000",
         )
+
+
+def test_run_cli_forwards_exact_target_role_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = tmp_path / "pipeline.json"
+    artifact.write_text(json.dumps({"results": []}), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda self: None,
+    )
+
+    def fake_execute(**kwargs: object) -> Path:
+        captured.update(kwargs)
+        return artifact
+
+    monkeypatch.setattr("outreach.cli.execute_linkedin_company_run", fake_execute)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "--company",
+            "AMETEK",
+            "--target-role-title",
+            "AI Automation Co-Op",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["company"] == "AMETEK"
+    assert captured["target_role_title"] == "AI Automation Co-Op"
 
 
 def test_daily_report_run_scope_ignores_unreferenced_concurrent_artifacts(tmp_path: Path) -> None:
@@ -828,7 +944,9 @@ def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_p
     assert [row["person"] for row in payload["auto_handled"]] == ["Auto Person"]
     assert [row["name"] for row in payload["messages_to_review"]] == ["Review Person"]
     assert [row["name"] for row in payload["system_held_messages"]] == ["Hold Person"]
-    assert [row["action_type"] for row in payload["what_needs_you"]] == ["message_review"]
+    assert [row["action_type"] for row in payload["what_needs_you"]] == [
+        "message_review_this_run"
+    ]
     assert payload["track_2_execution"]["status"] == "not_run"
     inbox_refresh = next(
         row for row in payload["linkedin_actions"]
@@ -841,10 +959,111 @@ def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_p
     assert inbox_rows["Review Person"]["status"] == "open"
     assert "Track 2 execution: `not_run`" in report_path.read_text(encoding="utf-8")
     html_text = html_path.read_text(encoding="utf-8")
-    assert "Messages to review" in html_text
+    assert "Messages to review (this run)" in html_text
     assert "Auto-handled messages (this run)" in html_text
     assert "Profile sync:" in html_text
     assert "positive examples added" in html_text
+
+
+def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    OutreachWorkbook(workspace).initialize()
+    (workspace / "linkedin_followup_pending_review.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-old",
+                        "company": "OldCo",
+                        "name": "Older Person",
+                        "send_recommendation": "review",
+                        "draft_message": "Older pending draft.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    drafts = artifacts / "exact-linkedin-followup-drafts.json"
+    held = {
+        "contact_id": "ct-held",
+        "company": "HeldCo",
+        "name": "Held Person",
+        "draft_kind": "conversation_reply",
+        "draft_message": "Wait until the cadence gate opens.",
+    }
+    drafts.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-now",
+                        "company": "NowCo",
+                        "name": "Current Person",
+                        "send_recommendation": "review",
+                        "draft_message": "Current exact-run draft.",
+                    },
+                    {**held, "send_recommendation": "review"},
+                ],
+                "cadence_held": [
+                    {**held, "send_recommendation": "cadence_hold"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"linkedin_followup_draft_artifacts": [str(drafts)]}),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "run_id": REPORT_RUN_ID,
+                "daily_engine_manifest": str(manifest),
+                "outreach_maintenance": {"ran": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_json, report_md, report_html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+
+    assert [row["name"] for row in payload["messages_to_review"]] == [
+        "Current Person"
+    ]
+    assert [row["name"] for row in payload["carryover_messages_to_review"]] == [
+        "Older Person"
+    ]
+    assert [row["name"] for row in payload["system_held_messages"]] == [
+        "Held Person"
+    ]
+    assert payload["pending_review_count"] == 1
+    assert payload["carryover_review_count"] == 1
+    assert [row["action_type"] for row in payload["what_needs_you"]] == [
+        "message_review_this_run",
+        "message_review_carryover",
+    ]
+    assert "Messages to review (this run)" in report_md.read_text(encoding="utf-8")
+    assert "Carryover review backlog (workspace snapshot)" in report_html.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Path) -> None:
@@ -907,7 +1126,7 @@ def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Pat
     assert payload["messages_to_review"][0]["channel"] == "email"
     assert payload["messages_to_review"][0]["subject"] == "Specific EmailCo role fit"
     action_types = {row["action_type"] for row in payload["what_needs_you"]}
-    assert {"message_review", "email_channel_blocker"} <= action_types
+    assert {"message_review_this_run", "email_channel_blocker"} <= action_types
     email_source = next(row for row in payload["source_breakdown"] if row["source"] == "Cold email channel")
     assert email_source["status"] == "skipped_missing_credentials"
     assert email_source["raw"] == 1
@@ -1057,9 +1276,103 @@ def test_daily_report_track_2_company_counts_are_actual_not_planned(tmp_path: Pa
     assert airbyte["company"] == "Airbyte"
     assert airbyte["counts"]["linkedin_invites_sent"] == 2
     assert airbyte["counts"]["linkedin_profiles_mapped"] == 3
+    assert airbyte["counts"]["company_mapping_attempted"] == 1
+    assert airbyte["counts"]["company_mapping_completed"] == 1
     assert 999 not in airbyte["counts"].values()
+    track_source = next(
+        row
+        for row in payload["source_breakdown"]
+        if row["source"] == "Track 2 imports / maintenance"
+    )
+    assert track_source["details"]["actual_actions"]["company_mapping_attempted"] == 1
+    assert track_source["details"]["actual_actions"]["companies_mapped"] == 1
     assert payload["track_2_execution"]["status"] == "completed"
     assert payload["run_status"] == "completed"
+
+
+def test_track_2_mapping_reports_each_attempt_and_uses_per_run_status(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.initialize()
+    settings = SimpleNamespace(
+        artifacts_dir=tmp_path / "artifacts",
+        resolved_tracking_workspace_dir=workspace,
+    )
+    actions, company_counts = _track_2_actual_actions(
+        track_payload={
+            "phase_results": [
+                {
+                    "phase": "4_contact_mapping",
+                    "status": "partial_failed",
+                    "runs": [
+                        {
+                            "company": "Compa",
+                            "status": "failed",
+                            "candidate_count": 0,
+                            "contacts_added": 0,
+                            "pass_errors": ["Exact company suggestion not found."],
+                        },
+                        {
+                            "company": "Parsec Automation",
+                            "status": "completed",
+                            "candidate_count": 0,
+                            "contacts_added": 0,
+                        },
+                    ],
+                }
+            ]
+        },
+        settings=settings,
+        summary_path=None,
+        workbook=workbook,
+    )
+
+    by_company = {row["company"]: row for row in actions}
+    assert by_company["Compa"]["status"] == "failed"
+    assert "Exact company suggestion not found" in by_company["Compa"]["detail"]
+    assert by_company["Parsec Automation"]["status"] == "completed"
+    assert company_counts["Compa"] == {
+        "company_mapping_attempted": 1,
+        "company_mapping_failed": 1,
+    }
+    assert company_counts["Parsec Automation"] == {
+        "company_mapping_attempted": 1,
+        "company_mapping_completed": 1,
+    }
+
+
+def test_source_breakdown_uses_already_resolved_track_payload() -> None:
+    rows = _source_breakdown(
+        {
+            "outreach_maintenance": {
+                "track_2_daily_run_returncode": 0,
+                "track_2_daily_run_artifact": "artifacts/relative-track-2.json",
+            }
+        },
+        exact_track_payload={
+            "execute": True,
+            "phase_results": [
+                {
+                    "phase": "4_contact_mapping",
+                    "status": "partial_failed",
+                    "runs": [
+                        {"company": "MappedCo", "status": "completed"},
+                        {"company": "FailedCo", "status": "failed"},
+                    ],
+                }
+            ],
+        },
+    )
+    track = next(
+        row for row in rows if row["source"] == "Track 2 imports / maintenance"
+    )
+
+    assert track["status"] == "failed"
+    assert track["details"]["actual_actions"]["company_mapping_attempted"] == 2
+    assert track["details"]["actual_actions"]["companies_mapped"] == 1
+    assert track["details"]["actual_actions"]["company_mapping_failed"] == 1
 
 
 def test_source_breakdown_exposes_each_startup_adapter_stage(tmp_path: Path) -> None:
@@ -1943,6 +2256,10 @@ def test_track_2_unknown_invite_slot_is_not_reused_and_summary_is_truthful(
 ) -> None:
     workspace = tmp_path / "workspace"
     OutreachWorkbook(workspace).initialize()
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda self: None,
+    )
     fake_plan = {
         "selected_count": 2,
         "budget": {"max_linkedin_invites": 2},

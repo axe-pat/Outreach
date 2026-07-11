@@ -6989,7 +6989,11 @@ def _daily_html_reports_dir(settings: OutreachSettings) -> Path:
     return _reports_dir(settings) / "daily_html"
 
 
-def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, object]]:
+def _source_breakdown(
+    nightly_summary: dict[str, object],
+    *,
+    exact_track_payload: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
     """Normalize the sources recorded by one ResumeGenerator nightly summary.
 
     A report must not infer source activity from whichever artifact happens to be
@@ -7005,12 +7009,24 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
         metric = metric if isinstance(metric, dict) else {}
         stage = stages.get(key) if isinstance(stages, dict) else {}
         stage = stage if isinstance(stage, dict) else {}
+        status = str(metric.get("status") or stage.get("status") or "skipped")
+        row_details = details if details is not None else (metric.get("details") or {})
+        row_details = row_details if isinstance(row_details, dict) else {}
+        # A source that claims it ran without recording even a raw-count value
+        # is not a trustworthy zero. Current runners persist an exact structured
+        # artifact for valid zero-result executions.
+        if status in {"ran", "completed"} and metric and metric.get("raw_count") is None:
+            status = "incomplete"
+            row_details = {
+                **row_details,
+                "reason": "raw_count_not_recorded_for_run",
+            }
         return {
             "source": label,
-            "status": metric.get("status") or stage.get("status") or "skipped",
+            "status": status,
             "raw": int(metric.get("raw_count") or 0) if metric else 0,
             "kept": int(metric.get("accepted_for_write") or 0) if metric else 0,
-            "details": details if details is not None else (metric.get("details") or {}),
+            "details": row_details,
         }
 
     startup_report = source_metrics.get("startup_source_report") if isinstance(source_metrics.get("startup_source_report"), dict) else {}
@@ -7151,7 +7167,11 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
     }
     maintenance = nightly_summary.get("outreach_maintenance") if isinstance(nightly_summary.get("outreach_maintenance"), dict) else {}
     track_artifact = Path(str((maintenance or {}).get("track_2_daily_run_artifact") or ""))
-    track_payload = _load_json_file(track_artifact)
+    track_payload = (
+        exact_track_payload
+        if exact_track_payload is not None
+        else _load_json_file(track_artifact)
+    )
     track_used = track_payload.get("used") if isinstance(track_payload.get("used"), dict) else {}
     maintenance_returncodes = {
         key: value
@@ -7162,7 +7182,11 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
     actual_actions = {
         "linkedin_invites_sent": 0,
         "linkedin_messages_sent": 0,
+        "company_mapping_attempted": 0,
         "companies_mapped": 0,
+        "company_mapping_failed": 0,
+        "linkedin_profiles_mapped": 0,
+        "contacts_added": 0,
         "profiles_inspected_for_email": 0,
         "emails_found": 0,
         "companies_enriched": 0,
@@ -7183,20 +7207,44 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
             attempted_actions += inspected
         elif phase_name == "4_contact_mapping":
             runs = [item for item in list(phase.get("runs") or []) if isinstance(item, dict)]
-            actual_actions["companies_mapped"] += len(runs)
+            actual_actions["company_mapping_attempted"] += len(runs)
+            actual_actions["companies_mapped"] += sum(
+                str(run.get("status") or "completed").casefold()
+                in {"completed", "ran"}
+                for run in runs
+            )
+            actual_actions["company_mapping_failed"] += sum(
+                str(run.get("status") or "").casefold()
+                in {"failed", "partial", "partial_failed", "timed_out", "timeout"}
+                for run in runs
+            )
+            actual_actions["linkedin_profiles_mapped"] += sum(
+                int(run.get("candidate_count") or 0) for run in runs
+            )
+            actual_actions["contacts_added"] += sum(
+                int(run.get("contacts_added") or 0) for run in runs
+            )
             attempted_actions += len(runs)
         elif phase_name == "5_send_linkedin_invites":
             for run in list(phase.get("runs") or []):
                 if not isinstance(run, dict):
                     continue
                 counts = run.get("status_counts") if isinstance(run.get("status_counts"), dict) else {}
-                actual_actions["linkedin_invites_sent"] += int((counts or {}).get("sent") or 0)
+                actual_actions["linkedin_invites_sent"] += int((counts or {}).get("sent") or 0) + int(
+                    (counts or {}).get("sent_without_note") or 0
+                )
                 attempted_actions += sum(int(value or 0) for value in (counts or {}).values())
         elif phase_name == "7_context_enrichment":
             count = int(phase.get("count") or 0)
             actual_actions["companies_enriched"] += count
             attempted_actions += count
-    completed_actions = sum(actual_actions.values()) - actual_actions["emails_found"]
+    completed_actions = (
+        actual_actions["linkedin_invites_sent"]
+        + actual_actions["linkedin_messages_sent"]
+        + actual_actions["companies_mapped"]
+        + actual_actions["profiles_inspected_for_email"]
+        + actual_actions["companies_enriched"]
+    )
     track_status = str(track_execution["status"])
     track = {
         "source": "Track 2 imports / maintenance",
@@ -7236,7 +7284,20 @@ def _source_breakdown(nightly_summary: dict[str, object]) -> list[dict[str, obje
     else:
         feed_status = "skipped"
         feed_reason = "not_recorded_for_this_run"
+    feed_captured = int(feed.get("unique_in_capture") or feed.get("captured") or 0)
+    feed_post_urls = int(feed.get("post_url_count") or 0)
+    if feed_status in {"ran", "completed"}:
+        if feed_captured <= 0:
+            feed_status = "failed"
+            feed_reason = "authenticated_feed_capture_was_empty"
+        elif feed_post_urls < feed_captured:
+            feed_status = "partial_failed"
+            feed_reason = (
+                f"only_{feed_post_urls}_of_{feed_captured}_captured_posts_have_stable_urls"
+            )
     feed_details = dict(feed)
+    if feed_reason:
+        feed_details["reason"] = feed_reason
     if not feed_details:
         feed_details = {
             "reason": feed_reason,
@@ -7337,6 +7398,7 @@ def _combined_source_status(*statuses: str) -> str:
 REQUIRED_RUN_SOURCE_NAMES = frozenset(
     {
         "LinkedIn",
+        "LinkedIn home feed",
         "Handshake",
         "JobSpy",
         "Startup sources",
@@ -7614,7 +7676,11 @@ def _source_summary(row: dict[str, object]) -> str:
         return (
             f"{int(actual.get('linkedin_invites_sent') or 0)} invites sent; "
             f"{int(actual.get('linkedin_messages_sent') or 0)} messages sent; "
-            f"{int(actual.get('companies_mapped') or 0)} companies mapped; "
+            f"mapping {int(actual.get('companies_mapped') or 0)}/"
+            f"{int(actual.get('company_mapping_attempted') or 0)} companies completed "
+            f"({int(actual.get('company_mapping_failed') or 0)} failed); "
+            f"{int(actual.get('linkedin_profiles_mapped') or 0)} profiles mapped; "
+            f"{int(actual.get('contacts_added') or 0)} contacts added; "
             f"{int(actual.get('profiles_inspected_for_email') or 0)} profiles inspected for email."
         )
     return ""
@@ -7646,6 +7712,21 @@ def _review_item_key(item: dict[str, object]) -> tuple[str, str, str, str]:
         str(item.get("name") or ""),
         str(item.get("draft_message") or item.get("message") or ""),
     )
+
+
+def _review_identity_key(item: dict[str, object]) -> tuple[str, str]:
+    """Return the channel/contact identity whose latest gate wins.
+
+    A cadence hold is a final state for that contact and channel, even when an
+    earlier draft copy used a slightly different message body.
+    """
+    channel = str(item.get("channel") or "linkedin").strip().casefold()
+    contact_id = str(item.get("contact_id") or "").strip().casefold()
+    if contact_id:
+        return channel, contact_id
+    company = normalize_dedupe_text(str(item.get("company") or ""))
+    name = normalize_dedupe_text(str(item.get("name") or item.get("person") or ""))
+    return channel, f"{company}|{name}"
 
 
 def _track_2_actual_actions(
@@ -7739,15 +7820,36 @@ def _track_2_actual_actions(
                 payload = _load_json_file(path)
                 profiles = int(payload.get("count") or len(list(payload.get("results") or [])))
                 contacts_added = int(run.get("contacts_added") or 0)
+                run_status = str(run.get("status") or "completed")
+                failed = run_status.casefold() in {
+                    "failed",
+                    "partial",
+                    "partial_failed",
+                    "timed_out",
+                    "timeout",
+                }
+                add(company, "company_mapping_attempted", 1)
+                add(company, "company_mapping_failed" if failed else "company_mapping_completed", 1)
                 add(company, "linkedin_profiles_mapped", profiles)
                 add(company, "contacts_added", contacts_added)
+                pass_errors = [
+                    str(error)
+                    for error in list(run.get("pass_errors") or [])
+                    if str(error).strip()
+                ]
+                detail = (
+                    f"mapping {run_status}; {profiles} LinkedIn profiles mapped; "
+                    f"{contacts_added} contacts added."
+                )
+                if pass_errors:
+                    detail += f" Errors: {'; '.join(pass_errors)}"
                 actions.append(
                     {
                         "action": "linkedin_company_contact_mapping",
-                        "status": phase_status,
+                        "status": run_status,
                         "company": company,
                         "count": profiles,
-                        "detail": f"{profiles} LinkedIn profiles mapped; {contacts_added} contacts added.",
+                        "detail": detail,
                         "artifact": str(path or ""),
                         "source_lane": "track_2",
                     }
@@ -7814,7 +7916,12 @@ def _company_execution_rows(
         bucket[key] = bucket.get(key, 0) + amount
 
     for run in invite_runs:
-        add(str(run.get("company") or ""), "linkedin_invites_sent", int((run.get("status_counts") or {}).get("sent") or 0))
+        counts = run.get("status_counts") or {}
+        add(
+            str(run.get("company") or ""),
+            "linkedin_invites_sent",
+            int(counts.get("sent") or 0) + int(counts.get("sent_without_note") or 0),
+        )
     for run in app_company_runs or []:
         company = str(run.get("company") or "")
         if not company:
@@ -7824,6 +7931,12 @@ def _company_execution_rows(
         detail = status.replace("_", " ")
         if run.get("safe_candidate_count") is not None:
             detail += f"; safe candidates {int(run.get('safe_candidate_count') or 0)}"
+        target_role_title = str(run.get("target_role_title") or "").strip()
+        if target_role_title:
+            detail += f"; role {target_role_title}"
+        target_source = str(run.get("source") or "").strip()
+        if target_source:
+            detail += f"; source {target_source}"
         error = str(run.get("prep_error") or run.get("send_error") or "").strip()
         if error:
             detail += f"; {error}"
@@ -8226,7 +8339,7 @@ def write_artifact_daily_report(
         elif recommendation in SYSTEM_HOLD_RECOMMENDATIONS:
             system_held_items.append(enriched)
 
-    seen_review_keys: set[tuple[str, str, str]] = set()
+    seen_review_keys: set[tuple[str, str]] = set()
     deduped_review_items: list[dict[str, object]] = []
     manually_cleared_items: list[dict[str, object]] = []
     for item in pending_review_items:
@@ -8252,32 +8365,57 @@ def write_artifact_daily_report(
             cleared_item["manual_source_artifact"] = (manual_outbound or {}).get("artifact", "")
             manually_cleared_items.append(cleared_item)
             continue
-        key = _review_item_key(item)[1:]
+        key = _review_identity_key(item)
         if key in seen_review_keys:
             continue
         seen_review_keys.add(key)
         deduped_review_items.append(item)
 
     sent_review_keys = {
-        _review_item_key(item)
+        _review_identity_key(item)
         for payload in followup_payloads
         for item in list(payload.get("results") or [])
         if isinstance(item, dict) and str(item.get("status") or "") == "sent"
     }
-    deduped_review_items = [
-        item for item in deduped_review_items if _review_item_key(item) not in sent_review_keys
-    ]
-    held_seen: set[tuple[str, str, str, str]] = set()
+    held_seen: set[tuple[str, str]] = set()
     deduped_held_items: list[dict[str, object]] = []
     for item in system_held_items:
-        key = _review_item_key(item)
+        key = _review_identity_key(item)
         if key in held_seen or key in sent_review_keys:
             continue
         held_seen.add(key)
         deduped_held_items.append(item)
+    deduped_review_items = [
+        item
+        for item in deduped_review_items
+        if _review_identity_key(item) not in sent_review_keys
+        and _review_identity_key(item) not in held_seen
+    ]
+    this_run_review_items = [
+        item
+        for item in deduped_review_items
+        if str(item.get("scope") or "this_run") == "this_run"
+    ]
+    carryover_review_items = [
+        item
+        for item in deduped_review_items
+        if str(item.get("scope") or "") != "this_run"
+    ]
+    this_run_held_items = [
+        item
+        for item in deduped_held_items
+        if str(item.get("scope") or "this_run") == "this_run"
+    ]
+    carryover_held_items = [
+        item
+        for item in deduped_held_items
+        if str(item.get("scope") or "") != "this_run"
+    ]
 
     source_breakdown = (
-        _source_breakdown(nightly_summary) if run_scoped else _unscoped_source_breakdown()
+        _source_breakdown(nightly_summary, exact_track_payload=track_payload)
+        if run_scoped
+        else _unscoped_source_breakdown()
     )
     app_invites = (
         run_integrity.get("app_invites")
@@ -8535,7 +8673,8 @@ def write_artifact_daily_report(
                 "action": "linkedin_invites",
                 "status": "ran",
                 "company": run.get("company", ""),
-                "count": int((run.get("status_counts") or {}).get("sent") or 0),
+                "count": int((run.get("status_counts") or {}).get("sent") or 0)
+                + int((run.get("status_counts") or {}).get("sent_without_note") or 0),
                 "status_counts": run.get("status_counts") or {},
                 "detail": _render_status_counts(run.get("status_counts") or {}),
                 "artifact": run.get("artifact", ""),
@@ -8549,6 +8688,10 @@ def write_artifact_daily_report(
             f"safe candidates {int(run.get('safe_candidate_count') or 0)}",
             f"sent {int(run.get('sent_count') or 0)}",
         ]
+        if str(run.get("target_role_title") or "").strip():
+            detail_parts.append(f"role {run.get('target_role_title')}")
+        if str(run.get("source") or "").strip():
+            detail_parts.append(f"source {run.get('source')}")
         if error:
             detail_parts.append(error)
         linkedin_actions.append(
@@ -8595,7 +8738,7 @@ def write_artifact_daily_report(
             }
         )
     linkedin_actions.extend(track_linkedin_actions)
-    for item in deduped_review_items:
+    for item in this_run_review_items:
         if item.get("channel") == "email":
             continue
         linkedin_actions.append(
@@ -8609,7 +8752,7 @@ def write_artifact_daily_report(
                 "scope": item.get("scope", "this_run"),
             }
         )
-    for item in deduped_held_items:
+    for item in this_run_held_items:
         if item.get("channel") == "email":
             continue
         linkedin_actions.append(
@@ -8688,22 +8831,38 @@ def write_artifact_daily_report(
                 "scope": "workspace_open_queue",
             }
         )
-    if deduped_review_items:
-        email_reviews = sum(item.get("channel") == "email" for item in deduped_review_items)
-        linkedin_reviews = len(deduped_review_items) - email_reviews
+    if this_run_review_items:
+        email_reviews = sum(item.get("channel") == "email" for item in this_run_review_items)
+        linkedin_reviews = len(this_run_review_items) - email_reviews
         what_needs_you.append(
             {
-                "action_type": "message_review",
+                "action_type": "message_review_this_run",
                 "priority": "high" if email_reviews else "medium",
-                "company": "Message review",
+                "company": "This run's message review",
                 "person": "",
                 "message": "",
                 "recommended_action": (
-                    f"Review {len(deduped_review_items)} unsent drafts in Messages to review "
+                    f"Review {len(this_run_review_items)} unsent drafts created in this run "
                     f"({linkedin_reviews} LinkedIn, {email_reviews} email)."
                 ),
-                "count": len(deduped_review_items),
-                "scope": "workspace_open_queue",
+                "count": len(this_run_review_items),
+                "scope": "this_run",
+            }
+        )
+    if carryover_review_items:
+        what_needs_you.append(
+            {
+                "action_type": "message_review_carryover",
+                "priority": "medium",
+                "company": "Carryover message backlog",
+                "person": "",
+                "message": "",
+                "recommended_action": (
+                    f"Review or resolve {len(carryover_review_items)} older unsent drafts "
+                    "from the persistent workspace queue."
+                ),
+                "count": len(carryover_review_items),
+                "scope": "workspace_snapshot",
             }
         )
     for blocker in email_blockers:
@@ -8773,7 +8932,9 @@ def write_artifact_daily_report(
     messages_sent = len(auto_handled)
     replies_sent = sum(item.get("message_type") == "reply" for item in auto_handled)
     followups_sent = messages_sent - replies_sent
-    invites_sent = int(invite_totals.get("sent") or 0)
+    invites_sent = int(invite_totals.get("sent") or 0) + int(
+        invite_totals.get("sent_without_note") or 0
+    )
     emails_sent = len(email_sends)
     total_outbound_sends = invites_sent + messages_sent + emails_sent
     email_actions: list[dict[str, object]] = [
@@ -8800,7 +8961,7 @@ def write_artifact_daily_report(
             "detail": item.get("subject", ""),
             "artifact": item.get("source_artifact", ""),
         }
-        for item in deduped_review_items
+        for item in this_run_review_items
         if item.get("channel") == "email"
     )
     email_actions.extend(
@@ -8814,7 +8975,7 @@ def write_artifact_daily_report(
             "detail": item.get("subject", ""),
             "artifact": item.get("source_artifact", ""),
         }
-        for item in deduped_held_items
+        for item in this_run_held_items
         if item.get("channel") == "email"
     )
     email_actions.extend(
@@ -8871,9 +9032,12 @@ def write_artifact_daily_report(
         "app_invite_status": app_invite_status,
         "app_company_runs": app_company_runs,
         "followup_runs": followup_runs,
-        "pending_review_count": len(deduped_review_items),
-        "messages_to_review": deduped_review_items,
-        "system_held_messages": deduped_held_items,
+        "pending_review_count": len(this_run_review_items),
+        "messages_to_review": this_run_review_items,
+        "carryover_review_count": len(carryover_review_items),
+        "carryover_messages_to_review": carryover_review_items,
+        "system_held_messages": this_run_held_items,
+        "carryover_system_held_messages": carryover_held_items,
         "auto_handled": auto_handled,
         "email_sends": email_sends,
         "email_actions": email_actions,
@@ -8898,8 +9062,10 @@ def write_artifact_daily_report(
             "emails_sent": emails_sent,
             "companies_touched": len(company_execution),
             "human_actions_open": len(what_needs_you),
-            "messages_to_review": len(deduped_review_items),
-            "system_held_messages": len(deduped_held_items),
+            "messages_to_review": len(this_run_review_items),
+            "carryover_messages_to_review": len(carryover_review_items),
+            "system_held_messages": len(this_run_held_items),
+            "carryover_system_held_messages": len(carryover_held_items),
         },
         "enrichment_summary": enrichment_summary,
         "enrichment_artifact": str(enrichment_artifact or ""),
@@ -8973,11 +9139,11 @@ def write_artifact_daily_report(
         f"- Resolve or snooze inbox items in `{inbox_action_path}`; non-open rows stop appearing here."
     )
 
-    lines.extend(["", "## Messages to review", ""])
-    if deduped_review_items:
-        for item in deduped_review_items:
+    lines.extend(["", "## Messages to review (this run)", ""])
+    if this_run_review_items:
+        for item in this_run_review_items:
             lines.append(
-                f"- **{item.get('channel', 'linkedin')} · {item.get('company', '')} · {item.get('name', '')} · {item.get('scope', 'this_run')}**"
+                f"- **{item.get('channel', 'linkedin')} · {item.get('company', '')} · {item.get('name', '')}**"
             )
             if item.get("email") or item.get("subject"):
                 lines.append(
@@ -8991,9 +9157,28 @@ def write_artifact_daily_report(
                 f"  - Gate: `{item.get('send_recommendation', '')}`; this was not auto-sent."
             )
     else:
-        lines.append("- No message currently requires human review.")
+        lines.append("- No message created by this run currently requires human review.")
     lines.append(
-        f"- System-held (no human action yet): `{len(deduped_held_items)}`."
+        f"- System-held by this run (no human action yet): `{len(this_run_held_items)}`."
+    )
+
+    lines.extend(["", "## Carryover review backlog (workspace snapshot)", ""])
+    if carryover_review_items:
+        for item in carryover_review_items:
+            lines.append(
+                f"- **{item.get('channel', 'linkedin')} · {item.get('company', '')} · {item.get('name', '')}**"
+            )
+            lines.append(
+                f"  - Last message: {item.get('latest_message') or item.get('last_message') or ''}"
+            )
+            lines.append(f"  - Draft: {item.get('draft_message', '')}")
+            lines.append(
+                f"  - Gate: `{item.get('send_recommendation', '')}`; this predates the selected run."
+            )
+    else:
+        lines.append("- No older persistent review item remains open.")
+    lines.append(
+        f"- Older system-held rows (no action yet): `{len(carryover_held_items)}`."
     )
 
     lines.extend(["", "## Auto-handled messages (this run)", ""])
@@ -9153,7 +9338,20 @@ def write_artifact_daily_report(
             f"<td>{esc(item.get('draft_message', ''))}</td>"
             "</tr>"
         )
-        for item in deduped_review_items
+        for item in this_run_review_items
+    )
+    carryover_review_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{esc(item.get('channel', 'linkedin'))}</td>"
+            f"<td>{esc(item.get('company', ''))}</td>"
+            f"<td>{esc(item.get('name', ''))}</td>"
+            f"<td>{esc(item.get('send_recommendation', ''))}</td>"
+            f"<td>{esc(item.get('latest_message') or item.get('last_message') or '')}</td>"
+            f"<td>{esc(item.get('draft_message', ''))}</td>"
+            "</tr>"
+        )
+        for item in carryover_review_items
     )
     auto_handled_rows = "".join(
         "<tr>"
@@ -9237,7 +9435,7 @@ def write_artifact_daily_report(
   <main>
     <section class="grid">
       <div class="card"><h2>Actual outbound sends</h2><p><strong>{esc(total_outbound_sends)}</strong> total · {esc(invites_sent)} invites · {esc(followups_sent)} follow-ups · {esc(replies_sent)} replies · {esc(emails_sent)} emails</p></div>
-      <div class="card"><h2>Open actions for you</h2><p><strong>{esc(len(what_needs_you))}</strong> human actions · <strong>{esc(len(deduped_review_items))}</strong> messages to review</p><p><small>Persistent inbox queue: {esc(inbox_action_path)}</small></p></div>
+      <div class="card"><h2>Open actions for you</h2><p><strong>{esc(len(what_needs_you))}</strong> human actions · <strong>{esc(len(this_run_review_items))}</strong> this-run messages to review · <strong>{esc(len(carryover_review_items))}</strong> carryover</p><p><small>Persistent inbox queue: {esc(inbox_action_path)}</small></p></div>
       <div class="card"><h2>Track 2</h2><p><strong>{esc(track_execution['status'])}</strong></p><p>Return code {esc(track_2_returncode)}. Planned counts are never shown as completed work.</p></div>
     </section>
     <section class="grid">
@@ -9246,7 +9444,8 @@ def write_artifact_daily_report(
       <div class="card"><h2>Run health</h2><p>Daily engine <code>{esc(nightly_summary.get('daily_engine_returncode', ''))}</code> · app invites <code>{esc(app_invite_status)}</code> · JobSpy score-now <code>{esc(jobspy_metrics.get('jobspy_app_score_now', 0))}</code></p></div>
     </section>
     <section><h2>What needs you</h2>{inbox_action_cards or '<div class="card">No open human action.</div>'}</section>
-    <section><h2>Messages to review</h2>{review_rows and '<table class="review-table"><thead><tr><th>Channel</th><th>Company</th><th>Person</th><th>Email</th><th>Subject</th><th>Gate</th><th>Scope</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>' + review_rows + '</tbody></table>' or '<div class="card">No message currently requires human review.</div>'}<p>System-held, no action yet: <strong>{esc(len(deduped_held_items))}</strong>.</p></section>
+    <section><h2>Messages to review (this run)</h2>{review_rows and '<table class="review-table"><thead><tr><th>Channel</th><th>Company</th><th>Person</th><th>Email</th><th>Subject</th><th>Gate</th><th>Scope</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>' + review_rows + '</tbody></table>' or '<div class="card">No message created by this run currently requires human review.</div>'}<p>System-held by this run, no action yet: <strong>{esc(len(this_run_held_items))}</strong>.</p></section>
+    <section><h2>Carryover review backlog (workspace snapshot)</h2>{carryover_review_rows and '<table class="review-table"><thead><tr><th>Channel</th><th>Company</th><th>Person</th><th>Gate</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>' + carryover_review_rows + '</tbody></table>' or '<div class="card">No older persistent review item remains open.</div>'}<p>Older system-held rows, no action yet: <strong>{esc(len(carryover_held_items))}</strong>.</p></section>
     <section><h2>Auto-handled messages (this run)</h2>{auto_handled_rows and '<table><thead><tr><th>Company</th><th>Person</th><th>Type</th><th>Status</th><th>Sent message</th></tr></thead><tbody>' + auto_handled_rows + '</tbody></table>' or '<div class="card">No LinkedIn follow-up or reply was auto-sent.</div>'}</section>
     <section><h2>Cold email actions (this run)</h2>{email_action_rows and '<table><thead><tr><th>Action</th><th>Company</th><th>Person</th><th>Email</th><th>Status</th><th>Detail</th></tr></thead><tbody>' + email_action_rows + '</tbody></table>' or '<div class="card">Cold email channel skipped: 0 drafts, 0 sends.</div>'}</section>
     <section><h2>LinkedIn actions (this run)</h2>{linkedin_action_rows and '<table><thead><tr><th>Action</th><th>Company</th><th>Person</th><th>Status</th><th>Count</th><th>Detail</th></tr></thead><tbody>' + linkedin_action_rows + '</tbody></table>' or '<div class="card">LinkedIn work was not recorded for this run.</div>'}</section>
@@ -12073,6 +12272,12 @@ def extract_company(
 @app.command()
 def run(
     company: Annotated[str, typer.Option(help="Target company name")],
+    target_role_title: Annotated[
+        str,
+        typer.Option(
+            help="Exact role title that should drive role-family inference and message context"
+        ),
+    ] = "",
     dry_run: Annotated[bool, typer.Option(help="Skip writes and external side effects")] = True,
     company_mode: Annotated[
         str,
@@ -12134,6 +12339,7 @@ def run(
         enable_marshall=enable_marshall,
         enable_affinity_expansion=enable_affinity_expansion,
         force_broad_fallback=force_broad_fallback,
+        target_role_title=target_role_title,
     )
     if not auto_send:
         return

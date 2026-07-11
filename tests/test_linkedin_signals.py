@@ -224,6 +224,15 @@ def test_capture_feed_duration_can_be_tuned_without_a_fixed_sixty_second_budget(
     assert page.waits == []
 
 
+def test_feed_extractor_uses_one_actor_block_and_not_nested_list_items() -> None:
+    script = linkedin_signals_module.FEED_EXTRACTION_SCRIPT
+
+    assert "[role=\"listitem\"]" not in script
+    assert "const actorBlock" in script
+    assert "actorBlock.querySelector" in script
+    assert "timestamp.closest('a[href]')" in script
+
+
 def test_capture_limits_validate_caller_supplied_bounds() -> None:
     with pytest.raises(ValueError, match="max_scrolls"):
         CaptureLimits(max_scrolls=-1)
@@ -590,3 +599,50 @@ def test_live_wrapper_reports_preflight_failure_instead_of_a_zero_result(
     assert result["profile_viewers"]["status"] == "skipped"
     assert not (tmp_path / "feed.csv").exists()
     assert browser.closed is True
+
+
+def test_live_feed_quality_gate_rejects_missing_post_permalinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = _FakePage([[]])
+
+    class _Context:
+        def new_page(self) -> _FakePage:
+            return page
+
+    class _Scraper:
+        def _close_page_safely(self, live_page: _FakePage) -> None:
+            live_page.close()
+
+    monkeypatch.setattr(
+        linkedin_signals_module,
+        "capture_feed_posts",
+        lambda *args, **kwargs: [
+            FeedPost(
+                post_url="",
+                author_name=f"Person {index}",
+                author_url=f"https://www.linkedin.com/in/person-{index}/",
+                company="ExampleCo",
+                company_url="https://www.linkedin.com/company/exampleco/",
+                text=f"Post {index}",
+            )
+            for index in range(3)
+        ],
+    )
+
+    result = linkedin_signals_module._capture_feed_live_page(
+        _Context(),
+        _Scraper(),
+        path=tmp_path / "feed.csv",
+        limits=CaptureLimits(max_scrolls=0),
+        observed_at="2026-07-11T08:00:00+00:00",
+        known_companies=(),
+        relevance_keywords=(),
+    )
+
+    assert result["status"] == "partial_failed"
+    assert result["reason"] == "feed_capture_missing_permalinks"
+    assert result["quality_gate"] == "0/3 captured posts have stable LinkedIn URLs"
+    assert result["persisted"] is False
+    assert not (tmp_path / "feed.csv").exists()
+    assert page.closed is True

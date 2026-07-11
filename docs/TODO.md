@@ -18,9 +18,11 @@ paths visible instead of accidentally filtering them out.
    or phase failures must remain visibly incomplete/not-run and can never be
    rendered as completed. Required Source Breakdown rows now fail overall run
    health on failed/timeout/partial/incomplete statuses while intentional skips
-   and successful zero-result runs remain valid. `What needs you`, message
-   review, auto-handled sends, system holds, actual company actions, and plans
-   remain separate report data.
+   and successful zero-result runs with an exact artifact remain valid. A
+   ran source with no raw count is incomplete, not a synthetic zero. `What
+   needs you`, exact-run message review, carryover review backlog, auto-handled
+   sends, system holds, actual company actions, and plans remain separate report
+   data. A final cadence hold wins over an older review copy for the same person.
    Exact-company-filter failures, app-queue prep/send failures, and unknown
    invite delivery must likewise stay non-green and visible at company level;
    an unknown reserved invite requires signed-in reconciliation before retry.
@@ -28,9 +30,12 @@ paths visible instead of accidentally filtering them out.
    configurable home-feed capture records good startups and other interesting
    company, role, hiring, funding, launch, and warm-network signals with post
    and author provenance. It never auto-messages and has no hard-coded 60-second
-   limit. The current selectors were live-validated on July 10, 2026; the next
-   work is tuning `max_scrolls`, `max_items`, and the optional duration cap from
-   several scheduled runs.
+   limit. The July 11 production proof exposed nested-card actor mismatches and
+   six captures with zero post URLs. The extractor now binds fields to one
+   update/actor block and requires at least one post plus a stable permalink for
+   every retained post; empty or URL-less captures fail closed. The next 1am
+   run is the live revalidation before tuning `max_scrolls`, `max_items`, or the
+   optional duration cap.
 3. **IMPLEMENTED — review and promote independently discovered companies.**
    Feed signals can become candidate companies without already existing in
    `organizations.csv`. Dedupe, provenance, the five-part fit rubric, editable
@@ -61,6 +66,10 @@ paths visible instead of accidentally filtering them out.
    and 2/2. No configured family is below its floor
    (`artifacts/20260711-141856-role-surface-report.json`). Continue tuning and
    verify several scheduled runs before treating this as ongoing coverage.
+   The app-queue bridge now preserves each selected target's exact role title,
+   source, and queue bucket and passes `--target-role-title` into Outreach; this
+   closes the AMETEK proof-run leak where company-only execution fell back to
+   Product wording for an AI Automation role.
 6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
    LinkedIn intelligence pass checks the viewer ledger every seven days by
    default, dedupes repeated observations, and annotates target-company/role
@@ -247,16 +256,21 @@ paths visible instead of accidentally filtering them out.
   - switch back to `--cycle-config normal` when app volume returns so the app-queue invite cap moves back to 25.
   - `scripts/run_manual_supervised_e2e_debug.sh` is the attended/manual Outreach debug runner; `scripts/run_daily_supervised_e2e.sh` is only a warning shim for backwards compatibility.
   - latest daily HTML lives in `workspace/reports/daily_html/`, with compatibility mirrors in `workspace/reports/` and `workspace/`.
-  - scheduled reports are run-scoped: Source Breakdown is anchored to the nightly summary and explicitly marks LinkedIn, Handshake, JobSpy, startup sources, ResumeGenerator/app queue, and Track 2 as ran/skipped. Do not present a workspace snapshot or a newest artifact as evidence for a prior run.
+  - scheduled reports are run-scoped: Source Breakdown is anchored to the nightly summary and explicitly marks LinkedIn job discovery, LinkedIn home feed, Handshake, JobSpy, startup sources, ResumeGenerator/app queue, and Track 2 as ran/skipped/failed. Do not present a workspace snapshot or a newest artifact as evidence for a prior run.
   - keep the report action-first: show actual per-company execution separately from planned campaigns, and surface open inbound LinkedIn actions (for example, resume requests) in `What needs you`. The persistent action queue is `workspace/linkedin_inbox_actions.csv`; it requires a human status update and never auto-sends an email.
   - the inbox refresh is independent of campaign-plan selection: zero planned
     follow-up companies must still scan for inbound replies within the 25-message
     cap. Unmatched threads become explicit mapping/review actions, and a clean
     zero-draft scan is recorded as completed-zero-actions.
   - contact mapping persists exact contacts and uses a bounded cross-functional
-    pass set; do not run every affinity/alumni expansion pass for all 15 nightly
-    mapping companies.
+    pass set; each attempted company is shown with its own completed/failed and
+    profile/contact counts, including zero-result attempts. Do not run every
+    affinity/alumni expansion pass for all 15 nightly mapping companies.
   - comms-learning artifacts are persisted under `workspace/comms_learning/`: manual sends are gold, replaced/cleared generated drafts are negative, and approved/automatic drafts actually sent are silver. Use the corpus to improve future messaging rather than merely deleting stale review rows.
+  - `Messages to review (this run)` and `Carryover review backlog (workspace
+    snapshot)` are separate report contracts. Only the first can count toward
+    exact-run outcome/review totals; final cadence holds suppress stale review
+    copies for the same contact.
   - role-surface counts are run-scoped only when built from that run's source
     metrics. Company review/watchlist, cadence, profile-viewer, and outcome-
     learning counts are cumulative workspace-state snapshots even when they

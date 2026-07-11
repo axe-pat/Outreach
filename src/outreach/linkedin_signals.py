@@ -259,22 +259,41 @@ FEED_EXTRACTION_SCRIPT = r"""
     if (!value) return '';
     try { return new URL(value, window.location.origin).href; } catch (_) { return value; }
   };
-  const cards = Array.from(document.querySelectorAll(
-    'div.feed-shared-update-v2, article[data-urn], main article, '
-    + '[data-testid="mainFeed"] [role="listitem"]'
+  const cardSelector = [
+    'div.feed-shared-update-v2',
+    'div[data-view-name="feed-full-update"]',
+    'article[data-urn*="activity:"]',
+    'article[data-id*="activity:"]',
+  ].join(', ');
+  const candidates = Array.from(document.querySelectorAll(cardSelector));
+  // LinkedIn nests list items for comments and recommendations inside a post.
+  // Keep only the outer update container so actor/body fields cannot leak across
+  // unrelated nested cards.
+  const cards = candidates.filter((card) => !candidates.some(
+    (other) => other !== card && other.contains(card)
   ));
   return cards.map((card) => {
-    const urn = card.getAttribute('data-urn') || card.getAttribute('data-id') || '';
+    const urnNode = card.matches('[data-urn], [data-id]')
+      ? card
+      : card.querySelector('[data-urn*="activity:"], [data-id*="activity:"]');
+    const urn = (urnNode && (urnNode.getAttribute('data-urn')
+      || urnNode.getAttribute('data-id'))) || '';
     const permalink = Array.from(card.querySelectorAll(
       'a[href*="/feed/update/"], a[href*="/posts/"], a[href*="/pulse/"]'
     )).find((anchor) => !(anchor.getAttribute('href') || '').includes('/company/'));
-    const actor = card.querySelector(
-      '.update-components-actor__meta-link, .update-components-actor__container-link, '
+    const actorBlock = card.querySelector(
+      '.update-components-actor, .feed-shared-actor, '
+      + '[data-view-name="feed-actor-image"], [data-view-name="feed-actor-name"]'
+    ) || card;
+    const actor = actorBlock.querySelector(
+      'a.update-components-actor__meta-link, '
+      + 'a.update-components-actor__container-link, '
+      + 'a.feed-shared-actor__container-link, '
       + 'a[href*="/in/"], a[href*="/company/"]'
     );
     const menuButton = card.querySelector('button[aria-label^="Open control menu for post by "]');
-    const companyAnchor = card.querySelector('a[href*="/company/"]');
-    const authorName = card.querySelector(
+    const companyAnchor = actorBlock.querySelector('a[href*="/company/"]');
+    const authorName = actorBlock.querySelector(
       '.update-components-actor__name, .update-components-actor__title, '
       + '.feed-shared-actor__name'
     );
@@ -286,15 +305,20 @@ FEED_EXTRACTION_SCRIPT = r"""
     const socialContext = card.querySelector(
       '.update-components-header__text-view, .feed-shared-header__text'
     );
-    const actorDescription = card.querySelector(
+    const actorDescription = actorBlock.querySelector(
       '.update-components-actor__description, .feed-shared-actor__description'
     );
-    const timestamp = card.querySelector(
+    const timestamp = actorBlock.querySelector(
       '.update-components-actor__sub-description, time, '
       + '.feed-shared-actor__sub-description'
     );
+    const timestampLink = timestamp && timestamp.closest('a[href]');
+    const normalizedUrn = urn.match(/urn:li:(?:activity|share):\d+/i);
     const postUrl = permalink ? absolute(permalink.getAttribute('href'))
-      : (urn ? `https://www.linkedin.com/feed/update/${urn}/` : '');
+      : (timestampLink ? absolute(timestampLink.getAttribute('href'))
+        : (normalizedUrn
+          ? `https://www.linkedin.com/feed/update/${normalizedUrn[0]}/`
+          : ''));
     const actorUrl = actor ? absolute(actor.getAttribute('href')) : '';
     const menuAuthor = clean(menuButton ? menuButton.getAttribute('aria-label')
       .replace(/^Open control menu for post by\s+/i, '') : '');
@@ -1119,15 +1143,56 @@ def _capture_feed_live_page(
     try:
         page = context.new_page()
         page.set_default_timeout(15_000)
-        summary = capture_and_store_feed(
+        posts = capture_feed_posts(
             page,
-            path=path,
             limits=limits or CaptureLimits(initial_wait_ms=2_500),
+        )
+        unique_posts = {
+            feed_post_identity(post): post
+            for post in posts
+        }
+        captured = len(unique_posts)
+        post_url_count = sum(bool(post.post_url) for post in unique_posts.values())
+        missing_urls = captured - post_url_count
+        if captured <= 0:
+            return {
+                "status": "failed",
+                "path": str(path),
+                "captured": 0,
+                "unique_in_capture": 0,
+                "post_url_count": 0,
+                "post_url_missing": 0,
+                "persisted": False,
+                "reason": "feed_capture_empty",
+                "quality_gate": "no_posts_extracted_from_authenticated_feed",
+            }
+        if post_url_count < captured or missing_urls:
+            return {
+                "status": "partial_failed",
+                "path": str(path),
+                "captured": len(posts),
+                "unique_in_capture": captured,
+                "post_url_count": post_url_count,
+                "post_url_missing": missing_urls,
+                "added": 0,
+                "persisted": False,
+                "reason": "feed_capture_missing_permalinks",
+                "quality_gate": (
+                    f"{post_url_count}/{captured} captured posts have stable LinkedIn URLs"
+                ),
+            }
+        summary = FeedSignalStore(path).upsert_posts(
+            posts,
             observed_at=observed_at,
             known_companies=known_companies,
             relevance_keywords=relevance_keywords,
         )
-        return {"status": "completed", **summary}
+        return {
+            "status": "completed",
+            **summary,
+            "persisted": True,
+            "quality_gate": f"{post_url_count}/{captured} posts have stable LinkedIn URLs",
+        }
     except Exception as exc:
         return {
             "status": "failed",

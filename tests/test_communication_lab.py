@@ -126,11 +126,31 @@ def test_review_outreach_message_flags_generic_company_insight() -> None:
     assert any("specific product" in guidance for guidance in review.rewrite_guidance)
 
 
-def test_build_communication_lab_includes_coffee_dump_and_story_sources() -> None:
+def test_build_communication_lab_includes_coffee_dump_and_story_sources(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "Outreach"
+    workspace = repo_root / "workspace"
+    coffee = repo_root / "Consulting" / "resources" / "Coffee chat dump.txt"
+    resume_root = tmp_path / "ResumeGenerator v1"
+    story = resume_root / "docs" / "reference" / "STORY_BANK_RICH.md"
+    coffee.parent.mkdir(parents=True)
+    workspace.mkdir(parents=True)
+    story.parent.mkdir(parents=True)
+    coffee.write_text(
+        "Hi Alex,\n\nThe part about customer discovery was useful.\n\nThanks,\nAkshat\n",
+        encoding="utf-8",
+    )
+    (workspace / "touchpoints.csv").write_text(
+        "message_text\nA specific sent note.\n",
+        encoding="utf-8",
+    )
+    story.write_text("# Hevo\n\nA concrete platform story.\n", encoding="utf-8")
+
     lab = build_communication_lab(
-        workspace=Path("workspace"),
-        repo_root=Path("."),
-        resume_root=Path("../ResumeGenerator v1"),
+        workspace=workspace,
+        repo_root=repo_root,
+        resume_root=resume_root,
     )
 
     source_types = {source["source_type"] for source in lab["source_summary"]}

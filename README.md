@@ -682,11 +682,12 @@ these explicit pointers:
 
 An unrelated manual command, test, or concurrent run can create an artifact in
 the same directory and time window without affecting the report. It has two
-modes: the scheduled
-run-scoped mode (pass both `--since` and `--nightly-summary`) is the source of
+modes: the scheduled run-scoped mode (pass `--since`, `--nightly-summary`, and
+the matching `--run-id`) is the source of
 truth; an ad-hoc mode without them is only for local troubleshooting and is
 clearly labeled as a workspace snapshot. The report has a first-class Source
-Breakdown for LinkedIn, Handshake, JobSpy, startup sources, the
+Breakdown for LinkedIn job discovery, the LinkedIn home feed, Handshake,
+JobSpy, startup sources, the
 ResumeGenerator/app queue, Track 2 imports/maintenance, and the cold-email
 channel. Sources that did
 not run are shown as `skipped`/`not_run` with zeroes rather than being inferred
@@ -695,10 +696,16 @@ from old artifacts. Startup sources also show adapter and lane stages separately
 cannot be confused with startup job discovery.
 
 Overall run health is derived from those same exact-run rows. A required
-LinkedIn, Handshake, JobSpy, startup, app-queue, or Track 2 row with status
+LinkedIn job-discovery, LinkedIn home-feed, Handshake, JobSpy, startup,
+app-queue, or Track 2 row with status
 `failed`, `timed_out`, `timeout`, `partial_failed`, or `incomplete` prevents the
 report from claiming `completed`. An explicitly configured `skipped` source and
-a successful source with zero results remain valid and visible.
+a successful source with an exact zero-result artifact remain valid and visible.
+An authenticated feed capture is green only when it extracts at least one real
+post and every retained post has a stable LinkedIn permalink; empty or URL-less
+captures fail closed instead of feeding mismatched author/company data into
+company discovery. A source that claims it ran but omits its raw count is
+`incomplete`, not a synthetic zero.
 
 The report is action-first: it separates outcomes actually executed in that
 run (including per-company counts, such as invites sent or contacts mapped)
@@ -707,10 +714,12 @@ from the next campaign plan. It has distinct contracts:
 - `What needs you` contains only concrete human actions, such as a resume/email
   request, routing decision, message-review batch, or explicit SMTP/configuration
   blocker.
-- `Messages to review` contains unsent drafts behind a human-review gate and
-  shows the channel, recipient, subject/inbound context, draft, gate, and whether
-  it came from this run or the carried-over queue. Track 2 email drafts belong
-  here until approved; a draft is never counted as sent.
+- `Messages to review (this run)` contains only exact artifacts owned by the
+  selected nightly run. `Carryover review backlog (workspace snapshot)` is a
+  separate persistent section for older unresolved rows. A final cadence/system
+  hold wins over an earlier review copy for the same contact, so one person
+  cannot appear as both reviewable and held. Track 2 email drafts stay in the
+  exact-run section until approved; a draft is never counted as sent.
 - `Auto-handled messages` contains only exact send results with `status=sent`.
 - `LinkedIn actions` puts invite sends, inbox refresh/triage, follow-ups,
   replies, mapping, Contact Info research, feed capture, viewer capture,
@@ -731,6 +740,11 @@ delivery; an uncertain slot is never retried automatically and appears in
 `What needs you` until signed-in reconciliation resolves it. App-queue prep/send
 failures and zero-send company attempts remain visible in LinkedIn Actions and
 Execution by company even when no send artifact exists.
+For every app-queue company, ResumeGenerator passes the exact action-queue role
+title, source, and bucket into `main.py run --target-role-title ...`; those
+fields remain in the company-run manifest and report. This prevents a
+company-level tracker or Product fallback from overwriting a concrete adjacent
+role such as BizOps, Strategy, Program/Ops, narrow Growth/GTM, or AI automation.
 
 ### Production promotion contract
 

@@ -117,6 +117,99 @@ class BrowserPage(Protocol):
 
     def wait_for_timeout(self, timeout: float) -> None: ...
 
+    def on(self, event: str, handler: Callable[[Any], None]) -> None: ...
+
+    def remove_listener(self, event: str, handler: Callable[[Any], None]) -> None: ...
+
+
+class _FeedPostUrlResolver:
+    """Resolve new-feed component keys against bounded LinkedIn response state."""
+
+    _COMPONENT_KEY = re.compile(
+        r"^expanded(?P<semantic>.+?)FeedType_MAIN_FEED_RELEVANCE$",
+        flags=re.IGNORECASE,
+    )
+    _STATE_MAPPING = re.compile(
+        r"TranslationState-null(?P<semantic>[A-Za-z0-9_-]+)"
+        r"(?:(?!TranslationState-null|reactionState-).){0,800}?"
+        r"reactionState-(?P<urn>urn:li:(?:activity|ugcPost|share):\d+)",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    _PAGINATION_PATH = "/flagship-web/rsc-action/actions/pagination"
+    _MAX_RESPONSE_CHARS = 8_000_000
+    # Main feed plus the five configured scroll pages, while keeping each body bounded.
+    _MAX_TOTAL_CHARS = 48_000_000
+
+    def __init__(self) -> None:
+        self._component_urls: dict[str, str] = {}
+        self._stored_chars = 0
+        self._page: Any = None
+
+    def attach(self, page: BrowserPage) -> None:
+        on = getattr(page, "on", None)
+        if not callable(on):
+            return
+        self._page = page
+        on("response", self._handle_response)
+
+    def detach(self) -> None:
+        if self._page is None:
+            return
+        remove_listener = getattr(self._page, "remove_listener", None)
+        if callable(remove_listener):
+            try:
+                remove_listener("response", self._handle_response)
+            except Exception:
+                pass
+        self._page = None
+
+    def _handle_response(self, response: Any) -> None:
+        try:
+            response_url = clean_text(response.url)
+            parsed = urlparse(response_url)
+            is_main_feed = response_url == LINKEDIN_FEED_URL
+            is_pagination = (
+                parsed.scheme == "https"
+                and parsed.netloc.lower() == "www.linkedin.com"
+                and parsed.path == self._PAGINATION_PATH
+            )
+            if not is_main_feed and not is_pagination:
+                return
+            body = response.text()
+        except Exception:
+            return
+        self.add_response_body(body)
+
+    def add_response_body(self, body: Any) -> None:
+        if self._stored_chars >= self._MAX_TOTAL_CHARS:
+            return
+        normalized = str(body or "").replace(r"\u003A", ":").replace("%3A", ":")
+        remaining = self._MAX_TOTAL_CHARS - self._stored_chars
+        bounded = normalized[: min(self._MAX_RESPONSE_CHARS, remaining)]
+        if not bounded:
+            return
+        self._stored_chars += len(bounded)
+        for match in self._STATE_MAPPING.finditer(bounded):
+            semantic = match.group("semantic")
+            urn = match.group("urn")
+            self._component_urls[semantic] = (
+                f"https://www.linkedin.com/feed/update/{urn}/"
+            )
+
+    def post_url_for_component_key(self, component_key: Any) -> str:
+        match = self._COMPONENT_KEY.match(clean_text(component_key))
+        if not match:
+            return ""
+        return self._component_urls.get(match.group("semantic"), "")
+
+    def resolve_row(self, row: Mapping[str, Any]) -> Mapping[str, Any]:
+        post_url = self.post_url_for_component_key(row.get("component_key"))
+        if post_url:
+            # The response state is tied to this exact visible card. Prefer it
+            # over a generic URN found elsewhere in the card's social context.
+            return {**row, "post_url": post_url}
+        return row
+
 
 FEED_FIELDS = [
     "signal_id",
@@ -259,40 +352,121 @@ FEED_EXTRACTION_SCRIPT = r"""
     if (!value) return '';
     try { return new URL(value, window.location.origin).href; } catch (_) { return value; }
   };
+  const stablePostUrlFromText = (value) => {
+    const normalized = clean(value)
+      .replace(/&amp;/gi, '&')
+      .replace(/%3A/gi, ':')
+      .replace(/%2F/gi, '/');
+    if (!normalized) return '';
+    const absoluteUrl = normalized.match(
+      /https?:\/\/(?:www\.)?linkedin\.com\/(?:feed\/update\/urn:li:(?:activity|ugcPost|share):\d+|posts\/[^\s"'<>?&#]+|pulse\/[^\s"'<>?&#]+)/i
+    );
+    if (absoluteUrl) return absolute(absoluteUrl[0]);
+    const relativeUrl = normalized.match(
+      /\/(?:feed\/update\/urn:li:(?:activity|ugcPost|share):\d+|posts\/[^\s"'<>?&#]+|pulse\/[^\s"'<>?&#]+)/i
+    );
+    if (relativeUrl) return absolute(relativeUrl[0]);
+    const qliUrn = normalized.match(
+      /(?:^|[?&])(?:utm_)?qliurn=(?:urn:li:)?(activity|share)[-:]([0-9]{10,})/i
+    );
+    return qliUrn
+      ? `https://www.linkedin.com/feed/update/urn:li:${qliUrn[1].toLowerCase()}:${qliUrn[2]}/`
+      : '';
+  };
   const cardSelector = [
     'div.feed-shared-update-v2',
     'div[data-view-name="feed-full-update"]',
-    'article[data-urn*="activity:"]',
-    'article[data-id*="activity:"]',
+    'article[data-urn*="activity:"], article[data-urn*="ugcPost:"], article[data-urn*="share:"]',
+    'article[data-id*="activity:"], article[data-id*="ugcPost:"], article[data-id*="share:"]',
   ].join(', ');
-  const candidates = Array.from(document.querySelectorAll(cardSelector));
-  // LinkedIn nests list items for comments and recommendations inside a post.
-  // Keep only the outer update container so actor/body fields cannot leak across
-  // unrelated nested cards.
-  const cards = candidates.filter((card) => !candidates.some(
+  // The 2026 feed keeps an accessible heading even when its update classes and
+  // activity URNs are absent from the rendered DOM.
+  const feedHeadings = Array.from(document.querySelectorAll('h2')).filter(
+    (heading) => clean(heading.textContent).toLowerCase() === 'feed post'
+  );
+  const accessibleCards = feedHeadings.map(
+    (heading) => heading.closest('[role="listitem"]')
+  ).filter(Boolean);
+  const legacyCandidates = Array.from(document.querySelectorAll(cardSelector));
+  const candidates = accessibleCards.length ? accessibleCards : legacyCandidates;
+  const cards = Array.from(new Set(candidates)).filter((card) => !candidates.some(
     (other) => other !== card && other.contains(card)
   ));
   return cards.map((card) => {
+    const isAccessibleCard = accessibleCards.includes(card);
+    const componentKeySelector = [
+      '[componentkey^="expanded"][componentkey$="FeedType_MAIN_FEED_RELEVANCE"]',
+      '[data-componentkey^="expanded"][data-componentkey$="FeedType_MAIN_FEED_RELEVANCE"]',
+      '[data-component-key^="expanded"][data-component-key$="FeedType_MAIN_FEED_RELEVANCE"]',
+    ].join(', ');
+    const componentKeyNode = card.matches(componentKeySelector)
+      ? card
+      : (card.querySelector(componentKeySelector) || card.closest(componentKeySelector));
+    const componentKey = clean(componentKeyNode ? (
+      componentKeyNode.getAttribute('componentkey')
+        || componentKeyNode.getAttribute('data-componentkey')
+        || componentKeyNode.getAttribute('data-component-key')
+    ) : '');
     const urnNode = card.matches('[data-urn], [data-id]')
       ? card
-      : card.querySelector('[data-urn*="activity:"], [data-id*="activity:"]');
+      : card.querySelector(
+        '[data-urn*="activity:"], [data-urn*="ugcPost:"], [data-urn*="share:"], '
+        + '[data-id*="activity:"], [data-id*="ugcPost:"], [data-id*="share:"]'
+      );
     const urn = (urnNode && (urnNode.getAttribute('data-urn')
       || urnNode.getAttribute('data-id'))) || '';
     const permalink = Array.from(card.querySelectorAll(
       'a[href*="/feed/update/"], a[href*="/posts/"], a[href*="/pulse/"]'
     )).find((anchor) => !(anchor.getAttribute('href') || '').includes('/company/'));
+    const menuButton = card.querySelector('button[aria-label^="Open control menu for post by "]');
+    const menuAuthor = clean(menuButton ? menuButton.getAttribute('aria-label')
+      .replace(/^Open control menu for post by\s+/i, '') : '');
+    if (isAccessibleCard && !menuAuthor) return null;
+    const paragraphs = Array.from(card.querySelectorAll('p'));
+    const paragraphText = paragraphs.map((node) => clean(node.textContent));
+    const cardLines = (card.innerText || '').split(/\n+/).map(clean).filter(Boolean);
+    const isPromoted = paragraphText.concat(cardLines).some(
+      (line) => /^promoted(?:\s+by\b.*)?$/i.test(line)
+    );
+    if (isPromoted) return null;
     const actorBlock = card.querySelector(
       '.update-components-actor, .feed-shared-actor, '
       + '[data-view-name="feed-actor-image"], [data-view-name="feed-actor-name"]'
     ) || card;
-    const actor = actorBlock.querySelector(
+    const actorCandidates = Array.from(card.querySelectorAll(
       'a.update-components-actor__meta-link, '
       + 'a.update-components-actor__container-link, '
       + 'a.feed-shared-actor__container-link, '
       + 'a[href*="/in/"], a[href*="/company/"]'
-    );
-    const menuButton = card.querySelector('button[aria-label^="Open control menu for post by "]');
-    const companyAnchor = actorBlock.querySelector('a[href*="/company/"]');
+    ));
+    const normalizedMenuAuthor = menuAuthor.toLowerCase();
+    const normalizedAuthorLabel = (value) => clean(value)
+      .replace(/^view\s+company:\s*/i, '')
+      .replace(/^view\s+/i, '')
+      .replace(/[’']s\s+profile$/i, '')
+      .replace(/\s+[•·]\s+.*$/i, '')
+      .replace(/\s+verified(?:\s+profile)?(?:\s+\d+(?:st|nd|rd|th))?$/i, '')
+      .toLowerCase();
+    const matchedAccessibleActor = normalizedMenuAuthor ? actorCandidates.find((anchor) => {
+      const image = anchor.querySelector('img[alt]');
+      const labels = [
+        anchor.textContent,
+        anchor.getAttribute('aria-label'),
+        anchor.getAttribute('title'),
+        image ? image.getAttribute('alt') : '',
+      ].filter(Boolean);
+      return labels.some(
+        (label) => normalizedAuthorLabel(label) === normalizedMenuAuthor
+      );
+    }) : null;
+    const actor = matchedAccessibleActor || (!isAccessibleCard
+      ? actorBlock.querySelector(
+        'a.update-components-actor__meta-link, '
+        + 'a.update-components-actor__container-link, '
+        + 'a.feed-shared-actor__container-link, '
+        + 'a[href*="/in/"], a[href*="/company/"]'
+      )
+      : null);
     const authorName = actorBlock.querySelector(
       '.update-components-actor__name, .update-components-actor__title, '
       + '.feed-shared-actor__name'
@@ -308,43 +482,95 @@ FEED_EXTRACTION_SCRIPT = r"""
     const actorDescription = actorBlock.querySelector(
       '.update-components-actor__description, .feed-shared-actor__description'
     );
-    const timestamp = actorBlock.querySelector(
+    const legacyTimestamp = actorBlock.querySelector(
       '.update-components-actor__sub-description, time, '
       + '.feed-shared-actor__sub-description'
     );
+    const semanticTimestamp = paragraphs.find((node) => (
+      /^\d+\s*(?:s|m|h|d|w|mo|yr)(?:\s*[\u2022\u00b7].*)?$/i.test(clean(node.textContent))
+    ));
+    const timestamp = legacyTimestamp || semanticTimestamp;
     const timestampLink = timestamp && timestamp.closest('a[href]');
-    const normalizedUrn = urn.match(/urn:li:(?:activity|share):\d+/i);
-    const postUrl = permalink ? absolute(permalink.getAttribute('href'))
-      : (timestampLink ? absolute(timestampLink.getAttribute('href'))
-        : (normalizedUrn
+    const timestampPostUrl = timestampLink
+      ? stablePostUrlFromText(timestampLink.getAttribute('href'))
+      : '';
+    const normalizedUrn = urn.match(/urn:li:(?:activity|ugcPost|share):\d+/i);
+    const postUrl = timestampPostUrl || (normalizedUrn
           ? `https://www.linkedin.com/feed/update/${normalizedUrn[0]}/`
-          : ''));
+          : (!isAccessibleCard && permalink
+            ? absolute(permalink.getAttribute('href'))
+            : ''));
     const actorUrl = actor ? absolute(actor.getAttribute('href')) : '';
-    const menuAuthor = clean(menuButton ? menuButton.getAttribute('aria-label')
-      .replace(/^Open control menu for post by\s+/i, '') : '');
-    const actorText = clean(authorName ? authorName.textContent : (actor ? actor.textContent : menuAuthor))
-      || menuAuthor;
-    const companyUrl = companyAnchor ? absolute(companyAnchor.getAttribute('href')) : '';
-    const cardLines = (card.innerText || '').split(/\n+/).map(clean).filter(Boolean);
+    const actorText = menuAuthor || clean(
+      authorName ? authorName.textContent : (actor ? actor.textContent : '')
+    );
+    const socialPattern = /\b(?:likes this|reposted this|commented on this|celebrates this)\b/i;
+    const semanticSocialContext = paragraphText.find((line) => socialPattern.test(line)) || '';
+    const socialContextText = clean(
+      socialContext ? socialContext.textContent : semanticSocialContext
+    );
+    const isAfterTimestamp = (node) => Boolean(timestamp && (
+      timestamp.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+    ));
+    const isMetaLine = (line) => (
+      !line
+      || line.toLowerCase() === 'feed post'
+      || line.toLowerCase() === actorText.toLowerCase()
+      || socialPattern.test(line)
+      || /^\d+\s*(?:s|m|h|d|w|mo|yr)(?:\s*[\u2022\u00b7].*)?$/i.test(line)
+      || /^\d[\d,.+]*\s+followers?$/i.test(line)
+      || /^(?:promoted|follow|following|connect|like|comment|repost|send|more)$/i.test(line)
+      || /^(?:like|comment|repost|send)\s+\d*$/i.test(line)
+    );
+    const semanticBodyCandidates = paragraphs.filter((node) => {
+      const line = clean(node.textContent);
+      return line.length >= 4 && !isMetaLine(line) && isAfterTimestamp(node);
+    });
+    const longestSemanticParagraph = paragraphs.reduce((best, node) => {
+      const line = clean(node.textContent);
+      if (isMetaLine(line) || line.length < 24) return best;
+      return !best || line.length > clean(best.textContent).length ? node : best;
+    }, null);
+    const bodyText = clean(body ? body.textContent : (
+      semanticBodyCandidates[0]?.textContent || longestSemanticParagraph?.textContent || ''
+    ));
+    const headlineCandidates = paragraphs.filter((node) => {
+      const line = clean(node.textContent);
+      const beforeTimestamp = !timestamp || Boolean(
+        node.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+      return beforeTimestamp && line.length > 6 && line.length <= 240 && !isMetaLine(line);
+    });
     const actorHeadline = clean(actorDescription ? actorDescription.textContent : (
-      cardLines.find((line) => line !== actorText
-        && !/^\u2022/.test(line)
-        && !/^(promoted|follow|connect|like|comment|repost|send|more)$/i.test(line)
-        && line.length > 6) || ''
+      headlineCandidates[headlineCandidates.length - 1]?.textContent
+      || cardLines.find((line) => !isMetaLine(line) && line.length > 6)
+      || ''
     ));
     const inferredCompanyMatch = actorHeadline.match(/\s(?:at|@)\s+([^|,;·]+)/i);
     const inferredCompany = inferredCompanyMatch ? clean(inferredCompanyMatch[1]) : '';
-    const bodyText = clean(body ? body.textContent : '');
     const mentionedCompanyMatch = bodyText.match(
-      /(?:[Jj]oined|[Jj]oining|[Cc]alled|[Bb]uilding|[Ll]aunched|[Ss]tarted)\s+@?([A-Z][A-Za-z0-9&'-]*(?:\s+[A-Z][A-Za-z0-9&'-]*){0,5})/
+      /(?:[Jj]oined|[Jj]oining|[Cc]alled|[Bb]uilding|[Ll]aunched|[Ss]tarted)\s+@?([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5})/
+    ) || bodyText.match(
+      /(?:^|[.!?]\s+)([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,4})\s+(?:is|are)\s+[Hh]iring\b/
     );
     const mentionedCompany = mentionedCompanyMatch ? clean(mentionedCompanyMatch[1]) : '';
-    const company = companyAnchor
-      ? (clean(companyAnchor.getAttribute('aria-label') || companyAnchor.textContent) || actorText)
-      : (actorUrl.includes('/company/') ? actorText : (inferredCompany || mentionedCompany));
+    const companyHint = inferredCompany || mentionedCompany;
+    const companyAnchor = actorUrl.includes('/company/') ? actor : actorCandidates.find((anchor) => {
+      if (!(anchor.getAttribute('href') || '').includes('/company/')) return false;
+      const label = clean(anchor.getAttribute('aria-label') || anchor.textContent);
+      return companyHint && label.toLowerCase().includes(companyHint.toLowerCase());
+    });
+    const companyUrl = companyAnchor ? absolute(companyAnchor.getAttribute('href')) : '';
+    const companyAnchorName = companyAnchor
+      ? clean(companyAnchor.getAttribute('aria-label') || companyAnchor.textContent)
+      : '';
+    const company = actorUrl.includes('/company/')
+      ? actorText
+      : (companyAnchorName || inferredCompany || mentionedCompany);
     const itemKeyNode = card.querySelector('[data-testid*="commentList"]');
     const itemKey = itemKeyNode ? clean(itemKeyNode.getAttribute('data-testid')) : '';
     return {
+      component_key: componentKey,
       post_url: postUrl,
       author_name: actorText,
       author_url: actorUrl,
@@ -352,13 +578,13 @@ FEED_EXTRACTION_SCRIPT = r"""
       company_url: companyUrl || (actorUrl.includes('/company/') ? actorUrl : ''),
       text: bodyText,
       context: [
-        clean(socialContext ? socialContext.textContent : ''),
+        socialContextText,
         actorHeadline,
         itemKey ? `feed_item_key=${itemKey}` : '',
       ].filter(Boolean).join(' | '),
       posted_at_text: clean(timestamp ? timestamp.textContent : ''),
     };
-  }).filter((item) => item.post_url || item.text);
+  }).filter((item) => item && (item.post_url || item.text));
 }
 """
 
@@ -458,6 +684,26 @@ def canonical_linkedin_url(value: str) -> str:
             if key.lower() not in {"trk", "trackingid", "lipi", "midtoken", "eid"}
         ]
     return urlunparse(("https", host, path, "", urlencode(retained_query), ""))
+
+
+def is_stable_linkedin_post_url(value: str) -> bool:
+    """Return whether a URL identifies a post, not merely another LinkedIn page."""
+
+    canonical = canonical_linkedin_url(value)
+    if not canonical:
+        return False
+    parsed = urlparse(canonical)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host != "linkedin.com":
+        return False
+    return bool(
+        re.fullmatch(
+            r"/feed/update/urn:li:(?:activity|ugcPost|share):\d+/"
+            r"|/(?:posts|pulse)/[^/?#]+/",
+            parsed.path,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def parse_feed_rows(rows: Iterable[Mapping[str, Any]]) -> list[FeedPost]:
@@ -638,18 +884,46 @@ def capture_feed_posts(
     feed_url: str = LINKEDIN_FEED_URL,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> list[FeedPost]:
-    rows = _capture_scrolling_rows(
-        page,
-        extraction_script=FEED_EXTRACTION_SCRIPT,
-        target_url=feed_url,
-        limits=limits or CaptureLimits(),
-        navigate=navigate,
-        monotonic=monotonic,
-        identity=lambda row: feed_post_identity(parse_feed_rows([row])[0])
-        if parse_feed_rows([row])
-        else "",
-    )
-    return parse_feed_rows(rows)
+    def capture_identity(row: Mapping[str, Any]) -> str:
+        component_key = clean_text(row.get("component_key"))
+        if _FeedPostUrlResolver._COMPONENT_KEY.match(component_key):
+            return f"linkedin-feed-component:{component_key}"
+        parsed = parse_feed_rows([row])
+        return feed_post_identity(parsed[0]) if parsed else ""
+
+    url_resolver = _FeedPostUrlResolver()
+    url_resolver.attach(page)
+    try:
+        rows = _capture_scrolling_rows(
+            page,
+            extraction_script=FEED_EXTRACTION_SCRIPT,
+            target_url=feed_url,
+            limits=limits or CaptureLimits(),
+            navigate=navigate,
+            monotonic=monotonic,
+            identity=capture_identity,
+            row_transform=url_resolver.resolve_row,
+        )
+        # A pagination response can finish after its card was first evaluated.
+        # Resolve every stored row again, with a bounded settling window for
+        # response bodies still completing, then collapse identities that
+        # changed from content-based to URL-based once state arrived.
+        resolved_rows = [url_resolver.resolve_row(row) for row in rows]
+        for _ in range(10):
+            unresolved_component = any(
+                clean_text(row.get("component_key"))
+                and not clean_text(row.get("post_url"))
+                for row in resolved_rows
+            )
+            if not unresolved_component:
+                break
+            page.wait_for_timeout(500)
+            resolved_rows = [url_resolver.resolve_row(row) for row in resolved_rows]
+        resolved_posts = parse_feed_rows(resolved_rows)
+        unique_posts = {feed_post_identity(post): post for post in resolved_posts}
+    finally:
+        url_resolver.detach()
+    return list(unique_posts.values())
 
 
 def capture_profile_viewers(
@@ -683,6 +957,7 @@ def _capture_scrolling_rows(
     navigate: bool,
     monotonic: Callable[[], float],
     identity: Callable[[Mapping[str, Any]], str],
+    row_transform: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
 ) -> list[Mapping[str, Any]]:
     if navigate:
         page.goto(
@@ -701,6 +976,8 @@ def _capture_scrolling_rows(
         for raw_row in raw_rows:
             if not isinstance(raw_row, Mapping):
                 continue
+            if row_transform is not None:
+                raw_row = row_transform(raw_row)
             key = identity(raw_row)
             if key:
                 found[key] = raw_row
@@ -1152,7 +1429,10 @@ def _capture_feed_live_page(
             for post in posts
         }
         captured = len(unique_posts)
-        post_url_count = sum(bool(post.post_url) for post in unique_posts.values())
+        post_url_count = sum(
+            is_stable_linkedin_post_url(post.post_url)
+            for post in unique_posts.values()
+        )
         missing_urls = captured - post_url_count
         if captured <= 0:
             return {

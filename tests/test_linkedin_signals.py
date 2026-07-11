@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,36 +25,74 @@ from outreach.linkedin_signals import (
     capture_linkedin_signals_live,
     capture_profile_viewers,
     classify_feed_post,
+    is_stable_linkedin_post_url,
     parse_feed_rows,
     parse_profile_viewer_rows,
     normalize_extracted_company,
 )
 
 
+class _FakeResponse:
+    def __init__(self, url: str, body: str) -> None:
+        self.url = url
+        self.body = body
+
+    def text(self) -> str:
+        return self.body
+
+
 class _FakePage:
-    def __init__(self, snapshots: list[list[dict[str, str]]]) -> None:
+    def __init__(
+        self,
+        snapshots: list[list[dict[str, str]]],
+        responses: list[_FakeResponse] | None = None,
+        responses_on_scroll: list[_FakeResponse] | None = None,
+        responses_on_wait: list[_FakeResponse] | None = None,
+    ) -> None:
         self.snapshots = snapshots
+        self.responses = responses or []
+        self.responses_on_scroll = responses_on_scroll or []
+        self.responses_on_wait = responses_on_wait or []
         self.scroll_index = 0
         self.gotos: list[tuple[str, dict[str, object]]] = []
         self.waits: list[float] = []
         self.default_timeout: float | None = None
         self.closed = False
+        self.listeners: dict[str, list[Callable[[Any], None]]] = {}
 
     def goto(self, url: str, **kwargs: object) -> None:
         self.gotos.append((url, kwargs))
+        for response in self.responses:
+            for handler in list(self.listeners.get("response", [])):
+                handler(response)
 
     def evaluate(self, expression: str, arg: object = None):
         if expression.startswith("window.scrollBy"):
             self.scroll_index += 1
+            for response in self.responses_on_scroll:
+                for handler in list(self.listeners.get("response", [])):
+                    handler(response)
             return None
         index = min(self.scroll_index, len(self.snapshots) - 1)
         return self.snapshots[index]
 
     def wait_for_timeout(self, timeout: float) -> None:
         self.waits.append(timeout)
+        responses = self.responses_on_wait
+        self.responses_on_wait = []
+        for response in responses:
+            for handler in list(self.listeners.get("response", [])):
+                handler(response)
 
     def set_default_timeout(self, timeout: float) -> None:
         self.default_timeout = timeout
+
+    def on(self, event: str, handler: Callable[[Any], None]) -> None:
+        self.listeners.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event: str, handler: Callable[[Any], None]) -> None:
+        if handler in self.listeners.get(event, []):
+            self.listeners[event].remove(handler)
 
     def close(self) -> None:
         self.closed = True
@@ -93,6 +133,23 @@ def test_canonical_linkedin_url_removes_tracking_and_normalizes_slash() -> None:
     assert canonical_linkedin_url(
         "https://www.linkedin.com/feed/update/urn:li:activity:123?trk=feed&trackingId=abc"
     ) == "https://linkedin.com/feed/update/urn:li:activity:123/"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.linkedin.com/feed/update/urn:li:activity:123/", True),
+        ("https://linkedin.com/feed/update/urn:li:ugcPost:456/", True),
+        ("https://www.linkedin.com/posts/example_activity-789/", True),
+        ("https://www.linkedin.com/pulse/example-post/", True),
+        ("https://www.linkedin.com/in/person/", False),
+        ("https://www.linkedin.com/company/example/posts/", False),
+        ("https://example.com/posts/example/", False),
+        ("", False),
+    ],
+)
+def test_stable_linkedin_post_url_rejects_non_post_pages(url: str, expected: bool) -> None:
+    assert is_stable_linkedin_post_url(url) is expected
 
 
 def test_parse_feed_rows_preserves_source_context_and_skips_empty_rows() -> None:
@@ -224,13 +281,267 @@ def test_capture_feed_duration_can_be_tuned_without_a_fixed_sixty_second_budget(
     assert page.waits == []
 
 
-def test_feed_extractor_uses_one_actor_block_and_not_nested_list_items() -> None:
+def test_capture_feed_resolves_component_keys_from_bounded_linkedin_response_state() -> None:
+    first = {
+        "component_key": "expandedAlpha_123FeedType_MAIN_FEED_RELEVANCE",
+        "post_url": "",
+        "author_name": "One",
+        "text": "We are hiring",
+    }
+    second = {
+        "component_key": "expandedBeta-456FeedType_MAIN_FEED_RELEVANCE",
+        "post_url": "",
+        "author_name": "Two",
+        "text": "We launched",
+    }
+    page = _FakePage(
+        [[first, second]],
+        responses=[
+            _FakeResponse(
+                "https://www.linkedin.com/feed/",
+                "TranslationState-nullAlpha_123 ignored "
+                "reactionState-urn:li:activity:7481550350064484352",
+            ),
+            _FakeResponse(
+                "https://www.linkedin.com/feed/help/",
+                "TranslationState-nullBeta-456 "
+                "reactionState-urn:li:activity:1111111111111111111",
+            ),
+            _FakeResponse(
+                "https://www.linkedin.com/flagship-web/rsc-action/actions/pagination?start=1",
+                "TranslationState-nullBeta-456 ignored "
+                "reactionState-urn:li:ugcPost:7481588174486515712",
+            ),
+        ],
+    )
+
+    posts = capture_feed_posts(page, limits=CaptureLimits(max_scrolls=0))
+
+    assert [post.post_url for post in posts] == [
+        "https://linkedin.com/feed/update/urn:li:activity:7481550350064484352/",
+        "https://linkedin.com/feed/update/urn:li:ugcPost:7481588174486515712/",
+    ]
+    assert page.listeners["response"] == []
+
+
+def test_response_mapping_cannot_cross_into_the_next_component_state() -> None:
+    resolver = linkedin_signals_module._FeedPostUrlResolver()
+    resolver.add_response_body(
+        "TranslationState-nullAlpha_123 missing-reaction "
+        "TranslationState-nullBeta_456 ignored "
+        "reactionState-urn:li:activity:7481550350064484352"
+    )
+
+    assert resolver.post_url_for_component_key(
+        "expandedAlpha_123FeedType_MAIN_FEED_RELEVANCE"
+    ) == ""
+    assert resolver.post_url_for_component_key(
+        "expandedBeta_456FeedType_MAIN_FEED_RELEVANCE"
+    ) == "https://www.linkedin.com/feed/update/urn:li:activity:7481550350064484352/"
+
+
+def test_response_mapping_overrides_a_nested_or_social_context_post_url() -> None:
+    resolver = linkedin_signals_module._FeedPostUrlResolver()
+    resolver.add_response_body(
+        "TranslationState-nullVisible_789 ignored "
+        "reactionState-urn:li:ugcPost:7481588174486515712"
+    )
+
+    resolved = resolver.resolve_row(
+        {
+            "component_key": "expandedVisible_789FeedType_MAIN_FEED_RELEVANCE",
+            "post_url": "https://www.linkedin.com/feed/update/urn:li:activity:111/",
+        }
+    )
+
+    assert resolved["post_url"] == (
+        "https://www.linkedin.com/feed/update/urn:li:ugcPost:7481588174486515712/"
+    )
+
+
+def test_component_identity_prevents_late_url_mapping_from_consuming_item_budget() -> None:
+    initial = [
+        {
+            "component_key": f"expandedKey{index}FeedType_MAIN_FEED_RELEVANCE",
+            "post_url": "",
+            "author_name": f"Person {index}",
+            "text": f"Post body {index}",
+        }
+        for index in range(60)
+    ]
+    expanded = initial + [
+        {
+            "component_key": f"expandedKey{index}FeedType_MAIN_FEED_RELEVANCE",
+            "post_url": "",
+            "author_name": f"Person {index}",
+            "text": f"Post body {index}",
+        }
+        for index in range(60, 120)
+    ]
+    response_body = " ".join(
+        f"TranslationState-nullKey{index} ignored "
+        f"reactionState-urn:li:activity:{7481000000000000000 + index}"
+        for index in range(120)
+    )
+    page = _FakePage(
+        [initial, expanded],
+        responses_on_scroll=[
+            _FakeResponse(
+                "https://www.linkedin.com/flagship-web/rsc-action/actions/pagination",
+                response_body,
+            )
+        ],
+    )
+
+    posts = capture_feed_posts(
+        page,
+        limits=CaptureLimits(
+            max_scrolls=1,
+            max_items=100,
+            max_duration_seconds=None,
+            scroll_pause_ms=0,
+        ),
+    )
+
+    assert len(posts) == 100
+    assert len({post.post_url for post in posts}) == 100
+
+
+def test_non_post_wrapper_component_key_cannot_collapse_distinct_rows() -> None:
+    page = _FakePage(
+        [[
+            {
+                "component_key": "mainFeedWrapper",
+                "post_url": "https://www.linkedin.com/feed/update/urn:li:activity:101/",
+                "author_name": "One",
+                "text": "First post",
+            },
+            {
+                "component_key": "mainFeedWrapper",
+                "post_url": "https://www.linkedin.com/feed/update/urn:li:activity:202/",
+                "author_name": "Two",
+                "text": "Second post",
+            },
+        ]]
+    )
+
+    posts = capture_feed_posts(page, limits=CaptureLimits(max_scrolls=0))
+
+    assert [post.author_name for post in posts] == ["One", "Two"]
+
+
+def test_capture_feed_reconciles_rows_when_response_mapping_arrives_after_first_evaluation() -> None:
+    row = {
+        "component_key": "expandedLate_789FeedType_MAIN_FEED_RELEVANCE",
+        "post_url": "",
+        "author_name": "Late Mapping",
+        "text": "We are hiring for product operations.",
+    }
+    page = _FakePage(
+        [[row], [row]],
+        responses_on_scroll=[
+            _FakeResponse(
+                "https://www.linkedin.com/flagship-web/rsc-action/actions/pagination",
+                "TranslationState-nullLate_789 ignored "
+                "reactionState-urn:li:share:7481999999999999999",
+            )
+        ],
+    )
+
+    posts = capture_feed_posts(
+        page,
+        limits=CaptureLimits(max_scrolls=1, max_duration_seconds=None, scroll_pause_ms=0),
+    )
+
+    assert len(posts) == 1
+    assert posts[0].post_url == (
+        "https://linkedin.com/feed/update/urn:li:share:7481999999999999999/"
+    )
+
+
+def test_capture_feed_waits_boundedly_for_component_response_body_to_finish() -> None:
+    row = {
+        "component_key": "expandedSettled_987FeedType_MAIN_FEED_RELEVANCE",
+        "post_url": "",
+        "author_name": "Settled Mapping",
+        "text": "We launched an applied AI product.",
+    }
+    page = _FakePage(
+        [[row]],
+        responses_on_wait=[
+            _FakeResponse(
+                "https://www.linkedin.com/feed/",
+                "TranslationState-nullSettled_987 ignored "
+                "reactionState-urn:li:activity:7481888888888888888",
+            )
+        ],
+    )
+
+    posts = capture_feed_posts(page, limits=CaptureLimits(max_scrolls=0))
+
+    assert len(posts) == 1
+    assert posts[0].post_url == (
+        "https://linkedin.com/feed/update/urn:li:activity:7481888888888888888/"
+    )
+    assert page.waits == [500]
+
+
+def test_capture_feed_settling_stays_bounded_when_mapping_never_arrives() -> None:
+    row = {
+        "component_key": "expandedMissing_654FeedType_MAIN_FEED_RELEVANCE",
+        "post_url": "",
+        "author_name": "Missing Mapping",
+        "text": "A post whose URL state did not arrive.",
+    }
+    page = _FakePage([[row]])
+
+    posts = capture_feed_posts(page, limits=CaptureLimits(max_scrolls=0))
+
+    assert len(posts) == 1
+    assert posts[0].post_url == ""
+    assert page.waits == [500] * 10
+
+
+def test_feed_extractor_supports_accessible_cards_and_legacy_fallback() -> None:
     script = linkedin_signals_module.FEED_EXTRACTION_SCRIPT
 
-    assert "[role=\"listitem\"]" not in script
+    assert "clean(heading.textContent).toLowerCase() === 'feed post'" in script
+    assert "heading.closest('[role=\"listitem\"]')" in script
+    assert "accessibleCards.length ? accessibleCards : legacyCandidates" in script
+    assert "card.querySelector(componentKeySelector) || card.closest(componentKeySelector)" in script
+    assert "!isAccessibleCard && permalink" in script
     assert "const actorBlock" in script
     assert "actorBlock.querySelector" in script
     assert "timestamp.closest('a[href]')" in script
+
+
+def test_feed_extractor_disambiguates_repost_author_from_social_context() -> None:
+    script = linkedin_signals_module.FEED_EXTRACTION_SCRIPT
+
+    assert 'button[aria-label^="Open control menu for post by "]' in script
+    assert "if (isAccessibleCard && !menuAuthor) return null" in script
+    assert "const actorText = menuAuthor ||" in script
+    assert "normalizedAuthorLabel(label) === normalizedMenuAuthor" in script
+    assert "matchedAccessibleActor || (!isAccessibleCard" in script
+    assert "likes this|reposted this|commented on this|celebrates this" in script
+
+
+def test_feed_extractor_has_semantic_body_and_timestamp_fallbacks() -> None:
+    script = linkedin_signals_module.FEED_EXTRACTION_SCRIPT
+
+    assert "const semanticTimestamp = paragraphs.find" in script
+    assert "const semanticBodyCandidates = paragraphs.filter" in script
+    assert "isAfterTimestamp(node)" in script
+    assert "semanticBodyCandidates[0]?.textContent" in script
+
+
+def test_feed_extractor_excludes_promoted_cards_and_derives_stable_urls() -> None:
+    script = linkedin_signals_module.FEED_EXTRACTION_SCRIPT
+
+    assert "if (isPromoted) return null" in script
+    assert "stablePostUrlFromText(card.outerHTML)" not in script
+    assert "component_key: componentKey" in script
+    assert "urn:li:${qliUrn[1].toLowerCase()}:${qliUrn[2]}" in script
 
 
 def test_capture_limits_validate_caller_supplied_bounds() -> None:
@@ -619,7 +930,9 @@ def test_live_feed_quality_gate_rejects_missing_post_permalinks(
         "capture_feed_posts",
         lambda *args, **kwargs: [
             FeedPost(
-                post_url="",
+                post_url=(
+                    "https://www.linkedin.com/in/not-a-post/" if index == 0 else ""
+                ),
                 author_name=f"Person {index}",
                 author_url=f"https://www.linkedin.com/in/person-{index}/",
                 company="ExampleCo",

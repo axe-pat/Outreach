@@ -2393,6 +2393,16 @@ def apply_linkedin_reconcile_results(
         if item.linkedin_url
     }
     sent_messages_by_contact: dict[str, set[str]] = {}
+    accepted_contacts = {
+        item.contact_id
+        for item in touchpoints
+        if item.contact_id
+        and (
+            (item.status or "").strip().casefold() in {"accepted", "already connected"}
+            or (item.message_kind or "").strip().casefold() in {"linkedin_accept", "linkedin_accepted"}
+            or (item.message_text or "").strip().casefold() == "linkedin invite accepted."
+        )
+    }
     for touchpoint in touchpoints:
         if (touchpoint.channel or "") != OutreachChannel.LINKEDIN:
             continue
@@ -2445,6 +2455,10 @@ def apply_linkedin_reconcile_results(
             summary["connected"] += 1
             if existing_status in {"connected", "replied"}:
                 action = "already_connected"
+                if existing_status == "connected" and contact.contact_id not in accepted_contacts:
+                    action = "record_missing_acceptance"
+                    touchpoint_status = "Accepted"
+                    message_text = "LinkedIn invite accepted."
             else:
                 action = "mark_connected"
                 new_contact_status = "Connected"
@@ -2465,15 +2479,16 @@ def apply_linkedin_reconcile_results(
             summary["unknown"] += 1
 
         applied = False
-        if apply_changes and new_contact_status:
-            updated = workbook.update_contact(
-                contact.contact_id,
-                status=new_contact_status,
-                last_contacted_at=utc_now_iso(),
-            )
-            if updated is not None:
-                summary["updated_contacts"] += 1
-                contact = updated
+        if apply_changes and (new_contact_status or message_text):
+            if new_contact_status:
+                updated = workbook.update_contact(
+                    contact.contact_id,
+                    status=new_contact_status,
+                    last_contacted_at=utc_now_iso(),
+                )
+                if updated is not None:
+                    summary["updated_contacts"] += 1
+                    contact = updated
             if message_text:
                 _, created = workbook.append_touchpoint(
                     TouchpointRecord(
@@ -2497,6 +2512,8 @@ def apply_linkedin_reconcile_results(
                 )
                 if created:
                     summary["touchpoints_added"] += 1
+                    if status == "connected":
+                        accepted_contacts.add(contact.contact_id)
             applied = True
 
         latest_message = str(raw.get("latest_message") or "").strip()
@@ -2902,6 +2919,81 @@ def build_linkedin_message_reconcile_results(
     return results, next_state
 
 
+def build_persisted_inbound_reconcile_results(
+    *,
+    state: dict[str, object],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    exclude_contact_ids: set[str] | None = None,
+) -> list[dict[str, object]]:
+    """Recover still-unanswered inbound threads from the persistent inbox state.
+
+    The live inbox snapshot is bounded and may not include an older reply.  A
+    reply must not disappear merely because it fell below today's scroll
+    window.  Current live results win; this function only fills missing
+    contacts from the durable state ledger.
+    """
+    excluded = exclude_contact_ids or set()
+    results: list[dict[str, object]] = []
+    for thread_id, raw_state in dict(state.get("thread_states") or {}).items():
+        if not isinstance(raw_state, dict):
+            continue
+        latest_message = str(raw_state.get("latest_message") or "").strip()
+        last_sender = str(raw_state.get("last_sender") or "").strip()
+        if not latest_message or last_sender.casefold() in {"you", "akshat"}:
+            continue
+        thread = {**raw_state, "thread_id": str(thread_id)}
+        contact = match_contact_for_message_thread(thread, contacts)
+        if contact is None or contact.contact_id in excluded:
+            continue
+        contact_touchpoints = [
+            item for item in touchpoints if item.contact_id == contact.contact_id
+        ]
+        original_invite_note = latest_invite_note_for_contact(
+            contact.contact_id,
+            touchpoints,
+        )
+        latest_invite = latest_invite_touchpoint_for_contact(contact_touchpoints)
+        invite_metadata = parse_notes_metadata(latest_invite.notes if latest_invite else "")
+        results.append(
+            {
+                "thread_id": str(thread_id),
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "name": contact.full_name,
+                "linkedin_url": contact.linkedin_url,
+                "status": "replied",
+                "detail": "Persistent inbox state contains an unanswered inbound reply.",
+                "thread_url": str(raw_state.get("thread_url") or ""),
+                "latest_message": latest_message,
+                "last_sender": last_sender,
+                "timestamp_text": str(raw_state.get("timestamp_text") or ""),
+                "message_window": compact_message_window(
+                    thread=thread,
+                    previous_state=raw_state,
+                    touchpoints=contact_touchpoints,
+                    original_invite_note=original_invite_note,
+                ),
+                "state_reason": "persistent_unanswered_inbound",
+                "original_invite_note": original_invite_note,
+                "target_role_family": invite_metadata.get("target_role_family", ""),
+                "target_role_label": invite_metadata.get("target_role_label", ""),
+                "target_role_source": invite_metadata.get("target_role_source", ""),
+                "target_role_matched_text": invite_metadata.get("target_role_matched_text", ""),
+                "target_role_matched_rule": invite_metadata.get("target_role_matched_rule", ""),
+                "target_role_is_concrete": invite_metadata.get("target_role_is_concrete", ""),
+            }
+        )
+    results.sort(
+        key=lambda item: (
+            str(item.get("timestamp_text") or ""),
+            str(item.get("name") or "").casefold(),
+        ),
+        reverse=True,
+    )
+    return results
+
+
 def first_name(value: str) -> str:
     return (value or "there").strip().split()[0]
 
@@ -2993,10 +3085,19 @@ def classify_linkedin_reply_intent(
             context,
         )
     )
+    promised_specific_fit = bool(
+        re.search(
+            r"\b(only send you a fit|real match|send (you )?(a )?(tight )?resume|short blurb|"
+            r"send (?:the|a) posting|share (?:the|a) role)\b",
+            context,
+        )
+    )
     if compact_lower in ack_tokens or any(emoji in lower for emoji in ["👍", "👏", "😊"]):
+        if promised_specific_fit:
+            return "permission_to_send_fit"
         return "already_asked_wait" if asked_already else "permission_to_send_fit"
     if "let me know" in lower and asked_already:
-        return "already_asked_wait"
+        return "permission_to_send_fit" if promised_specific_fit else "already_asked_wait"
     if "let me know" in lower:
         return "permission_to_send_fit"
     if "hr" in lower or "recruiter" in lower or "hiring" in lower:
@@ -3175,11 +3276,55 @@ def _reply_followup_draft_product(
     contact: ContactRecord,
     latest_message: str,
     message_window: list[dict[str, str]] | None = None,
+    target_role: TargetRoleContext | None = None,
 ) -> tuple[str, str, str]:
     name = first_name(contact.full_name)
     lower = latest_message.lower()
     emails = extract_email_addresses(latest_message)
     intent = classify_linkedin_reply_intent(latest_message=latest_message, message_window=message_window)
+    if "let me know if" in lower and any(
+        token in lower for token in ["opening", "opens", "role", "interested", "pm", "product"]
+    ):
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"Thanks {name}, this is helpful. I'm focused on PM/product paths for now, so I'd really "
+                f"appreciate being kept in mind if something opens up at {company}. Happy to send a short fit "
+                "summary if that would be useful."
+            ),
+        )
+    if intent == "permission_to_send_fit":
+        concrete_role_sources = {
+            "explicit_title",
+            "note_context.target_role_title",
+            "opportunity_title",
+            "note_context.opportunity_title",
+            "note_context.latest_opportunity_title",
+        }
+        if (
+            target_role is None
+            or not target_role.is_concrete
+            or target_role.source not in concrete_role_sources
+        ):
+            return (
+                "already_asked_wait",
+                "hold",
+                (
+                    f"Hold for now. {name} is open to the next step, but there is no concrete {company} "
+                    "role/fit to send yet."
+                ),
+            )
+        role = target_role.matched_text or target_role.label
+        return (
+            "conversation_reply",
+            "auto_send",
+            (
+                f"Thanks {name}. I found one concrete fit: {role}. I spent 5 years building backend/data platforms "
+                "before Marshall, so the technical and cross-functional side lines up well. I can send the posting "
+                "plus a tight resume/fit blurb here if useful."
+            ),
+        )
     if intent == "does_not_know":
         return (
             "conversation_reply",
@@ -3234,18 +3379,6 @@ def _reply_followup_draft_product(
                 "resume too if HR wants it."
             ),
         )
-    if "let me know if" in lower and any(
-        token in lower for token in ["opening", "opens", "role", "interested", "pm", "product"]
-    ):
-        return (
-            "conversation_reply",
-            "review",
-            (
-                f"Thanks {name}, this is helpful. I'm focused on PM/product paths for now, so I'd really "
-                f"appreciate being kept in mind if something opens up at {company}. Happy to send a short fit "
-                "summary if that would be useful."
-            ),
-        )
     if any(token in lower for token in ["small team", "high-impact", "high ownership", "feedback loop"]):
         return (
             "conversation_reply",
@@ -3279,6 +3412,7 @@ def reply_followup_draft(
         contact=contact,
         latest_message=latest_message,
         message_window=message_window,
+        target_role=target_role,
     )
     effective_target = target_role or infer_target_role_context()
     return (
@@ -4187,7 +4321,22 @@ def summarize_communication_feedback(rows: list[dict[str, str]]) -> dict[str, ob
 app = typer.Typer(help="Outreach engine CLI")
 register_intelligence_commands(app)
 
-SAFE_FOLLOWUP_SEND_RECOMMENDATIONS = {"safe_to_review"}
+# These are execution labels, not review verdicts. ``safe_to_review`` remains
+# for backwards-compatible accepted-connection drafts; new inbound automation
+# uses the unambiguous ``auto_send`` label.
+SAFE_FOLLOWUP_SEND_RECOMMENDATIONS = {"auto_send", "safe_to_review"}
+
+# Contact mapping is a breadth-building maintenance phase, not a full campaign
+# search.  Re-running every affinity and alumni pass for each of 15 companies
+# can turn a nightly run into several hours of redundant browser work.  These
+# passes preserve existing, product, technical-referral, and broad coverage;
+# invite campaigns still use the complete company search plan.
+TRACK_2_MAPPING_PASSES = [
+    "existing_connections",
+    "product_network",
+    "engineering_network",
+    "broad_fallback",
+]
 
 
 @app.command("account-tracker")
@@ -5014,6 +5163,38 @@ def _filter_reconcile_results_to_orgs(
     ]
 
 
+def _linkedin_reply_is_unanswered(
+    touchpoints: list[TouchpointRecord],
+    *,
+    contact_id: str,
+) -> tuple[bool, str]:
+    history = sorted(
+        [item for item in touchpoints if item.contact_id == contact_id],
+        key=lambda item: item.recorded_at,
+    )
+    inbound = [
+        item
+        for item in history
+        if (item.message_kind or "").strip().casefold()
+        in {"linkedin_reply", "inbound_reply", "reply"}
+    ]
+    if not inbound:
+        return False, "No tracker-backed inbound LinkedIn reply exists."
+    latest_inbound = inbound[-1]
+    outbound_after = [
+        item
+        for item in history
+        if (item.status or "").strip().casefold() == "sent"
+        and (item.channel or "").strip().casefold() == "linkedin"
+        and (item.message_kind or "").strip().casefold()
+        in {"linkedin_followup", "linkedin_message", "linkedin_manual_message"}
+        and item.recorded_at > latest_inbound.recorded_at
+    ]
+    if outbound_after:
+        return False, "A later outbound LinkedIn response is already recorded."
+    return True, "Latest tracker-backed inbound LinkedIn reply is unanswered."
+
+
 def _apply_linkedin_cadence_guards(
     *,
     workbook: OutreachWorkbook,
@@ -5071,6 +5252,25 @@ def _apply_linkedin_cadence_guards(
                     ],
                 }
             )
+            continue
+        if str(draft.get("source_status") or "").casefold() == "replied":
+            unanswered, reply_reason = _linkedin_reply_is_unanswered(
+                touchpoints,
+                contact_id=contact_id,
+            )
+            enriched_reply = {
+                **draft,
+                "cadence_action": "linkedin_reply",
+                "cadence_state": "due" if unanswered else "held",
+                "cadence_due_at": None,
+                "cadence_due_by": None,
+                "cadence_reasons": [reply_reason],
+            }
+            if unanswered:
+                allowed.append(enriched_reply)
+            else:
+                enriched_reply["send_recommendation"] = "cadence_hold"
+                held.append(enriched_reply)
             continue
         if recommendation is None:
             held.append(
@@ -7085,10 +7285,11 @@ def run_track_2_daily_plan_cmd(
             "artifacts": [],
         }
         if should_refresh_linkedin:
-            LinkedInScraper(settings).require_live_cdp_session()
+            scraper = LinkedInScraper(settings)
+            scraper.require_live_cdp_session()
             threads = [
                 item.__dict__
-                for item in LinkedInScraper(settings).snapshot_message_threads(
+                for item in scraper.snapshot_message_threads(
                     limit=linkedin_message_limit,
                     deep=deep_messages,
                 )
@@ -7102,19 +7303,101 @@ def run_track_2_daily_plan_cmd(
                 state=state,
                 include_seen=True,
             )
+            live_contact_ids = {
+                str(item.get("contact_id") or "")
+                for item in message_results
+                if str(item.get("contact_id") or "")
+            }
+            persisted_inbound_results = build_persisted_inbound_reconcile_results(
+                state=next_state,
+                contacts=contacts,
+                touchpoints=touchpoints,
+                exclude_contact_ids=live_contact_ids,
+            )
+            all_message_results = [*message_results, *persisted_inbound_results]
             reconcile_result = apply_linkedin_reconcile_results(
                 workbook=workbook,
-                results=message_results,
+                results=all_message_results,
                 source_artifact="",
                 apply_changes=execute,
             )
             if execute:
                 save_linkedin_message_state(state_path, next_state)
-            filtered_results = _filter_reconcile_results_to_orgs(
+            planned_message_results = _filter_reconcile_results_to_orgs(
                 list(reconcile_result.get("results") or []),
                 contacts=contacts,
                 organization_ids=followup_org_ids,
             )
+            inbound_results = [
+                item
+                for item in list(reconcile_result.get("results") or [])
+                if str(item.get("normalized_status") or "").casefold() == "replied"
+                and str(item.get("last_sender") or "").casefold() not in {"you", "akshat"}
+            ]
+
+            execution_results: list[dict[str, object]] = []
+            execution_keys: set[str] = set()
+
+            def add_execution_result(item: dict[str, object]) -> None:
+                key = str(item.get("contact_id") or item.get("thread_id") or "")
+                if not key or key in execution_keys:
+                    return
+                execution_keys.add(key)
+                execution_results.append(item)
+
+            # Unanswered inbound replies are production-priority work even if
+            # their company was not selected by today's account campaign.
+            for item in inbound_results:
+                add_execution_result(item)
+            for item in planned_message_results:
+                add_execution_result(item)
+
+            profile_reconcile_artifact: Path | None = None
+            profile_reconcile_count = 0
+            remaining_profile_budget = max(0, followup_budget - len(execution_results))
+            if remaining_profile_budget and followup_org_ids:
+                profile_candidates = [
+                    item
+                    for item in build_linkedin_reconcile_queue_items(
+                        organizations=workbook.list_organizations(),
+                        contacts=workbook.list_contacts(),
+                        touchpoints=workbook.list_touchpoints(),
+                        include_statuses=("Invited", "Connected"),
+                        max_age_days=21,
+                        min_age_hours=12,
+                    )
+                    if str(item.get("organization_id") or "") in followup_org_ids
+                ][:remaining_profile_budget]
+                if profile_candidates:
+                    detected_profiles = [
+                        item.__dict__
+                        for item in scraper.reconcile_connection_statuses(profile_candidates)
+                    ]
+                    profile_reconcile = apply_linkedin_reconcile_results(
+                        workbook=workbook,
+                        results=detected_profiles,
+                        source_artifact="",
+                        apply_changes=execute,
+                    )
+                    profile_reconcile_count = len(detected_profiles)
+                    profile_reconcile_artifact = write_artifact(
+                        settings.artifacts_dir,
+                        "track-2-linkedin-profile-reconcile",
+                        {
+                            "workspace": str(workspace),
+                            "execute": execute,
+                            "count": len(detected_profiles),
+                            **profile_reconcile,
+                        },
+                    )
+                    for item in list(profile_reconcile.get("results") or []):
+                        if (
+                            str(item.get("normalized_status") or "").casefold() == "connected"
+                            and bool(item.get("needs_follow_up"))
+                        ):
+                            add_execution_result(item)
+
+            execution_results = execution_results[:followup_budget]
             reconcile_artifact = write_artifact(
                 settings.artifacts_dir,
                 "track-2-linkedin-message-reconcile",
@@ -7124,13 +7407,17 @@ def run_track_2_daily_plan_cmd(
                     "offset_updated": execute,
                     "thread_count": len(threads),
                     "new_result_count": len(message_results),
-                    "filtered_result_count": len(filtered_results),
-                    "results": filtered_results,
+                    "persistent_inbound_count": len(persisted_inbound_results),
+                    "inbound_result_count": len(inbound_results),
+                    "planned_company_result_count": len(planned_message_results),
+                    "profile_reconcile_count": profile_reconcile_count,
+                    "execution_result_count": len(execution_results),
+                    "results": execution_results,
                     "summary": reconcile_result.get("summary", {}),
                 },
             )
             drafts = build_linkedin_followup_drafts(
-                reconcile_results=filtered_results,
+                reconcile_results=execution_results,
                 organizations=organizations,
                 contacts=contacts,
                 opportunities=workbook.list_opportunities(),
@@ -7139,7 +7426,7 @@ def run_track_2_daily_plan_cmd(
                 workbook=workbook,
                 drafts=drafts,
             )
-            action_summary = summarize_linkedin_followup_actions(cadence_allowed_drafts, filtered_results)
+            action_summary = summarize_linkedin_followup_actions(cadence_allowed_drafts, execution_results)
             draft_artifact = write_artifact(
                 settings.artifacts_dir,
                 "track-2-linkedin-followup-drafts",
@@ -7158,12 +7445,20 @@ def run_track_2_daily_plan_cmd(
                     "status": "drafted",
                     "thread_count": len(threads),
                     "detected_count": len(message_results),
-                    "filtered_count": len(filtered_results),
+                    "persistent_inbound_count": len(persisted_inbound_results),
+                    "inbound_result_count": len(inbound_results),
+                    "planned_company_result_count": len(planned_message_results),
+                    "profile_reconcile_count": profile_reconcile_count,
+                    "execution_result_count": len(execution_results),
                     "draft_count": len(drafts),
                     "cadence_allowed_count": len(cadence_allowed_drafts),
                     "cadence_held_count": len(cadence_held_drafts),
                     "action_summary": action_summary,
-                    "artifacts": [str(reconcile_artifact), str(draft_artifact)],
+                    "artifacts": [
+                        str(reconcile_artifact),
+                        str(draft_artifact),
+                        *([str(profile_reconcile_artifact)] if profile_reconcile_artifact else []),
+                    ],
                 }
             )
             if send_linkedin and drafts:
@@ -7427,12 +7722,24 @@ def run_track_2_daily_plan_cmd(
                     company=company,
                     dry_run=True,
                     company_mode=_company_mode_for_org(org) if org else "default",
+                    include_pass=TRACK_2_MAPPING_PASSES,
                     target_role_title=str(item.get("target_role") or ""),
+                )
+                import_summary = workbook.import_linkedin_artifact(
+                    artifact_path=artifact,
+                    target_lists="referrals;linkedin;track-2",
+                    organization_type=(org.organization_type if org else OrganizationType.COMPANY),
+                    touchpoint_status="Prepared",
                 )
                 mapping_result["runs"].append(
                     {
                         "company": company,
                         "artifact": str(artifact),
+                        "organization_id": import_summary.organization_id,
+                        "source_id": import_summary.source_id,
+                        "contacts_added": import_summary.contacts_added,
+                        "touchpoints_added": import_summary.touchpoints_added,
+                        "search_passes": list(TRACK_2_MAPPING_PASSES),
                     }
                 )
             mapping_result["status"] = "ran"

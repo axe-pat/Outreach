@@ -20,6 +20,7 @@ from outreach.cli import (
     build_track_2_email_drafts,
     build_linkedin_reconcile_queue_items,
     build_linkedin_message_reconcile_results,
+    build_persisted_inbound_reconcile_results,
     build_communication_review_csv_rows,
     build_organization_intel_items,
     build_relationship_loop_items,
@@ -63,7 +64,9 @@ from outreach.cli import (
     text_contains_signal,
     touchpoint_status_from_invite_result,
     _source_breakdown,
+    _apply_linkedin_cadence_guards,
     _write_comms_learning_artifact,
+    TRACK_2_MAPPING_PASSES,
     write_artifact_daily_report,
     write_communication_review_csv,
 )
@@ -1402,6 +1405,57 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
     assert any(item.message_kind == "linkedin_reply" for item in touchpoints)
 
 
+def test_reconcile_records_missing_acceptance_for_existing_connected_contact(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-scale",
+            name="Scale AI",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-scale",
+            organization_id="org-scale",
+            full_name="Scale Contact",
+            status="Connected",
+            linkedin_url="https://www.linkedin.com/in/scale-contact/",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-scale-invite",
+            organization_id="org-scale",
+            contact_id="ct-scale",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi, open to connecting?",
+            recorded_at="2026-07-01T00:00:00+00:00",
+        )
+    )
+
+    result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "contact_id": "ct-scale",
+                "status": "connected",
+                "detail": "Profile shows Message.",
+            }
+        ],
+        apply_changes=True,
+    )
+
+    assert result["results"][0]["action"] == "record_missing_acceptance"
+    assert result["summary"]["touchpoints_added"] == 1
+    assert any(
+        item.status == "Accepted" and item.message_text == "LinkedIn invite accepted."
+        for item in workbook.list_touchpoints()
+    )
+
+
 def test_build_linkedin_message_reconcile_results_uses_thread_offset() -> None:
     contacts = [
         ContactRecord(
@@ -1754,7 +1808,7 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[6]["action_items"][0]["email"] == "Alessandra@beyondmedplans.com"
 
 
-def test_followup_draft_uses_context_window_to_hold_repeat_ack() -> None:
+def test_followup_draft_holds_positive_ack_without_concrete_fit() -> None:
     organizations = [
         OrganizationRecord(
             organization_id="org-ottimate",
@@ -1802,6 +1856,216 @@ def test_followup_draft_uses_context_window_to_hold_repeat_ack() -> None:
     assert drafts[0]["send_recommendation"] == "hold"
     assert drafts[0]["communication_recommendation"] == "hold"
     assert drafts[0]["reply_intent"] == "already_asked_wait"
+
+
+def test_followup_draft_auto_sends_promised_concrete_fit() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-ottimate",
+            name="Ottimate",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-midun",
+            organization_id="org-ottimate",
+            full_name="Midun Raju C",
+            title="Senior Software Engineer",
+            contact_type="Engineering",
+        )
+    ]
+    opportunities = [
+        OpportunityRecord(
+            opportunity_id="opp-ottimate-ai-strategy",
+            organization_id="org-ottimate",
+            title="MBA Internship - AI Strategy & Operations",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-midun",
+                "organization_id": "org-ottimate",
+                "normalized_status": "replied",
+                "last_sender": "Midun Raju",
+                "latest_message": "Absolutely",
+                "message_window": [
+                    {
+                        "sender": "You",
+                        "message": "I'll only send you a fit if there is a real match.",
+                    },
+                    {"sender": "Midun Raju", "message": "Absolutely"},
+                ],
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+        opportunities=opportunities,
+    )
+
+    assert drafts[0]["reply_intent"] == "permission_to_send_fit"
+    assert drafts[0]["send_recommendation"] == "auto_send"
+    assert "MBA Internship - AI Strategy & Operations" in str(drafts[0]["draft_message"])
+
+
+def test_persisted_inbound_replies_survive_bounded_live_snapshot() -> None:
+    contact = ContactRecord(
+        contact_id="ct-jordan",
+        organization_id="org-lemonlime",
+        full_name="Jordan Zietz",
+        linkedin_url="https://www.linkedin.com/in/jordan-zietz/",
+    )
+    touchpoint = TouchpointRecord(
+        touchpoint_id="tp-jordan-invite",
+        organization_id="org-lemonlime",
+        contact_id="ct-jordan",
+        channel="linkedin",
+        status="Sent",
+        message_kind="linkedin_invite",
+        message_text="Hi Jordan, open to connecting?",
+        recorded_at="2026-07-01T00:00:00+00:00",
+    )
+    state = {
+        "thread_states": {
+            "synthetic:jordan-zietz": {
+                "name": "Jordan Zietz",
+                "last_sender": "Jordan",
+                "latest_message": "Send your resume to careers@lemonlime.ai",
+                "message_window": [
+                    {"sender": "Jordan", "message": "Send your resume to careers@lemonlime.ai"}
+                ],
+            }
+        }
+    }
+
+    results = build_persisted_inbound_reconcile_results(
+        state=state,
+        contacts=[contact],
+        touchpoints=[touchpoint],
+    )
+
+    assert len(results) == 1
+    assert results[0]["contact_id"] == "ct-jordan"
+    assert results[0]["status"] == "replied"
+    assert results[0]["state_reason"] == "persistent_unanswered_inbound"
+
+
+def test_unanswered_inbound_reply_bypasses_campaign_cadence_hold(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-lemonlime",
+            name="LemonLime",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-jordan",
+            organization_id="org-lemonlime",
+            full_name="Jordan Zietz",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-jordan-reply",
+            organization_id="org-lemonlime",
+            contact_id="ct-jordan",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text="LinkedIn reply detected.",
+            recorded_at="2026-07-09T07:19:26+00:00",
+        )
+    )
+
+    allowed, held = _apply_linkedin_cadence_guards(
+        workbook=workbook,
+        drafts=[
+            {
+                "contact_id": "ct-jordan",
+                "organization_id": "org-lemonlime",
+                "source_status": "replied",
+                "send_recommendation": "review",
+                "draft_message": "Thanks Jordan, I'll send that over.",
+            }
+        ],
+    )
+
+    assert held == []
+    assert len(allowed) == 1
+    assert allowed[0]["cadence_action"] == "linkedin_reply"
+    assert allowed[0]["cadence_state"] == "due"
+
+
+def test_inbound_reply_is_held_after_later_outbound_response(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-lemonlime",
+            name="LemonLime",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-jordan",
+            organization_id="org-lemonlime",
+            full_name="Jordan Zietz",
+        )
+    )
+    for touchpoint in [
+        TouchpointRecord(
+            touchpoint_id="tp-jordan-reply",
+            organization_id="org-lemonlime",
+            contact_id="ct-jordan",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text="LinkedIn reply detected.",
+            recorded_at="2026-07-09T07:19:26+00:00",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-jordan-response",
+            organization_id="org-lemonlime",
+            contact_id="ct-jordan",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_manual_message",
+            message_text="Thanks Jordan, I'll email it over.",
+            recorded_at="2026-07-09T08:00:00+00:00",
+        ),
+    ]:
+        workbook.append_touchpoint(touchpoint)
+
+    allowed, held = _apply_linkedin_cadence_guards(
+        workbook=workbook,
+        drafts=[
+            {
+                "contact_id": "ct-jordan",
+                "organization_id": "org-lemonlime",
+                "source_status": "replied",
+                "send_recommendation": "review",
+                "draft_message": "Thanks Jordan, I'll send that over.",
+            }
+        ],
+    )
+
+    assert allowed == []
+    assert len(held) == 1
+    assert held[0]["send_recommendation"] == "cadence_hold"
+    assert "later outbound" in str(held[0]["cadence_reasons"][0])
+
+
+def test_track_2_mapping_uses_bounded_cross_functional_passes() -> None:
+    assert TRACK_2_MAPPING_PASSES == [
+        "existing_connections",
+        "product_network",
+        "engineering_network",
+        "broad_fallback",
+    ]
 
 
 def test_followup_draft_does_not_invent_positive_callback_when_contact_does_not_know() -> None:

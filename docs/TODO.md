@@ -34,14 +34,17 @@ paths visible instead of accidentally filtering them out.
    follow-ups. SMTP delivery exists only behind reviewed drafts, a due cadence
    decision, configured credentials, a bounded limit, and explicit `--execute`.
    The next step is one small reviewed live batch, not higher volume.
-5. **IMPLEMENTED MONITOR; TUNING REMAINS — protect adjacent role coverage.**
+5. **IMPLEMENTED AND REAL-RUN TUNED — protect adjacent role coverage.**
    A separate run-scoped role-surface report keeps the account tracker
    company-level while showing discovered, scored, surfaced, and acted-on
    Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and narrow
-   Growth-adjacent roles by source. Product remains primary. Use real reports to
-   audit and then tune ResumeGenerator queries/classifiers where adjacent lanes
-   are genuinely missing; the monitor itself does not prove discovery breadth
-   is already adequate.
+   Growth-adjacent roles by source. Product remains primary. The July 11
+   current-run replay covered 402 observations, 379 unique roles, and 220
+   companies from six ran sources with zero failures/skips: Product 94
+   discovered and 5 scored/surfaced; Product Strategy 1; BizOps 8 and 2/2;
+   Program/Ops 24 and 5/5; narrow Growth 7 and 2/2. No configured family was
+   below its floor. This is one successful replay, not proof that future runs
+   cannot regress (`artifacts/20260711-124409-role-surface-report.json`).
 6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
    LinkedIn intelligence pass checks the viewer ledger every seven days by
    default, dedupes repeated observations, and annotates target-company/role
@@ -64,8 +67,10 @@ paths visible instead of accidentally filtering them out.
 - [ ] Review useful feed signals and set dispositions; review the generated
   company CSV and explicitly approve candidates before running
   `build-company-discovery-review --promote-approved`.
-- [ ] Pass the current run's ResumeGenerator source-metrics JSON into the role
-  monitor. Never fill a missing source with an older workspace artifact.
+- [x] Pass the current run's ResumeGenerator source-metrics JSON into the role
+  monitor. The July 11 exact-artifact replay is recorded at
+  `artifacts/20260711-124409-role-surface-report.json`; never fill a missing
+  source with an older workspace artifact.
 - [ ] Configure `SMTP_HOST` and `SMTP_FROM_EMAIL` plus the appropriate port,
   username/password, STARTTLS/SSL settings; verify sender authorization outside
   the production batch.
@@ -111,12 +116,15 @@ paths visible instead of accidentally filtering them out.
 - [x] Add a high-affinity LinkedIn expansion pass for
   `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
-  - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`, `USC`, `Marshall`, plus `Product`, `hiring`, and product leadership terms
+  - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`,
+    `USC`, `Marshall`, `Thapar`, `Hevo`, and `Optum`, plus role-family-specific
+    product, hiring, leadership, strategy, operations, and narrow growth terms
   - raise per-company caps from 3 to at most 5 only when actual scored affinity
     candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
 - [x] Add a merged daily queue that combines:
-  - apply-backed outreach from `ResumeGenerator v1/discovery/jobs.xlsx`
+  - apply-backed outreach from the exact ResumeGenerator current-run action
+    queue, ultimately derived from `ResumeGenerator v1/discovery/jobs.xlsx`
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
 - [x] Use a separate shared module/artifact rather than another workbook. The
@@ -235,9 +243,10 @@ paths visible instead of accidentally filtering them out.
   that reports whether the discovery/application lanes are surfacing Product
   Strategy, BizOps/Strategy, Program/Operations, and narrowly defined
   Growth/GTM-adjacent roles alongside the primary Product lane.
-- Audit ResumeGenerator title/query filters and scoring so those families are
-  discovered, scored, and surfaced rather than silently treated as generic
-  non-PM roles or deprioritized sales.
-- Add account-level role-watch tasks for strategic companies: a company can
+- [x] Audit ResumeGenerator title/query filters and scoring so those families
+  are discovered, scored, and surfaced rather than silently treated as generic
+  non-PM roles or deprioritized sales. Product Strategy and narrow Growth query
+  coverage are now explicit; generic sales/marketing growth remains excluded.
+- [ ] Add account-level role-watch tasks for strategic companies: a company can
   remain active even when it has no current PM role, while a good adjacent
   opening should create an application/research action.

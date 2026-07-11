@@ -49,6 +49,11 @@ _NON_CURRENT_PATTERN = re.compile(
     r"^(?:incoming|former|previous|ex[- ])\b|\b(?:formerly|worked at|retired)\b",
     re.IGNORECASE,
 )
+_DESCRIPTIVE_TITLE_TAGLINE_PATTERN = re.compile(
+    r":\s*(?:spearheading|driving|building|helping|transforming|empowering|"
+    r"creating|innovating)\b",
+    re.IGNORECASE,
+)
 _LEADERSHIP_PATTERN = re.compile(
     r"\b(?:senior|sr\.?|principal|group|lead|leader|head|director|"
     r"senior vice president|vice president|svp|evp|vp|chief|general manager|gm)\b",
@@ -82,6 +87,7 @@ _COMPANY_BLOCKLIST = {
 # Attach subsidiaries and legacy brands to the canonical account already used
 # by the Outreach workbook. The exact source headline remains in notes.
 _CANONICAL_COMPANY_ALIASES = {
+    "apollomed-nasdaq-ameh": "ApolloMed",
     "amazon-web-services": "Amazon",
     "amazon-web-services-aws": "Amazon",
     "aws": "Amazon",
@@ -743,7 +749,11 @@ def parse_current_title_company(headline: str) -> tuple[str, str] | None:
     title = _clean(match.group("title")).strip("-|,\u2013\u2014 ")
     company = _clean(match.group("company")).strip("-|,\u2013\u2014 ")
     company = _CANONICAL_COMPANY_ALIASES.get(_normalized_token(company), company)
-    if not title or not _company_is_confident(company):
+    if (
+        not title
+        or _DESCRIPTIVE_TITLE_TAGLINE_PATTERN.search(title)
+        or not _company_is_confident(company)
+    ):
         return None
     return title, company
 

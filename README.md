@@ -246,6 +246,13 @@ and artifact hash remain in the notes and decision audit. If an existing explici
 company alias is used for account dedupe, the exact captured title and company
 remain separately recorded as enrichment evidence.
 
+That loader is deliberately limited to signed-in PeopleGrove Career Journey
+data bound to the exact raw-capture hash. Public-web corroboration is not a
+valid `--enrichment-path` input. Research from official pages, LinkedIn public
+profiles, or professional directories must be manually reviewed, converted
+into a separate staged relationship batch with its evidence URL/status intact,
+and imported under `peoplegrove_public_web` university-directory provenance.
+
 Keep a capture manifest beside the raw JSON with each query's advertised count,
 profiles captured, card batches/scrolls, and an honest termination state. An
 exact-count query may be marked exhausted; a high-volume query stopped at a

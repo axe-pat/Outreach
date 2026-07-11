@@ -6,6 +6,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from outreach.cli import _apply_linkedin_cadence_guards, app
+from outreach.company_news import company_news_capture_snapshots, company_news_signal_id
+from outreach.company_watchlist import CandidateCompanySignal
 from outreach.intelligence_commands import (
     _apply_email_approval,
     _capture_due,
@@ -15,6 +17,8 @@ from outreach.intelligence_commands import (
 )
 from outreach.tracking import (
     ContactRecord,
+    OrganizationRecord,
+    OrganizationType,
     OutreachChannel,
     OutreachWorkbook,
     SourceKind,
@@ -196,11 +200,15 @@ def test_company_news_capture_does_not_claim_old_linkedin_ledger_as_same_run(
         encoding="utf-8",
     )
     capture = tmp_path / "news-capture.json"
+    captured_signal = CandidateCompanySignal.model_validate(signals[0]["signal"])
+    snapshots, snapshots_sha256 = company_news_capture_snapshots([captured_signal])
     capture.write_text(
         json.dumps(
             {
                 "status": "completed",
-                "captured_signal_ids": ["news-new"],
+                "captured_signal_ids": [company_news_signal_id(captured_signal)],
+                "captured_signal_snapshots": snapshots,
+                "captured_signal_snapshots_sha256": snapshots_sha256,
             }
         ),
         encoding="utf-8",
@@ -257,6 +265,65 @@ def test_watchlist_promotion_preserves_non_linkedin_source_provenance(
     assert organization.source_url == "https://news.example/company"
     assert "source_types=funding_news" in organization.notes
     assert "source_run_ids=news-run-1" in organization.notes
+
+
+def test_watchlist_promotion_merges_existing_organization_idempotently(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-news-discovered-co",
+            name="News Discovered Co",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="existing-list",
+            status="Researching",
+            source_kind=SourceKind.MANUAL,
+            notes="Existing account context | owner=akshat",
+        )
+    )
+    watchlist = tmp_path / "company_watchlist.json"
+    watchlist.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "company_name": "News Discovered Co",
+                        "rubric_total": 13,
+                        "reviewer": "reviewer-1",
+                        "reviewed_at": "2026-07-11T08:00:00+00:00",
+                        "reviewer_notes": "Approved after product-surface review",
+                        "provenance": [
+                            {
+                                "source_type": "funding_news",
+                                "source_run_id": "news-run-1",
+                                "source_url": "https://news.example/company",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _promote_approved_watchlist(workspace, watchlist) == 0
+    organization = workbook.list_organizations()[0]
+    assert organization.status == "Reviewed watchlist"
+    assert organization.target_lists == (
+        "existing-list;company-watchlist;track-2;relationship"
+    )
+    assert organization.source_kind == SourceKind.OTHER
+    assert organization.source_url == "https://news.example/company"
+    assert "Existing account context" in organization.notes
+    assert "owner=akshat" in organization.notes
+    assert "watchlist_review_state=approved" in organization.notes
+    assert "watchlist_source_types=funding_news" in organization.notes
+    first_content = (workspace / "organizations.csv").read_text(encoding="utf-8")
+
+    assert _promote_approved_watchlist(workspace, watchlist) == 0
+    assert (workspace / "organizations.csv").read_text(encoding="utf-8") == first_content
 
 
 def test_role_cadence_and_learning_commands_emit_artifacts(tmp_path: Path) -> None:

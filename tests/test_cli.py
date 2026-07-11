@@ -44,6 +44,7 @@ from outreach.cli import (
     import_communication_feedback_rows,
     item_matches_remote,
     item_matches_tags,
+    linkedin_company_search_name,
     normalize_tag,
     parse_notes_metadata,
     parse_batch_year,
@@ -55,6 +56,8 @@ from outreach.cli import (
     run_supervised_e2e_pipeline,
     score_opportunity_relevance,
     select_invite_candidates,
+    should_stop_after_company_filter_error,
+    summarize_linkedin_mapping_artifact,
     summarize_linkedin_followup_actions,
     startup_pool_metadata,
     startup_pool_mode,
@@ -471,6 +474,64 @@ def test_founding_mechatronics_engineer_buckets_as_engineering() -> None:
 def test_company_search_aliases_strip_common_startup_suffixes() -> None:
     assert company_search_aliases("Splash Inc.")[:2] == ["Splash Inc.", "Splash"]
     assert "Surtr" in company_search_aliases("Surtr Defense Systems")
+    assert company_search_aliases("Globalization Partners")[:2] == [
+        "Globalization Partners",
+        "Globalization Partners International",
+    ]
+    assert (
+        linkedin_company_search_name("Globalization Partners")
+        == "Globalization Partners International"
+    )
+    assert linkedin_company_search_name("Parsec Automation") == "Parsec Automation, LLC"
+
+
+def test_exact_company_filter_miss_stops_only_before_any_success() -> None:
+    error = "Could not find an exact company suggestion for 'Globalization Partners'."
+
+    assert should_stop_after_company_filter_error(
+        error,
+        successful_filtered_passes=0,
+    )
+    assert not should_stop_after_company_filter_error(
+        error,
+        successful_filtered_passes=1,
+    )
+    assert not should_stop_after_company_filter_error(
+        "LinkedIn navigation timed out",
+        successful_filtered_passes=0,
+    )
+
+
+def test_mapping_artifact_summary_surfaces_pass_failures() -> None:
+    failed = summarize_linkedin_mapping_artifact(
+        {
+            "count": 0,
+            "company_filter_status": "failed_exact_company_suggestion",
+            "pass_summaries": [
+                {"pass_name": "existing_connections", "error": "exact company miss"},
+                {"pass_name": "product", "error": "exact company miss"},
+            ],
+        }
+    )
+    partial = summarize_linkedin_mapping_artifact(
+        {
+            "count": 4,
+            "pass_summaries": [
+                {"pass_name": "product", "raw_count": 4},
+                {"pass_name": "engineering", "error": "filter timeout"},
+            ],
+        }
+    )
+
+    assert failed == {
+        "status": "failed",
+        "candidate_count": 0,
+        "pass_failure_count": 2,
+        "pass_errors": ["exact company miss"],
+    }
+    assert partial["status"] == "partial"
+    assert partial["candidate_count"] == 4
+    assert partial["pass_failure_count"] == 1
 
 
 def test_build_linkedin_contact_info_email_queue_uses_daily_email_research_accounts(tmp_path: Path) -> None:

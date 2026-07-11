@@ -9,12 +9,15 @@ from outreach.company_news import (
     CompanyNewsEntry,
     CompanyNewsSource,
     capture_company_news,
+    company_news_capture_snapshots,
     company_news_signal_id,
     company_signals_from_news_entries,
     extract_company_from_headline,
+    load_company_news_capture_snapshots,
     load_company_news_signals,
     parse_company_news_feed,
     structured_company_signals_from_path,
+    upsert_company_news_ledger,
 )
 
 
@@ -193,3 +196,56 @@ def test_capture_fails_closed_without_replacing_a_corrupt_ledger(tmp_path: Path)
 
     assert ledger.read_text(encoding="utf-8") == corrupt_payload
     assert list(tmp_path.glob(".company_news_signals.json.*.tmp")) == []
+
+
+def test_exact_capture_replay_uses_hash_bound_snapshot_not_mutable_ledger(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "company_news_signals.json"
+    first = company_signals_from_news_entries(
+        [
+            CompanyNewsEntry(
+                title="Orbit AI raises $25M to automate finance workflows",
+                url="https://news.example/orbit-ai-round",
+                summary="Original San Francisco product-operations evidence.",
+            )
+        ],
+        source=SOURCE,
+        run_id="run-1",
+        observed_at="2026-07-10T12:00:00+00:00",
+    )[0]
+    snapshots, snapshots_sha256 = company_news_capture_snapshots([first])
+    exact_capture = {
+        "captured_signal_ids": [company_news_signal_id(first)],
+        "captured_signal_snapshots": snapshots,
+        "captured_signal_snapshots_sha256": snapshots_sha256,
+    }
+    upsert_company_news_ledger(
+        ledger,
+        [first],
+        observed_at="2026-07-10T12:00:00+00:00",
+        run_id="run-1",
+    )
+
+    replacement = first.model_copy(deep=True)
+    replacement.description = "Later rewritten ledger context that is not run-1 evidence."
+    replacement.provenance[0].source_run_id = "run-2"
+    upsert_company_news_ledger(
+        ledger,
+        [replacement],
+        observed_at="2026-07-11T12:00:00+00:00",
+        run_id="run-2",
+    )
+
+    assert load_company_news_signals(ledger)[0].description == replacement.description
+    replayed = load_company_news_capture_snapshots(exact_capture)
+    assert replayed[0].description == first.description
+    assert replayed[0].provenance[0].source_run_id == "run-1"
+
+
+def test_legacy_id_only_capture_fails_closed_instead_of_reading_latest_ledger() -> None:
+    with pytest.raises(ValueError, match="predates immutable signal snapshots"):
+        load_company_news_capture_snapshots(
+            {"captured_signal_ids": ["company-news-legacy"]},
+            artifact_label="legacy-capture.json",
+        )

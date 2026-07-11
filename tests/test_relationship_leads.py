@@ -10,6 +10,7 @@ from outreach.relationship_leads import (
     RelationshipLeadReviewError,
     _program_tag,
     _school_tag,
+    _source_kind_for_lead,
     ensure_relationship_leads_template,
     import_relationship_leads,
     load_relationship_leads,
@@ -65,6 +66,12 @@ def test_school_and_program_tags_are_safe_single_tokens() -> None:
         "school-university-of-california-berkeley-haas-school-of-business"
     )
     assert _program_tag("MBA / Product Strategy") == "program-mba-product-strategy"
+
+
+def test_peoplegrove_public_corroboration_retains_directory_provenance() -> None:
+    assert _source_kind_for_lead("peoplegrove_public_web") == (
+        SourceKind.UNIVERSITY_DIRECTORY
+    )
 
 
 def test_import_relationship_leads_applies_recent_mba_pm_preset_defaults(tmp_path: Path) -> None:
@@ -312,6 +319,64 @@ def test_execute_blocks_person_locator_owned_by_another_organization(tmp_path: P
 
     with pytest.raises(RelationshipLeadConflictError, match="already belongs"):
         import_relationship_leads(workspace, source_path=staged, execute=True)
+
+    assert (workspace / "contacts.csv").read_text(encoding="utf-8") == contacts_before
+
+
+def test_execute_blocks_stable_source_identity_at_a_different_company(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.initialize()
+    old_org_id = workbook.make_organization_id("Old Company")
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id=old_org_id,
+            name="Old Company",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id=workbook.make_contact_id(old_org_id, "Trojan Operator"),
+            organization_id=old_org_id,
+            full_name="Trojan Operator",
+            notes=(
+                "Relationship lead contact | relationship_source_type=peoplegrove"
+                " | relationship_source_record_id=stable-person-123"
+                " | relationship_evidence_url=https://usc.peoplegrove.com/hub/usc/person"
+                "?userProfile=stable-person-123"
+            ),
+        )
+    )
+    source = tmp_path / "relationship_leads.csv"
+    with source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RELATIONSHIP_LEAD_FIELDS)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "source_type": "peoplegrove_public_web",
+                "full_name": "Trojan Operator",
+                "company": "New Company",
+                "title": "Product Manager",
+                "source_url": (
+                    "https://usc.peoplegrove.com/hub/usc/person"
+                    "?userProfile=stable-person-123"
+                ),
+                "source_record_id": "stable-person-123",
+            }
+        )
+    staged = _stage_and_approve(source, source_key="peoplegrove_usc")
+    contacts_before = (workspace / "contacts.csv").read_text(encoding="utf-8")
+
+    with pytest.raises(RelationshipLeadConflictError, match="already belongs"):
+        import_relationship_leads(
+            workspace,
+            source_path=staged,
+            source_key="peoplegrove_usc",
+            execute=True,
+        )
 
     assert (workspace / "contacts.csv").read_text(encoding="utf-8") == contacts_before
 

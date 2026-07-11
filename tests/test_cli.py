@@ -65,6 +65,7 @@ from outreach.cli import (
     touchpoint_status_from_invite_result,
     _source_breakdown,
     _apply_linkedin_cadence_guards,
+    _track_2_actual_actions,
     _write_comms_learning_artifact,
     TRACK_2_MAPPING_PASSES,
     write_artifact_daily_report,
@@ -2552,6 +2553,38 @@ def test_track_2_mapping_uses_bounded_cross_functional_passes() -> None:
         "engineering_network",
         "broad_fallback",
     ]
+
+
+def test_track_2_report_uses_current_followup_execution_schema(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.initialize()
+
+    actions, company_counts = _track_2_actual_actions(
+        track_payload={
+            "phase_results": [
+                {
+                    "phase": "1_2_linkedin_followups",
+                    "status": "drafted_review_required",
+                    "thread_count": 21,
+                    "persistent_inbound_count": 2,
+                    "inbound_result_count": 6,
+                    "planned_company_result_count": 3,
+                    "execution_result_count": 7,
+                    "sendable_count": 1,
+                    "pending_review_count": 6,
+                }
+            ]
+        },
+        settings=SimpleNamespace(artifacts_dir=tmp_path / "artifacts"),
+        summary_path=None,
+        workbook=workbook,
+    )
+
+    assert company_counts == {}
+    assert actions[0]["count"] == 7
+    assert "6 inbound replies prioritized" in str(actions[0]["detail"])
+    assert "2 recovered from persistent state" in str(actions[0]["detail"])
+    assert "7 total results executed" in str(actions[0]["detail"])
 
 
 def test_followup_draft_does_not_invent_positive_callback_when_contact_does_not_know() -> None:

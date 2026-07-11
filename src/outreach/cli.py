@@ -6718,14 +6718,31 @@ def _track_2_actual_actions(
         phase_name = str(phase.get("phase") or "")
         phase_status = str(phase.get("status") or "not_run")
         if phase_name == "1_2_linkedin_followups":
+            execution_count = int(
+                phase.get("execution_result_count")
+                or phase.get("filtered_count")
+                or 0
+            )
+            inbound_count = int(phase.get("inbound_result_count") or 0)
+            persistent_inbound_count = int(
+                phase.get("persistent_inbound_count") or 0
+            )
+            planned_company_count = int(
+                phase.get("planned_company_result_count")
+                or phase.get("filtered_count")
+                or 0
+            )
             actions.append(
                 {
                     "action": "linkedin_followup_reply_triage",
                     "status": phase_status,
-                    "count": int(phase.get("filtered_count") or 0),
+                    "count": execution_count,
                     "detail": (
                         f"{int(phase.get('thread_count') or 0)} threads scanned; "
-                        f"{int(phase.get('filtered_count') or 0)} in planned companies; "
+                        f"{inbound_count} inbound replies prioritized "
+                        f"({persistent_inbound_count} recovered from persistent state); "
+                        f"{planned_company_count} planned-company results; "
+                        f"{execution_count} total results executed; "
                         f"{int(phase.get('sendable_count') or 0)} auto-send eligible; "
                         f"{int(phase.get('pending_review_count') or 0)} review/hold."
                     ),

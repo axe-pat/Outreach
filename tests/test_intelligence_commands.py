@@ -18,6 +18,7 @@ from outreach.intelligence_commands import (
     _email_is_approved,
     _email_is_verified,
     _promote_approved_watchlist,
+    _record_profile_viewer_capture_state,
 )
 from outreach.tracking import (
     ContactRecord,
@@ -169,6 +170,91 @@ def test_profile_viewer_due_date_uses_observation_not_file_mtime(tmp_path: Path)
     path.write_text(f"viewer_id,last_seen_at\nviewer-1,{last_seen}\n", encoding="utf-8")
 
     assert _capture_due(path, 7) is True
+
+
+def test_successful_zero_viewer_capture_advances_weekly_cadence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = _workspace(tmp_path)
+    scheduled: list[bool] = []
+
+    def capture(*args, **kwargs):
+        viewer_scheduled = bool(kwargs["capture_profile_viewers_this_run"])
+        scheduled.append(viewer_scheduled)
+        return {
+            "status": "completed",
+            "feed": {"status": "completed", "captured": 0},
+            "profile_viewers": (
+                {"status": "completed", "captured": 0, "added": 0}
+                if viewer_scheduled
+                else {
+                    "status": "skipped",
+                    "captured": 0,
+                    "reason": "not_scheduled_for_this_run",
+                }
+            ),
+        }
+
+    monkeypatch.setattr(
+        "outreach.intelligence_commands.capture_linkedin_signals_live",
+        capture,
+    )
+    monkeypatch.setattr(
+        "outreach.intelligence_commands.write_artifact",
+        lambda *args, **kwargs: tmp_path / "capture.json",
+    )
+
+    first = runner.invoke(
+        app,
+        ["capture-linkedin-intelligence", "--workspace", str(workspace)],
+    )
+    second = runner.invoke(
+        app,
+        ["capture-linkedin-intelligence", "--workspace", str(workspace)],
+    )
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    assert scheduled == [True, False]
+    state = json.loads(
+        (workspace / "linkedin_profile_viewers_capture_state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["last_attempt_status"] == "completed"
+    assert state["last_success_captured"] == 0
+    assert state["last_success_at"]
+    assert state["passive_context_only"] is True
+    assert not (workspace / "linkedin_profile_viewers.csv").exists()
+
+
+def test_failed_profile_viewer_attempt_does_not_postpone_retry(tmp_path: Path) -> None:
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    old_success = (now - timedelta(days=8)).isoformat()
+    state_path = tmp_path / "linkedin_profile_viewers_capture_state.json"
+    _record_profile_viewer_capture_state(
+        state_path,
+        attempted_at=old_success,
+        status="completed",
+        captured=0,
+        updated_at=old_success,
+    )
+    _record_profile_viewer_capture_state(
+        state_path,
+        attempted_at=now.isoformat(),
+        status="failed",
+        updated_at=now.isoformat(),
+    )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["last_attempt_status"] == "failed"
+    assert state["last_success_at"] == old_success
+    assert _capture_due(
+        tmp_path / "missing-viewers.csv",
+        7,
+        state_path=state_path,
+        now=now,
+    ) is True
 
 
 def test_company_discovery_report_is_capture_scoped_but_review_queue_is_cumulative(

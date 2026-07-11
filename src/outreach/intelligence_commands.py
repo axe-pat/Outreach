@@ -89,7 +89,7 @@ def capture_linkedin_intelligence_cmd(
     max_scrolls: Annotated[int, typer.Option(help="Maximum home-feed scrolls")] = 5,
     max_items: Annotated[int, typer.Option(help="Maximum feed items to inspect")] = 100,
     max_duration_seconds: Annotated[float, typer.Option(help="Optional time budget; 0 means no time cap")] = 0,
-    profile_viewers_every_days: Annotated[int, typer.Option(help="Capture viewers when the passive ledger is this many days old; 0 captures every run")] = 7,
+    profile_viewers_every_days: Annotated[int, typer.Option(help="Capture viewers when the last successful passive capture is this many days old; 0 captures every run")] = 7,
 ) -> None:
     """Capture read-only LinkedIn feed discovery and passive profile-view context."""
     settings = OutreachSettings()
@@ -97,7 +97,19 @@ def capture_linkedin_intelligence_cmd(
     organizations = workbook.list_organizations()
     company_names = [item.name for item in organizations]
     viewer_path = workspace / "linkedin_profile_viewers.csv"
-    capture_viewers = _capture_due(viewer_path, profile_viewers_every_days)
+    viewer_state_path = workspace / "linkedin_profile_viewers_capture_state.json"
+    capture_viewers = _capture_due(
+        viewer_path,
+        profile_viewers_every_days,
+        state_path=viewer_state_path,
+    )
+    viewer_attempted_at = utc_now_iso()
+    if capture_viewers:
+        _record_profile_viewer_capture_state(
+            viewer_state_path,
+            attempted_at=viewer_attempted_at,
+            status="started",
+        )
     limits = CaptureLimits(
         max_scrolls=max_scrolls,
         max_duration_seconds=max_duration_seconds or None,
@@ -113,6 +125,24 @@ def capture_linkedin_intelligence_cmd(
         known_companies=company_names,
         target_companies=company_names,
     )
+    viewer_summary = (
+        summary.get("profile_viewers")
+        if isinstance(summary.get("profile_viewers"), dict)
+        else {}
+    )
+    if capture_viewers:
+        _record_profile_viewer_capture_state(
+            viewer_state_path,
+            attempted_at=viewer_attempted_at,
+            status=str(viewer_summary.get("status") or "failed"),
+            captured=viewer_summary.get("captured"),
+        )
+    summary["profile_viewer_cadence"] = {
+        "scheduled_this_run": capture_viewers,
+        "every_days": profile_viewers_every_days,
+        "state_path": str(viewer_state_path),
+        "passive_context_only": True,
+    }
     artifact = write_artifact(settings.artifacts_dir, "linkedin-intelligence-capture", summary)
     typer.echo(f"LinkedIn feed: {summary.get('feed', {}).get('status', 'unknown')}")
     typer.echo(f"Profile viewers: {summary.get('profile_viewers', {}).get('status', 'unknown')}")
@@ -717,24 +747,95 @@ def send_track_2_emails_cmd(
     typer.echo(f"Artifact: {artifact}")
 
 
-def _capture_due(path: Path, every_days: int) -> bool:
-    if every_days <= 0 or not path.exists():
+def _capture_due(
+    path: Path,
+    every_days: int,
+    *,
+    state_path: Path | None = None,
+    now: datetime | None = None,
+) -> bool:
+    if every_days <= 0:
         return True
-    with path.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
+
     observed: list[datetime] = []
-    for row in rows:
-        value = str(row.get("last_seen_at") or "").strip().replace("Z", "+00:00")
-        if not value:
-            continue
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            continue
-        observed.append(parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC))
+    if state_path is not None:
+        state = _read_profile_viewer_capture_state(state_path)
+        parsed = _parse_utc_datetime(state.get("last_success_at"))
+        if parsed is not None:
+            observed.append(parsed)
+
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            parsed = _parse_utc_datetime(row.get("last_seen_at"))
+            if parsed is not None:
+                observed.append(parsed)
+
     if not observed:
         return True
-    return datetime.now(UTC) - max(observed) >= timedelta(days=every_days)
+    current = now or datetime.now(UTC)
+    current = current if current.tzinfo else current.replace(tzinfo=UTC)
+    return current.astimezone(UTC) - max(observed) >= timedelta(days=every_days)
+
+
+def _record_profile_viewer_capture_state(
+    path: Path,
+    *,
+    attempted_at: str,
+    status: str,
+    captured: object = None,
+    updated_at: str | None = None,
+) -> dict[str, object]:
+    """Persist capture cadence without turning passive viewer rows into actions."""
+
+    previous = _read_profile_viewer_capture_state(path)
+    recorded_at = updated_at or utc_now_iso()
+    normalized_status = status.strip().casefold() or "failed"
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "capture_kind": "linkedin_profile_viewers",
+        "passive_context_only": True,
+        "last_attempt_at": attempted_at,
+        "last_attempt_status": normalized_status,
+        "last_success_at": str(previous.get("last_success_at") or ""),
+        "last_success_captured": previous.get("last_success_captured", 0),
+        "updated_at": recorded_at,
+    }
+    if normalized_status == "completed":
+        payload["last_success_at"] = recorded_at
+        try:
+            payload["last_success_captured"] = max(0, int(captured or 0))
+        except (TypeError, ValueError):
+            payload["last_success_captured"] = 0
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+    return payload
+
+
+def _read_profile_viewer_capture_state(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _parse_utc_datetime(value: object) -> datetime | None:
+    normalized = str(value or "").strip().replace("Z", "+00:00")
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    parsed = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _promote_approved_watchlist(workspace: Path, path: Path) -> int:

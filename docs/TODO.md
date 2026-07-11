@@ -133,7 +133,9 @@ paths visible instead of accidentally filtering them out.
   the next one.
 - **Profile viewers:** capture/review weekly as passive interest context, score
   by account fit/shared context, and research before writing; no automatic
-  sends.
+  sends. Weekly cadence uses a durable last-attempt/last-success marker, so a
+  successful zero-viewer capture waits seven days while a failed attempt retries
+  on the next run.
 
 ## Discovery Architecture
 

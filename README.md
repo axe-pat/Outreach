@@ -381,6 +381,11 @@ Profile viewers are checked weekly by default and retained in
 repeat observations and annotates target-company or role relevance; a profile
 view never creates or sends outreach by itself. Set
 `--profile-viewers-every-days 0` only for an intentional every-run capture.
+Cadence is tracked separately in
+`workspace/linkedin_profile_viewers_capture_state.json`, including the last
+attempt and last successful capture. A successful capture advances the weekly
+clock even when LinkedIn returns zero viewers; a failed capture remains due for
+the next run. This state file does not change the passive-only ledger semantics.
 
 ### Company discovery and reviewed watchlist
 

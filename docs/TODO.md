@@ -125,13 +125,17 @@ paths visible instead of accidentally filtering them out.
 - [x] Keep reverse cross-pollination review-first: Outreach-only companies surface
   as company/research actions in the shared queue and never write directly into
   `jobs.xlsx`. A live role remains required before the application lane owns it.
-- [x] Add a high-affinity LinkedIn expansion pass for
+- [ ] Canary and production-validate the implemented, default-off high-affinity
+  LinkedIn expansion pass for
   `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
   - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`, `USC`, `Marshall`, plus `Product`, `hiring`, and product leadership terms
   - raise per-company caps from 3 to at most 5 only when actual scored affinity
     candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
+  - keep `--enable-affinity-expansion` off in scheduled production until bounded
+    runtime, partial-send reservation, and no-oversend tests pass against a live
+    canary
 - [x] Add a merged daily queue that combines:
   - apply-backed outreach from `ResumeGenerator v1/discovery/jobs.xlsx`
   - hiring startups from YC / Built In discovery
@@ -241,17 +245,17 @@ paths visible instead of accidentally filtering them out.
   source URLs and no guessed emails.
 - [x] Require `validate → stage → explicit review → execute` for every later batch.
   Staged batch/row IDs, SHA-256 manifests, provenance, dedupe, tamper detection,
-  and ambiguous workbook-identity conflict checks are implemented.
-- [ ] Finish curation/review/import of the signed-in, hundreds-scale
-  PeopleGrove/Trojan Network capture. The July 11 capture contains 1,845 unique
-  profiles across 12 USC role/education queries; its manifest records seven
-  exact-count queries as exhausted and five high-volume queries as deliberately
-  bounded best-match samples. Do not relabel those broad samples exhaustive.
-  Reject irrelevant students, unrelated functions/companies, malformed current
-  role/company parses, stale/empty cards, duplicates, and other junk, then
-  stage/review/import only outreach-useful people. Record raw,
-  rejected-by-reason, staged, approved, imported, and unchanged-on-rerun counts.
-  Keep the completed source low-frequency; do not make it a daily scraper.
+  finalized-decision locking, complete SHA-bound decision artifacts, non-mutating
+  imports, and ambiguous workbook-identity conflict checks are implemented.
+- [ ] Reconcile and import the already curated signed-in PeopleGrove/Trojan Network
+  batch. Capture and curation are complete: 1,845 unique profiles across 12 USC
+  role/education queries became 153 curated candidates and 1,692 explicit
+  rejections. Its manifest records seven exact-count queries as exhausted and five
+  high-volume queries as deliberately bounded best-match samples. Reconcile the
+  intended 104-approved/49-rejected partition into one complete decision artifact,
+  reseal the staged file, verify exact counts and hashes, then import once and prove
+  an unchanged rerun. Do not import the existing inconsistent staged review or make
+  this low-frequency source a daily scraper.
 
 ## Role-Family Coverage
 

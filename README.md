@@ -261,8 +261,7 @@ python main.py stage-relationship-leads \
 python main.py review-relationship-leads \
   --staged-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
   --reviewer Akshat \
-  --approve-all-ready \
-  --reject-all-blocked
+  --decision-artifact workspace/peoplegrove_review_decisions.json
 python main.py import-relationship-leads \
   --source-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
   --source-key peoplegrove_usc \
@@ -270,10 +269,16 @@ python main.py import-relationship-leads \
 ```
 
 Staging validates required identity/provenance, URL shape, email shape, source
-records, duplicates, and batch fingerprints. The review manifest binds decisions
-to the staged file so later edits cannot silently inherit approval. Imports are
-idempotent and stop on ambiguous identity conflicts instead of merging people or
-companies by guesswork.
+records, duplicates, and batch fingerprints. For a reviewed batch, the decision
+artifact must contain `schema_version`, `batch_id`, the original `source_sha256`,
+the pre-review `staged_sha256`, exact `approved_row_ids`/`rejected_row_ids`, and
+matching `rows_total`/`rows_approved`/`rows_rejected` counts. Those lists must
+partition every staged row
+exactly once. The review manifest records the decision artifact's own SHA-256 and
+its source/stage binding, so later edits fail import. Bulk flags affect only
+pending rows; changing a finalized decision requires the explicit
+`--override-finalized` flag. Imports never create or rewrite their source and
+stop on missing, empty, raw, unreviewed, tampered, or ambiguous inputs.
 
 The source-key templates create clean one-time capture files and companion guides:
 
@@ -284,13 +289,13 @@ Current baseline: the 28 USC profiles imported on July 4 are an early
 proof-of-flow seed, not complete PeopleGrove coverage. A separate July 11
 official-public-source batch imported 11 reviewed leads (6 USC and 5 recent
 MBA-to-product) with source URLs and no guessed emails. The signed-in July 11
-capture is now hundreds-scale and coverage-manifested: 1,845 unique profiles
-across 12 role/education queries, with seven exact-count queries exhausted and
-five broad queries explicitly retained as bounded best-match samples. Curate
-that capture for current-role/company accuracy and company/role usefulness,
-preserve stable source identities, dedupe, and run only the retained rows through
-the staged review gate. Do not claim the five sampled broad surfaces are
-exhaustive. This remains a low-frequency source pull, not a daily scraper.
+capture and curation are complete: 1,845 unique profiles across 12 role/education
+queries became 153 curated candidates and 1,692 explicit rejections. Seven
+exact-count queries were exhausted; five broad queries remain bounded best-match
+samples and must not be described as exhaustive. The live 104-approved/49-rejected
+manual partition still needs reconciliation into one complete SHA-bound decision
+artifact before staging can be resealed or anything can be imported. This remains
+a low-frequency source pull, not a daily scraper.
 
 ## Communication Style
 
@@ -404,14 +409,14 @@ exact current inputs, while the editable review queue remains cumulative.
 
 ### High-affinity LinkedIn expansion
 
-Top, role-backed accounts now keep the exact-company people search as the base
-pass and add bounded Intuit, Gojek, USC, Marshall, Thapar, Hevo, Optum, and
-role-family searches. Product, Product Strategy, BizOps/Strategy,
-Program/Operations, and narrow Growth/GTM targets receive their own search terms.
-The pass preserves why a person surfaced even when LinkedIn omits past-employer
-detail on the compact card. A per-company invite cap can rise from 3 to at most 5
-only when enough real, scored affinity candidates exist and the global daily
-budget has unused headroom; all existing review, cadence, and send gates remain.
+The canary-only affinity mode keeps exact-company search as the base and can add
+bounded Intuit, Gojek, USC, Marshall, Thapar, Hevo, Optum, and role-family
+searches for top role-backed accounts. It is disabled by default in both the
+nightly runner and standalone company runs; enable it deliberately with
+`--enable-affinity-expansion` during a bounded validation run. When enabled, a
+per-company invite cap can rise from 3 to at most 5 only when real scored
+affinity candidates exist and the Track 2 daily budget has unused headroom.
+Mapping never enables these expansion passes.
 
 ### Role-family coverage
 
@@ -732,9 +737,10 @@ This repo now covers:
 - public company/news feeds plus reviewed structured imports through that same
   candidate contract, with source-aware tracker promotion
 - the run-stamped shared ResumeGenerator/Outreach daily company queue
-- bounded high-affinity LinkedIn passes for role-backed priority accounts
+- default-off, bounded high-affinity LinkedIn canary passes for role-backed
+  priority accounts
 - tamper-bound stage/review/import gates for low-frequency relationship-source
-  pulls, with hundreds-scale idempotency coverage
+  pulls, including a synthetic 150-row idempotency regression test
 - run-scoped role-family coverage with explicit source status
 - tracker-enforced LinkedIn/email cadence and explicitly gated SMTP delivery
 - gold/silver/negative communication examples plus advisory outcome learning

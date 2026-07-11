@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -36,6 +37,39 @@ def _stage_and_approve(source: Path, *, source_key: str = "") -> Path:
         reject_all_blocked=True,
     )
     return staged
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_complete_decision_artifact(
+    staged: Path,
+    *,
+    approved_row_ids: list[str],
+    rejected_row_ids: list[str],
+) -> Path:
+    manifest = json.loads(staged.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    path = staged.with_suffix(".decisions.json")
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "batch_id": manifest["batch_id"],
+                "source_sha256": manifest["source_sha256"],
+                "staged_sha256": _file_sha256(staged),
+                "rows_total": len(approved_row_ids) + len(rejected_row_ids),
+                "rows_approved": len(approved_row_ids),
+                "rows_rejected": len(rejected_row_ids),
+                "approved_row_ids": approved_row_ids,
+                "rejected_row_ids": rejected_row_ids,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_ensure_relationship_leads_template_writes_header(tmp_path: Path) -> None:
@@ -242,6 +276,193 @@ def test_review_cannot_approve_validation_blocked_row(tmp_path: Path) -> None:
         )
 
 
+def test_bulk_review_only_updates_pending_rows_and_override_is_explicit(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "relationship_leads.csv"
+    source.write_text(
+        "source_type,full_name,company,title,linkedin_url,email,company_website,company_linkedin_url,location,school,program,grad_year,relationship_signal,contact_type,priority,target_lists,tags,source_url,notes\n"
+        "peoplegrove,Manual Reject,Low Fit Co,Sales Lead,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/reject,\n"
+        "peoplegrove,Keep Product,Product Co,Product Manager,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/keep,\n",
+        encoding="utf-8",
+    )
+    summary = stage_relationship_leads(source)
+    staged = Path(str(summary["staged_path"]))
+    with staged.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    rejected_id = rows[0]["row_id"]
+    approved_id = rows[1]["row_id"]
+
+    review_staged_relationship_leads(
+        staged,
+        reviewer="manual-reviewer",
+        reject_row_ids=(rejected_id,),
+    )
+    review_staged_relationship_leads(
+        staged,
+        reviewer="bulk-reviewer",
+        approve_all_ready=True,
+    )
+    with staged.open(newline="", encoding="utf-8") as handle:
+        by_id = {row["row_id"]: row for row in csv.DictReader(handle)}
+
+    assert by_id[rejected_id]["review_status"] == "rejected"
+    assert by_id[rejected_id]["reviewed_by"] == "manual-reviewer"
+    assert by_id[approved_id]["review_status"] == "approved"
+
+    with pytest.raises(RelationshipLeadReviewError, match="already rejected"):
+        review_staged_relationship_leads(
+            staged,
+            reviewer="override-reviewer",
+            approve_row_ids=(rejected_id,),
+        )
+
+    result = review_staged_relationship_leads(
+        staged,
+        reviewer="override-reviewer",
+        approve_row_ids=(rejected_id,),
+        override_finalized=True,
+    )
+    assert result["finalized_override_count"] == 1
+    assert result["finalized_override_row_ids"] == [rejected_id]
+
+
+def test_complete_decision_artifact_is_sha_bound_and_importable(tmp_path: Path) -> None:
+    source = tmp_path / "relationship_leads.csv"
+    source.write_text(
+        "source_type,full_name,company,title,linkedin_url,email,company_website,company_linkedin_url,location,school,program,grad_year,relationship_signal,contact_type,priority,target_lists,tags,source_url,notes\n"
+        "peoplegrove,Ready Product,Product Co,Product Manager,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/ready,\n"
+        "peoplegrove,Blocked Person,Blocked Co,Unknown,not-a-url,,,,,,,,,,,,,https://usc.peoplegrove.com/person/blocked,\n",
+        encoding="utf-8",
+    )
+    summary = stage_relationship_leads(source)
+    staged = Path(str(summary["staged_path"]))
+    with staged.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    ready = next(row for row in rows if row["validation_status"] == "ready")
+    blocked = next(row for row in rows if row["validation_status"] == "blocked")
+    decision_path = _write_complete_decision_artifact(
+        staged,
+        approved_row_ids=[ready["row_id"]],
+        rejected_row_ids=[blocked["row_id"]],
+    )
+
+    review = review_staged_relationship_leads(
+        staged,
+        reviewer="artifact-reviewer",
+        decision_artifact_path=decision_path,
+    )
+
+    binding = review["decision_artifact"]
+    assert binding["sha256"] == _file_sha256(decision_path)
+    assert binding["source_sha256"] == json.loads(
+        staged.with_suffix(".manifest.json").read_text(encoding="utf-8")
+    )["source_sha256"]
+    assert review["rows_approved"] == 1
+    assert review["rows_rejected"] == 1
+
+    with pytest.raises(RelationshipLeadReviewError, match="bound to a complete"):
+        review_staged_relationship_leads(
+            staged,
+            reviewer="row-reviewer",
+            approve_row_ids=(ready["row_id"],),
+        )
+
+    imported = import_relationship_leads(
+        tmp_path / "workspace",
+        source_path=staged,
+        execute=True,
+    )
+    assert imported["rows_selected"] == 1
+    assert imported["contacts_added"] == 1
+
+
+def test_decision_artifact_must_partition_every_row_and_match_counts(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "relationship_leads.csv"
+    source.write_text(
+        "source_type,full_name,company,title,linkedin_url,email,company_website,company_linkedin_url,location,school,program,grad_year,relationship_signal,contact_type,priority,target_lists,tags,source_url,notes\n"
+        "peoplegrove,One Product,One Co,Product Manager,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/one,\n"
+        "peoplegrove,Two Product,Two Co,Product Manager,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/two,\n",
+        encoding="utf-8",
+    )
+    summary = stage_relationship_leads(source)
+    staged = Path(str(summary["staged_path"]))
+    original_staged = staged.read_bytes()
+    with staged.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    decision_path = _write_complete_decision_artifact(
+        staged,
+        approved_row_ids=[rows[0]["row_id"]],
+        rejected_row_ids=[],
+    )
+
+    with pytest.raises(RelationshipLeadReviewError, match="partition every staged row"):
+        review_staged_relationship_leads(
+            staged,
+            reviewer="artifact-reviewer",
+            decision_artifact_path=decision_path,
+        )
+
+    decision_path = _write_complete_decision_artifact(
+        staged,
+        approved_row_ids=[row["row_id"] for row in rows],
+        rejected_row_ids=[],
+    )
+    wrong_source = json.loads(decision_path.read_text(encoding="utf-8"))
+    wrong_source["source_sha256"] = "0" * 64
+    decision_path.write_text(
+        json.dumps(wrong_source, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RelationshipLeadReviewError, match="original capture"):
+        review_staged_relationship_leads(
+            staged,
+            reviewer="artifact-reviewer",
+            decision_artifact_path=decision_path,
+        )
+
+    assert staged.read_bytes() == original_staged
+
+
+def test_tampered_bound_decision_artifact_blocks_import_without_tracker_writes(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "relationship_leads.csv"
+    source.write_text(
+        "source_type,full_name,company,title,linkedin_url,email,company_website,company_linkedin_url,location,school,program,grad_year,relationship_signal,contact_type,priority,target_lists,tags,source_url,notes\n"
+        "peoplegrove,Ready Product,Product Co,Product Manager,,,,,,,,,,,,,,https://usc.peoplegrove.com/person/ready,\n",
+        encoding="utf-8",
+    )
+    summary = stage_relationship_leads(source)
+    staged = Path(str(summary["staged_path"]))
+    with staged.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    decision_path = _write_complete_decision_artifact(
+        staged,
+        approved_row_ids=[row["row_id"]],
+        rejected_row_ids=[],
+    )
+    review_staged_relationship_leads(
+        staged,
+        reviewer="artifact-reviewer",
+        decision_artifact_path=decision_path,
+    )
+    decision_path.write_text(
+        decision_path.read_text(encoding="utf-8").replace(
+            '"rows_approved": 1', '"rows_approved": 0'
+        ),
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+
+    with pytest.raises(RelationshipLeadReviewError, match="counts do not match"):
+        import_relationship_leads(workspace, source_path=staged, execute=True)
+
+    assert not workspace.exists()
+
+
 def test_execute_rejects_raw_unreviewed_file_without_creating_workspace(tmp_path: Path) -> None:
     source = tmp_path / "relationship_leads.csv"
     source.write_text(
@@ -254,6 +475,55 @@ def test_execute_rejects_raw_unreviewed_file_without_creating_workspace(tmp_path
     with pytest.raises(RelationshipLeadReviewError, match="staged and reviewed"):
         import_relationship_leads(workspace, source_path=source, execute=True)
 
+    assert not workspace.exists()
+
+
+def test_execute_rejects_missing_empty_and_unreviewed_staged_inputs_without_writes(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    missing = tmp_path / "missing.staged.csv"
+    with pytest.raises(FileNotFoundError):
+        import_relationship_leads(workspace, source_path=missing, execute=True)
+    assert not missing.exists()
+    assert not workspace.exists()
+
+    empty_source = tmp_path / "empty.csv"
+    empty_source.write_text(
+        ",".join(RELATIONSHIP_LEAD_FIELDS) + "\n",
+        encoding="utf-8",
+    )
+    empty_summary = stage_relationship_leads(empty_source)
+    empty_staged = Path(str(empty_summary["staged_path"]))
+    empty_before = empty_staged.read_bytes()
+    with pytest.raises(RelationshipLeadReviewError, match="non-empty staged"):
+        import_relationship_leads(workspace, source_path=empty_staged, execute=True)
+    assert empty_staged.read_bytes() == empty_before
+    assert not workspace.exists()
+
+    source = tmp_path / "unreviewed.csv"
+    with source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RELATIONSHIP_LEAD_FIELDS)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "source_type": "peoplegrove",
+                "full_name": "Pending Product",
+                "company": "Pending Co",
+                "title": "Product Manager",
+                "source_url": "https://usc.peoplegrove.com/person/pending",
+            }
+        )
+    unreviewed_summary = stage_relationship_leads(source)
+    unreviewed_staged = Path(str(unreviewed_summary["staged_path"]))
+    unreviewed_before = unreviewed_staged.read_bytes()
+    with pytest.raises(RelationshipLeadReviewError, match="Review manifest not found"):
+        import_relationship_leads(
+            workspace,
+            source_path=unreviewed_staged,
+            execute=True,
+        )
+    assert unreviewed_staged.read_bytes() == unreviewed_before
     assert not workspace.exists()
 
 

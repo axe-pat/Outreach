@@ -76,6 +76,8 @@ REQUIRED_RELATIONSHIP_STAGE_FIELDS = {
     "review_status",
 }
 VALID_REVIEW_STATUSES = {"pending", "approved", "rejected"}
+FINAL_REVIEW_STATUSES = {"approved", "rejected"}
+RELATIONSHIP_DECISION_SCHEMA_VERSION = 1
 VALID_PRIORITIES = {"low", "medium", "high"}
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -483,6 +485,8 @@ def review_staged_relationship_leads(
     reject_row_ids: tuple[str, ...] = (),
     approve_all_ready: bool = False,
     reject_all_blocked: bool = False,
+    decision_artifact_path: Path | None = None,
+    override_finalized: bool = False,
     review_notes: str = "",
 ) -> dict[str, object]:
     staged_path = staged_path.resolve()
@@ -497,22 +501,55 @@ def review_staged_relationship_leads(
             + ", ".join(sorted(missing))
         )
     rows = [row for _, row in numbered_rows]
-    _assert_stage_manifest(staged_path, rows)
+    stage_manifest = _assert_stage_manifest(staged_path, rows)
+    review_manifest_path = relationship_leads_review_manifest_path(staged_path)
+    if decision_artifact_path is None and review_manifest_path.exists():
+        try:
+            existing_review_manifest = json.loads(
+                review_manifest_path.read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError) as exc:
+            raise RelationshipLeadReviewError(
+                f"Existing review manifest is unreadable: {review_manifest_path}"
+            ) from exc
+        if isinstance(existing_review_manifest, dict) and isinstance(
+            existing_review_manifest.get("decision_artifact"), dict
+        ):
+            raise RelationshipLeadReviewError(
+                "This review is bound to a complete decision artifact; provide a new "
+                "decision artifact to update or reseal it"
+            )
     rows_by_id = {_clean(row.get("row_id")): row for row in rows}
     approve = {_clean(item) for item in approve_row_ids if _clean(item)}
     reject = {_clean(item) for item in reject_row_ids if _clean(item)}
-    if approve_all_ready:
-        approve.update(
-            row_id
-            for row_id, row in rows_by_id.items()
-            if _clean(row.get("validation_status")) == "ready"
+    decision_binding: dict[str, object] | None = None
+    if decision_artifact_path is not None:
+        if approve or reject or approve_all_ready or reject_all_blocked:
+            raise RelationshipLeadReviewError(
+                "A decision artifact is a complete decision set; do not combine it with "
+                "row selectors or bulk review flags"
+            )
+        approve, reject, decision_binding = _load_relationship_decision_artifact(
+            decision_artifact_path,
+            rows=rows,
+            stage_manifest=stage_manifest,
+            expected_staged_sha256=_file_sha256(staged_path),
         )
-    if reject_all_blocked:
-        reject.update(
-            row_id
-            for row_id, row in rows_by_id.items()
-            if _clean(row.get("validation_status")) == "blocked"
-        )
+    else:
+        if approve_all_ready:
+            approve.update(
+                row_id
+                for row_id, row in rows_by_id.items()
+                if _clean(row.get("validation_status")) == "ready"
+                and _clean(row.get("review_status")).lower() == "pending"
+            )
+        if reject_all_blocked:
+            reject.update(
+                row_id
+                for row_id, row in rows_by_id.items()
+                if _clean(row.get("validation_status")) == "blocked"
+                and _clean(row.get("review_status")).lower() == "pending"
+            )
     if not approve and not reject:
         raise RelationshipLeadReviewError("select at least one row to approve or reject")
     overlap = approve & reject
@@ -524,8 +561,12 @@ def review_staged_relationship_leads(
     if unknown:
         raise RelationshipLeadReviewError("Unknown row IDs: " + ", ".join(sorted(unknown)))
 
-    reviewed_at = _utc_now()
-    for row_id in approve | reject:
+    desired_statuses = {
+        **{row_id: "approved" for row_id in approve},
+        **{row_id: "rejected" for row_id in reject},
+    }
+    finalized_overrides: list[str] = []
+    for row_id, desired_status in desired_statuses.items():
         row = rows_by_id[row_id]
         lead = _relationship_lead_from_staged_row(row)
         actual_fingerprint = _relationship_lead_fingerprint(lead)
@@ -533,27 +574,51 @@ def review_staged_relationship_leads(
             raise RelationshipLeadReviewError(
                 f"Row {row_id} changed after staging; restage before reviewing"
             )
-        if row_id in approve and _clean(row.get("validation_status")) != "ready":
+        if desired_status == "approved" and _clean(row.get("validation_status")) != "ready":
             raise RelationshipLeadReviewError(
                 f"Row {row_id} is validation-blocked and cannot be approved"
             )
-        row["review_status"] = "approved" if row_id in approve else "rejected"
-        row["reviewed_by"] = reviewer
-        row["reviewed_at"] = reviewed_at
-        if review_notes:
-            row["review_notes"] = _clean(review_notes)
+        current_status = _clean(row.get("review_status")).lower()
+        if (
+            current_status in FINAL_REVIEW_STATUSES
+            and current_status != desired_status
+        ):
+            if not override_finalized:
+                raise RelationshipLeadReviewError(
+                    f"Row {row_id} is already {current_status}; pass override_finalized "
+                    f"to change it to {desired_status}"
+                )
+            finalized_overrides.append(row_id)
+
+    reviewed_at = _utc_now()
+    for row_id in approve | reject:
+        row = rows_by_id[row_id]
+        desired_status = desired_statuses[row_id]
+        current_status = _clean(row.get("review_status")).lower()
+        needs_provenance = not (
+            _clean(row.get("reviewed_by")) and _clean(row.get("reviewed_at"))
+        )
+        if current_status != desired_status or needs_provenance or review_notes:
+            row["review_status"] = desired_status
+            row["reviewed_by"] = reviewer
+            row["reviewed_at"] = reviewed_at
+            if review_notes:
+                row["review_notes"] = _clean(review_notes)
 
     _write_csv_atomic(staged_path, RELATIONSHIP_LEAD_STAGE_FIELDS, rows)
     counts = _relationship_review_counts(rows)
-    review_manifest_path = relationship_leads_review_manifest_path(staged_path)
     review_manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "staged_path": str(staged_path),
         "staged_sha256": _file_sha256(staged_path),
         "reviewed_at": reviewed_at,
         "reviewer": reviewer,
+        "finalized_override_count": len(finalized_overrides),
+        "finalized_override_row_ids": sorted(finalized_overrides),
         **counts,
     }
+    if decision_binding is not None:
+        review_manifest["decision_artifact"] = decision_binding
     _write_json_atomic(review_manifest_path, review_manifest)
     return {**review_manifest, "review_manifest_path": str(review_manifest_path)}
 
@@ -585,6 +650,16 @@ def import_relationship_leads(
         "rows_pending": len(all_leads),
     }
 
+    if execute and not staged:
+        raise RelationshipLeadReviewError(
+            "Execute import requires a staged and reviewed CSV. Run stage-relationship-leads, "
+            "review-relationship-leads, then import the staged file."
+        )
+    if execute and not all_leads:
+        raise RelationshipLeadReviewError(
+            "Execute import requires a non-empty staged relationship lead batch"
+        )
+
     if staged:
         review_counts = _relationship_review_counts(rows)
         statuses = {
@@ -592,15 +667,10 @@ def import_relationship_leads(
             for row in rows
         }
         leads = [lead for lead in all_leads if statuses.get(lead.row_id) == "approved"]
-        if execute and all_leads:
+        if execute:
             _assert_relationship_review_gate(source_path, rows, all_leads)
     else:
         leads = [lead for lead in all_leads if lead.source_row_number not in issue_rows]
-        if execute and all_leads:
-            raise RelationshipLeadReviewError(
-                "Execute import requires a staged and reviewed CSV. Run stage-relationship-leads, "
-                "review-relationship-leads, then import the staged file."
-            )
 
     workbook = OutreachWorkbook(workbook_dir)
     organizations = workbook.list_organizations()
@@ -826,10 +896,11 @@ def _write_relationship_source_readme(path: Path, source_key: str) -> None:
             "",
             f"1. Stage: `python main.py stage-relationship-leads --source-path {path}`",
             "2. Inspect the staged CSV and its validation issues.",
-            "3. Record explicit approvals/rejections with `review-relationship-leads`.",
+            "3. Record explicit row decisions, or pass a complete SHA-bound decision JSON to `review-relationship-leads --decision-artifact`.",
             "4. Import the reviewed staged CSV with `import-relationship-leads --execute`.",
             "",
-            "Raw capture CSVs cannot be executed directly.",
+            "Bulk review flags affect pending rows only; changing a finalized decision requires `--override-finalized`.",
+            "Raw, missing, empty, or unreviewed capture CSVs cannot be executed directly.",
             "",
         ]
     )
@@ -1075,6 +1146,160 @@ def _relationship_review_counts(rows: list[dict[str, str]]) -> dict[str, int]:
     }
 
 
+def _load_relationship_decision_artifact(
+    path: Path,
+    *,
+    rows: list[dict[str, str]],
+    stage_manifest: dict[str, object],
+    expected_staged_sha256: str,
+) -> tuple[set[str], set[str], dict[str, object]]:
+    path = path.resolve()
+    if not path.is_file():
+        raise RelationshipLeadReviewError(
+            f"Relationship review decision artifact not found: {path}"
+        )
+    payload = _load_json_object_without_duplicate_keys(path)
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != RELATIONSHIP_DECISION_SCHEMA_VERSION
+    ):
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact schema_version must be 1"
+        )
+
+    def row_ids(field: str) -> set[str]:
+        raw = payload.get(field)
+        if not isinstance(raw, list):
+            raise RelationshipLeadReviewError(
+                f"Relationship review decision artifact {field} must be a JSON list"
+            )
+        values: list[str] = []
+        for value in raw:
+            if not isinstance(value, str) or not _clean(value):
+                raise RelationshipLeadReviewError(
+                    f"Relationship review decision artifact {field} contains a blank or non-string row ID"
+                )
+            values.append(_clean(value))
+        if len(values) != len(set(values)):
+            raise RelationshipLeadReviewError(
+                f"Relationship review decision artifact {field} contains duplicate row IDs"
+            )
+        return set(values)
+
+    def count(field: str) -> int:
+        value = payload.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise RelationshipLeadReviewError(
+                f"Relationship review decision artifact {field} must be a non-negative integer"
+            )
+        return value
+
+    approved = row_ids("approved_row_ids")
+    rejected = row_ids("rejected_row_ids")
+    if approved & rejected:
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact assigns rows to both approved and rejected"
+        )
+
+    staged_row_ids = [_clean(row.get("row_id")) for row in rows]
+    if any(not row_id for row_id in staged_row_ids) or len(staged_row_ids) != len(
+        set(staged_row_ids)
+    ):
+        raise RelationshipLeadReviewError(
+            "Staged relationship rows must have unique, non-empty row IDs"
+        )
+    staged_row_id_set = set(staged_row_ids)
+    decided = approved | rejected
+    if decided != staged_row_id_set:
+        missing = sorted(staged_row_id_set - decided)
+        unknown = sorted(decided - staged_row_id_set)
+        details: list[str] = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if unknown:
+            details.append("unknown=" + ",".join(unknown))
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact must partition every staged row exactly once"
+            + (": " + "; ".join(details) if details else "")
+        )
+
+    rows_total = count("rows_total")
+    rows_approved = count("rows_approved")
+    rows_rejected = count("rows_rejected")
+    if rows_total != len(rows) or rows_approved != len(approved) or rows_rejected != len(
+        rejected
+    ):
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact counts do not match its row-ID partition"
+        )
+    if rows_approved + rows_rejected != rows_total:
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact counts are not a complete partition"
+        )
+
+    batch_id = _clean(payload.get("batch_id"))
+    source_sha256 = _clean(payload.get("source_sha256"))
+    staged_sha256 = _clean(payload.get("staged_sha256"))
+    if batch_id != _clean(stage_manifest.get("batch_id")):
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact batch_id does not match the stage manifest"
+        )
+    if source_sha256 != _clean(stage_manifest.get("source_sha256")):
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact source_sha256 does not match the original capture"
+        )
+    if staged_sha256 != expected_staged_sha256:
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact staged_sha256 does not match the staged CSV it was prepared for"
+        )
+
+    binding: dict[str, object] = {
+        "path": str(path),
+        "sha256": _file_sha256(path),
+        "schema_version": schema_version,
+        "batch_id": batch_id,
+        "source_sha256": source_sha256,
+        "staged_sha256": staged_sha256,
+        "rows_total": rows_total,
+        "rows_approved": rows_approved,
+        "rows_rejected": rows_rejected,
+    }
+    return approved, rejected, binding
+
+
+def _load_json_object_without_duplicate_keys(path: Path) -> dict[str, object]:
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for key, value in pairs:
+            if key in payload:
+                raise RelationshipLeadReviewError(
+                    f"Relationship review decision artifact contains duplicate JSON key {key!r}"
+                )
+            payload[key] = value
+        return payload
+
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
+    except json.JSONDecodeError as exc:
+        raise RelationshipLeadReviewError(
+            f"Relationship review decision artifact is invalid JSON: {path}"
+        ) from exc
+    except OSError as exc:
+        raise RelationshipLeadReviewError(
+            f"Relationship review decision artifact is unreadable: {path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RelationshipLeadReviewError(
+            "Relationship review decision artifact must contain one JSON object"
+        )
+    return payload
+
+
 def _assert_stage_manifest(staged_path: Path, rows: list[dict[str, str]]) -> dict[str, object]:
     manifest_path = relationship_leads_manifest_path(staged_path)
     if not manifest_path.exists():
@@ -1101,7 +1326,7 @@ def _assert_relationship_review_gate(
     rows: list[dict[str, str]],
     leads: list[RelationshipLead],
 ) -> None:
-    _assert_stage_manifest(staged_path, rows)
+    stage_manifest = _assert_stage_manifest(staged_path, rows)
     review_manifest_path = relationship_leads_review_manifest_path(staged_path)
     if not review_manifest_path.exists():
         raise RelationshipLeadReviewError(
@@ -1117,6 +1342,11 @@ def _assert_relationship_review_gate(
         raise RelationshipLeadReviewError(
             "Staged CSV changed after review; restage or record review decisions again"
         )
+    _assert_relationship_decision_artifact_binding(
+        review_manifest,
+        stage_manifest=stage_manifest,
+        rows=rows,
+    )
 
     issues = validate_relationship_leads(leads)
     issue_rows = {issue.row_number for issue in issues}
@@ -1146,6 +1376,62 @@ def _assert_relationship_review_gate(
             errors.append(f"{row_id} changed after staging")
     if errors:
         raise RelationshipLeadReviewError("Review gate blocked import: " + "; ".join(errors))
+
+
+def _assert_relationship_decision_artifact_binding(
+    review_manifest: dict[str, object],
+    *,
+    stage_manifest: dict[str, object],
+    rows: list[dict[str, str]],
+) -> None:
+    raw_binding = review_manifest.get("decision_artifact")
+    if raw_binding is None:
+        return
+    if not isinstance(raw_binding, dict):
+        raise RelationshipLeadReviewError(
+            "Review manifest decision_artifact binding is malformed"
+        )
+    decision_path = Path(_clean(raw_binding.get("path")))
+    expected_staged_sha256 = _clean(raw_binding.get("staged_sha256"))
+    if not decision_path.is_absolute() or not expected_staged_sha256:
+        raise RelationshipLeadReviewError(
+            "Review manifest decision_artifact binding lacks an absolute path or staged SHA"
+        )
+    approved, rejected, actual_binding = _load_relationship_decision_artifact(
+        decision_path,
+        rows=rows,
+        stage_manifest=stage_manifest,
+        expected_staged_sha256=expected_staged_sha256,
+    )
+    for key in (
+        "path",
+        "sha256",
+        "schema_version",
+        "batch_id",
+        "source_sha256",
+        "staged_sha256",
+        "rows_total",
+        "rows_approved",
+        "rows_rejected",
+    ):
+        if raw_binding.get(key) != actual_binding.get(key):
+            raise RelationshipLeadReviewError(
+                f"Review manifest decision_artifact binding changed for {key}"
+            )
+    actual_approved = {
+        _clean(row.get("row_id"))
+        for row in rows
+        if _clean(row.get("review_status")).lower() == "approved"
+    }
+    actual_rejected = {
+        _clean(row.get("row_id"))
+        for row in rows
+        if _clean(row.get("review_status")).lower() == "rejected"
+    }
+    if actual_approved != approved or actual_rejected != rejected:
+        raise RelationshipLeadReviewError(
+            "Staged review decisions do not match the bound decision artifact"
+        )
 
 
 def _relationship_workbook_conflicts(

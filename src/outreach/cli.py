@@ -1713,6 +1713,7 @@ def execute_linkedin_company_run(
     include_pass: list[str] | None = None,
     exclude_pass: list[str] | None = None,
     enable_marshall: bool = False,
+    enable_affinity_expansion: bool = False,
     force_broad_fallback: bool = False,
     note_context: dict | None = None,
     target_role_title: str = "",
@@ -1897,10 +1898,14 @@ def execute_linkedin_company_run(
         ex_companies=settings.search.ex_companies,
         shared_history_keywords=settings.search.shared_history_keywords,
     )
-    affinity_passes = filter_affinity_pass_definitions(
-        affinity_plan,
-        include_passes=tuple(include_pass or []),
-        exclude_passes=tuple(exclude_pass or []),
+    affinity_passes = (
+        filter_affinity_pass_definitions(
+            affinity_plan,
+            include_passes=tuple(include_pass or []),
+            exclude_passes=tuple(exclude_pass or []),
+        )
+        if enable_affinity_expansion
+        else {}
     )
     pass_definitions.update(affinity_passes)
     ordered_passes = sorted(
@@ -2030,14 +2035,19 @@ def execute_linkedin_company_run(
     affinity_summary = affinity_plan.as_dict()
     affinity_summary.update(
         {
+            "feature_enabled": enable_affinity_expansion,
             "enabled_passes": list(affinity_passes),
             "high_affinity_candidate_count": sum(
                 bool(high_affinity_candidate_signals(candidate))
                 for candidate in scored_candidates
             ),
-            "recommended_send_cap": recommend_affinity_send_cap(
-                scored_candidates,
-                plan=affinity_plan,
+            "recommended_send_cap": (
+                recommend_affinity_send_cap(
+                    scored_candidates,
+                    plan=affinity_plan,
+                )
+                if enable_affinity_expansion
+                else 0
             ),
         }
     )
@@ -8184,7 +8194,7 @@ def write_artifact_daily_report(
     <section><h2>Startup adapter and lane detail</h2>{startup_adapter_rows and '<table><thead><tr><th>Source</th><th>Lane</th><th>Status</th><th>Fetched</th><th>Discovered</th><th>Selected/new</th></tr></thead><tbody>' + startup_adapter_rows + '</tbody></table>' or '<div class="card">Startup adapters did not run or did not record exact artifacts.</div>'}</section>
     <section><h2>Maintenance completed</h2><div class="grid"><div class="card"><h3>Website resolution</h3><p>{esc(website_summary)}</p></div><div class="card"><h3>Company context enrichment</h3><p>{esc(enrichment_summary)}</p></div><div class="card"><h3>Campaign plan created</h3><p>{esc(campaign_summary)}</p></div></div></section>
     <section><h2>Nightly stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
-    <section class="card"><h2>{esc(html_comms_heading)}</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
+    <section class="card"><h2>{esc(html_comms_heading)}</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Profile sync: <strong>{esc(style_sync_summary.get('strong_added', 0))}</strong> positive examples added · <strong>{esc(style_sync_summary.get('weak_added', 0))}</strong> negative examples added · <strong>{esc(style_sync_summary.get('duplicates_skipped', 0))}</strong> already learned.</p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
   </main>
 </body>
 </html>
@@ -8589,6 +8599,12 @@ def run_track_2_daily_plan_cmd(
         bool,
         typer.Option(help="Use startup pool size to adapt invite score gate"),
     ] = True,
+    enable_affinity_expansion: Annotated[
+        bool,
+        typer.Option(
+            help="Canary-only: add high-affinity LinkedIn search passes and allow bounded per-company cap lifts"
+        ),
+    ] = False,
     network_enrichment: Annotated[
         bool,
         typer.Option(help="Allow network fetches for context-enrichment phase when executing"),
@@ -9181,6 +9197,7 @@ def run_track_2_daily_plan_cmd(
                     company=company,
                     dry_run=True,
                     company_mode=_company_mode_for_org(org) if org else "default",
+                    enable_affinity_expansion=enable_affinity_expansion,
                     target_role_title=str(item.get("target_role") or ""),
                 )
                 with pipeline_artifact.open(encoding="utf-8") as handle:
@@ -9998,7 +10015,7 @@ def run_supervised_e2e_pipeline(
         },
         "stages": stages,
         "remaining_known_gaps": [
-            "PeopleGrove/USC and recent-MBA-PM source templates are wired, but rows still need to be manually captured from those portals/searches.",
+            "The July 11 PeopleGrove capture and curation are complete, but its review partition must be reconciled and sealed before any import.",
             "cold email drafts stay capped at zero until emails exist and the communication engine is approved.",
             "external email finder is wired but disabled unless --external-email-finder is passed with PROSPEO_API_KEY or HUNTER_API_KEY configured.",
         ],
@@ -10340,11 +10357,25 @@ def review_relationship_leads_cmd(
     ] = None,
     approve_all_ready: Annotated[
         bool,
-        typer.Option(help="Approve every validation-ready row after reviewing the staged CSV"),
+        typer.Option(help="Approve every still-pending validation-ready row"),
     ] = False,
     reject_all_blocked: Annotated[
         bool,
-        typer.Option(help="Reject every validation-blocked row"),
+        typer.Option(help="Reject every still-pending validation-blocked row"),
+    ] = False,
+    decision_artifact: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Complete JSON row-ID decision partition bound to the staged and source SHA-256 values"
+            )
+        ),
+    ] = None,
+    override_finalized: Annotated[
+        bool,
+        typer.Option(
+            help="Allow explicit row or decision-artifact choices to change an already finalized decision"
+        ),
     ] = False,
     review_notes: Annotated[
         str,
@@ -10360,6 +10391,8 @@ def review_relationship_leads_cmd(
             reject_row_ids=tuple(reject_row or ()),
             approve_all_ready=approve_all_ready,
             reject_all_blocked=reject_all_blocked,
+            decision_artifact_path=decision_artifact,
+            override_finalized=override_finalized,
             review_notes=review_notes,
         )
     except (RelationshipLeadReviewError, FileNotFoundError) as exc:
@@ -10392,10 +10425,9 @@ def import_relationship_leads_cmd(
     """Preview raw/staged leads or import an explicitly reviewed one-time batch."""
     if source_key and source_path == DEFAULT_RELATIONSHIP_LEADS_PATH:
         source_path = relationship_source_default_path(source_key)
-    if execute and not source_path.exists():
+    if not source_path.exists():
         typer.echo(f"Relationship lead import blocked: source file not found: {source_path}", err=True)
         raise typer.Exit(code=2)
-    ensure_relationship_leads_template(source_path, source_key=source_key)
     try:
         summary = import_relationship_lead_seeds(
             workspace,
@@ -10407,6 +10439,7 @@ def import_relationship_leads_cmd(
         RelationshipLeadConflictError,
         RelationshipLeadReviewError,
         RelationshipLeadValidationError,
+        FileNotFoundError,
     ) as exc:
         typer.echo(f"Relationship lead import blocked: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -10799,6 +10832,10 @@ def run(
         bool,
         typer.Option(help="Enable USC Marshall passes for this run"),
     ] = False,
+    enable_affinity_expansion: Annotated[
+        bool,
+        typer.Option(help="Canary-only: add high-affinity LinkedIn search passes"),
+    ] = False,
     force_broad_fallback: Annotated[
         bool,
         typer.Option(help="Force the broad fallback pass even if the pool is already healthy"),
@@ -10837,6 +10874,7 @@ def run(
         include_pass=include_pass,
         exclude_pass=exclude_pass,
         enable_marshall=enable_marshall,
+        enable_affinity_expansion=enable_affinity_expansion,
         force_broad_fallback=force_broad_fallback,
     )
     if not auto_send:
@@ -11074,6 +11112,10 @@ def dispatch_linkedin_company_queue(
         bool,
         typer.Option(help="Actually run the LinkedIn company pipeline instead of only planning dispatch"),
     ] = False,
+    enable_affinity_expansion: Annotated[
+        bool,
+        typer.Option(help="Canary-only: add high-affinity LinkedIn passes to dispatched runs"),
+    ] = False,
 ) -> None:
     settings = OutreachSettings()
     workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
@@ -11104,6 +11146,7 @@ def dispatch_linkedin_company_queue(
                 company=item.company,
                 dry_run=True,
                 company_mode=item.company_mode,
+                enable_affinity_expansion=enable_affinity_expansion,
             )
             run_entry["artifact"] = str(artifact)
         planned_runs.append(run_entry)

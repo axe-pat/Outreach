@@ -629,6 +629,8 @@ def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_p
     html_text = html_path.read_text(encoding="utf-8")
     assert "Messages to review" in html_text
     assert "Auto-handled messages (this run)" in html_text
+    assert "Profile sync:" in html_text
+    assert "positive examples added" in html_text
 
 
 def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Path) -> None:

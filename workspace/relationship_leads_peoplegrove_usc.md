@@ -15,6 +15,8 @@ Recommended columns:
 - `school`, `program`, `grad_year`
 - `relationship_signal`
 - `notes`
+- `source_url` or `source_record_id` (required provenance for PeopleGrove)
+- `capture_batch`, `captured_at`, `captured_by`
 
 Defaults applied during import when a row leaves fields blank:
 
@@ -28,3 +30,12 @@ Capture rules:
 - Use this for PeopleGrove/Trojan Network/USC manual captures.
 - Prioritize founders, C-suite, product leaders, operators, recruiters, and startup-adjacent USC people.
 - Paste one person per row. company and full_name are required; LinkedIn URL is strongly preferred.
+
+Review workflow:
+
+1. Stage: `python main.py stage-relationship-leads --source-path workspace/relationship_leads_peoplegrove_usc.csv --source-key peoplegrove_usc`
+2. Inspect the staged CSV and its validation issues.
+3. Record explicit approvals/rejections with `review-relationship-leads`.
+4. Import the reviewed staged CSV with `import-relationship-leads --execute`.
+
+Raw capture CSVs cannot be executed directly.

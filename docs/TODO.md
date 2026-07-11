@@ -1,6 +1,6 @@
 # TODO
 
-## Operating Priorities: Items 2–7 Implemented, Live Validation Next
+## Operating Priorities: Core Architecture Implemented, Live Validation Next
 
 The objective is not maximum messages or a perfect database. It is to create
 enough high-quality conversations and live application paths to land a product
@@ -28,10 +28,12 @@ paths visible instead of accidentally filtering them out.
 3. **IMPLEMENTED — review and promote independently discovered companies.**
    Feed signals can become candidate companies without already existing in
    `organizations.csv`. Dedupe, provenance, the five-part fit rubric, editable
-   review state, and JSON/CSV watchlist outputs are in place. Promotion into the
+   review state, and JSON/CSV watchlist outputs are in place. Public startup/news
+   RSS feeds and reviewed CSV/JSON imports now use the same candidate contract.
+   Promotion into the
    company tracker requires both rubric qualification and explicit human
-   approval. Same-run YC/Built In startup discovery is also connected; next add
-   further company/news directories through the same input contract.
+   approval. Same-run YC/Built In startup discovery is also connected; tune the
+   broader feeds from real review yield rather than bypassing the gate.
 4. **IMPLEMENTED, LIVE GATE CLOSED — cold email and cross-channel cadence.**
    Tracker-backed guards now cover LinkedIn and email timing, maximum touches,
    replies/stops, same-day channel suppression, and distinct second LinkedIn
@@ -114,26 +116,39 @@ paths visible instead of accidentally filtering them out.
 
 ## Discovery Architecture
 
-- Evaluate a shared discovery layer that ingests both ResumeGenerator job pulls and Outreach startup/company sources into one canonical store before downstream actioning.
-- Design reverse cross-pollination from Outreach startup discovery back into application intake, ideally as a lightweight export/review step before any direct write into `jobs.xlsx`.
-- Add a high-affinity LinkedIn expansion pass for `application_plus_outreach` companies before sends:
+- [x] Build a shared discovery layer that consumes one exact ResumeGenerator
+  nightly/action-queue artifact plus Outreach company, watchlist, and warm-contact
+  evidence. `src/outreach/shared_discovery.py` normalizes and dedupes by company,
+  preserves roles/provenance/review state, and writes a run-stamped JSON/CSV queue
+  whose embedded scope distinguishes the exact ResumeGenerator run from the
+  Outreach/watchlist snapshots merged alongside it.
+- [x] Keep reverse cross-pollination review-first: Outreach-only companies surface
+  as company/research actions in the shared queue and never write directly into
+  `jobs.xlsx`. A live role remains required before the application lane owns it.
+- [x] Add a high-affinity LinkedIn expansion pass for
+  `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
   - add targeted passes for shared-history keywords such as `Intuit`, `Gojek`, `USC`, `Marshall`, plus `Product`, `hiring`, and product leadership terms
-  - raise daily send caps for companies with strong job fit plus strong affinity signals
+  - raise per-company caps from 3 to at most 5 only when actual scored affinity
+    candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
-- Add a merged daily queue that combines:
+- [x] Add a merged daily queue that combines:
   - apply-backed outreach from `ResumeGenerator v1/discovery/jobs.xlsx`
   - hiring startups from YC / Built In discovery
   - optional warm-startup outreach targets without live roles
-- Decide whether the long-term canonical store should be one workbook with multiple sheets or a separate shared project/module.
+- [x] Use a separate shared module/artifact rather than another workbook. The
+  application tracker and Outreach entity workbook remain their lane-specific
+  systems of record; the merged queue is a run-stamped decision surface with
+  explicit per-input scope, not a third mutable tracker.
 - [x] Build the initial company-discovery and promotion loop: ingest candidates from
   LinkedIn home-feed signals, startup/company sources, hiring/funding/news, and
   warm-network activity; score candidates against the target rubric; and create
   a human-reviewed company watchlist. The goal is to discover strong companies
   before a role or search query happens to put them in front of us. Current
   inputs are the feed ledger plus same-run YC/Built In startup source artifacts;
-  add further source adapters through the same candidate contract rather than
-  bypassing review.
+  public TechCrunch Startups and Crunchbase News RSS adapters plus repeatable
+  reviewed CSV/JSON/JSONL inputs now use the same candidate contract rather than
+  bypassing review. Hacker News remains opt-in because it is noisier.
 - [x] Add a lightweight daily LinkedIn home-feed ingestion pass that records
   actionable posts with source URL, author/company, signal type, and a review
   decision. It must be a provenance-preserving discovery source, not a bulk
@@ -218,8 +233,25 @@ paths visible instead of accidentally filtering them out.
 
 ## Relationship Sources
 
-- Populate `workspace/relationship_leads.csv` from manual PeopleGrove/USC/recent-MBA-PM pulls when ready.
-- Keep these as one-time or low-frequency source imports, not daily scrapers.
+- [x] Complete the safe low-frequency relationship import path and its initial
+  proof-of-flow seed. The July 4 PeopleGrove/Trojan Network work placed 28 USC
+  profiles in the tracker; that is not complete source coverage. On July 11, an
+  additional official-public-source batch added 11 reviewed leads: 6 USC
+  founders/product leaders/operators and 5 recent MBA-to-product profiles, with
+  source URLs and no guessed emails.
+- [x] Require `validate → stage → explicit review → execute` for every later batch.
+  Staged batch/row IDs, SHA-256 manifests, provenance, dedupe, tamper detection,
+  and ambiguous workbook-identity conflict checks are implemented.
+- [ ] Finish curation/review/import of the signed-in, hundreds-scale
+  PeopleGrove/Trojan Network capture. The July 11 capture contains 1,845 unique
+  profiles across 12 USC role/education queries; its manifest records seven
+  exact-count queries as exhausted and five high-volume queries as deliberately
+  bounded best-match samples. Do not relabel those broad samples exhaustive.
+  Reject irrelevant students, unrelated functions/companies, malformed current
+  role/company parses, stale/empty cards, duplicates, and other junk, then
+  stage/review/import only outreach-useful people. Record raw,
+  rejected-by-reason, staged, approved, imported, and unchanged-on-rerun counts.
+  Keep the completed source low-frequency; do not make it a daily scraper.
 
 ## Role-Family Coverage
 

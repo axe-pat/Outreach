@@ -34,14 +34,17 @@ Note on AI usage: base LinkedIn note generation is deterministic. The optional `
 src/outreach/
   cadence.py
   cli.py
+  company_news.py
   company_watchlist.py
   config.py
   discovery/
   email_delivery.py
   linkedin_signals.py
+  linkedin_affinity.py
   models.py
   outcome_learning.py
   role_surface_monitor.py
+  shared_discovery.py
   tracking.py
   scoring.py
   services/
@@ -97,7 +100,9 @@ instead of creating one sheet per avenue.
 - `python main.py import-resume-jobs`
 - `python main.py import-story-fit-targets --source-path workspace/story_fit_targets.csv`
 - `python main.py init-relationship-leads`
-- `python main.py import-relationship-leads --source-path workspace/relationship_leads.csv`
+- `python main.py stage-relationship-leads --source-path workspace/relationship_leads.csv`
+- `python main.py review-relationship-leads --staged-path workspace/relationship_leads.staged.csv --reviewer Akshat`
+- `python main.py import-relationship-leads --source-path workspace/relationship_leads.staged.csv --execute`
 - `python main.py list-discovery-sources`
 - `python main.py discover-source --source-id yc_los_angeles --limit 25`
 - `python main.py discover-source --source-id yc_los_angeles --require-jobs-url --max-team-size 50 --min-batch-year 2024`
@@ -116,8 +121,10 @@ instead of creating one sheet per avenue.
 - `python main.py review-linkedin-followup-drafts --draft-artifact artifacts/...track-2-linkedin-followup-drafts.json`
 - `python main.py review-track-2-email-drafts --draft-artifact artifacts/...track-2-email-drafts.json`
 - `python main.py capture-linkedin-intelligence --max-scrolls 5 --max-items 100`
+- `python main.py capture-company-news --per-source-limit 30`
 - `python main.py review-linkedin-feed-signal <signal-id> --disposition company_candidate`
 - `python main.py build-company-discovery-review --run-id <run-id>`
+- `python -m outreach.shared_discovery --nightly-summary '../ResumeGenerator v1/discovery/source_validation/...nightly-pipeline-summary.json'`
 - `python main.py build-role-surface-report --source-metrics <run-source-metrics.json> --run-id <run-id>`
 - `python main.py build-outreach-cadence-report`
 - `python main.py build-outcome-learning-report`
@@ -147,6 +154,14 @@ Outreach-specific prioritization lives downstream. Use
 `workspace/company_overrides.csv` to manually bias certain companies toward
 startup outreach or deprioritize big-company outreach without changing
 `jobs.xlsx`.
+
+The cross-repo decision surface is `workspace/shared_discovery/shared_daily_queue.{json,csv}`.
+It consumes one exact ResumeGenerator nightly summary or action-queue artifact,
+merges application roles with YC/Built In candidates, approved company-watchlist
+entries, and warm Outreach contacts, then dedupes at company level. It never
+authorizes a send or writes back into `jobs.xlsx`; every row carries its gate,
+recommended action, and source provenance. The nightly runner now refreshes this
+queue after its current-run action queue is available.
 
 In the combined **Recruiting Engine**, this repo is the **Outreach Lane**:
 relationship targets come from application-plus-outreach jobs, startup org
@@ -193,19 +208,89 @@ python main.py init-relationship-leads --source-key peoplegrove_usc
 python main.py init-relationship-leads --source-key recent_mba_pm
 ```
 
-Preview or import:
+For a signed-in PeopleGrove browser pull, capture a JSON array with
+`full_name`, `headline`, `program`, `grad_year`, `member_type`, `source_url`,
+`source_record_id`, `queries`, and `labels`, then curate it before staging:
 
 ```bash
-python main.py import-relationship-leads --source-path workspace/relationship_leads.csv
-python main.py import-relationship-leads --source-path workspace/relationship_leads.csv --execute
-python main.py import-relationship-leads --source-key peoplegrove_usc --execute
-python main.py import-relationship-leads --source-key recent_mba_pm --execute
+python main.py curate-peoplegrove-capture \
+  --input-path artifacts/peoplegrove_capture.json \
+  --enrichment-path artifacts/peoplegrove_career_journey.json \
+  --output-path workspace/relationship_leads_peoplegrove_curated.csv \
+  --workspace workspace
 ```
+
+The curator accepts only an explicit current `TITLE at COMPANY`, `TITLE @
+COMPANY`, or founder/company separator. It retains product/product strategy,
+BizOps/strategy, program/operations leadership, founder/C-suite,
+recruiting/talent, and venture/startup-operator lanes. Students, interns, job
+seekers, vague or irrelevant titles, ambiguous companies, and duplicates are
+rejected. Its companion `.summary.json` records every decision, category,
+score, rejection reason, and source identity. The optional workspace argument
+is read-only and suppresses already-imported contacts.
+
+`--enrichment-path` is optional. Use it only for exact current roles captured
+from signed-in PeopleGrove Career Journey profiles when a directory-card headline
+does not expose a parseable current role/company. The enrichment is a strict,
+capture-bound JSON object: `schema_version`, `source_capture_sha256`,
+`captured_at`, `captured_by`, and a `profiles` mapping keyed by the exact
+`source_record_id` or canonical `source_url`. Each mapping contains those source
+identities plus non-empty `current_roles` entries with exactly `title`, `company`,
+`date_range`, and `location`. Unknown identities, duplicate IDs/URLs, mismatched
+ID/URL pairs, malformed roles, duplicate JSON keys, or a capture-hash mismatch
+block the whole curation before outputs are replaced. A parseable card headline
+still wins; otherwise the curator selects only an explicit enriched current role
+that passes the same role and irrelevance gates. It never derives an employer or
+title. The original headline, selected role evidence, enrichment operator/time,
+and artifact hash remain in the notes and decision audit. If an existing explicit
+company alias is used for account dedupe, the exact captured title and company
+remain separately recorded as enrichment evidence.
+
+Keep a capture manifest beside the raw JSON with each query's advertised count,
+profiles captured, card batches/scrolls, and an honest termination state. An
+exact-count query may be marked exhausted; a high-volume query stopped at a
+deliberate review-yield budget must remain `bounded_sample_cap`, not be described
+as exhaustive.
+
+Stage, review, then import. Raw captures cannot be executed directly:
+
+```bash
+python main.py stage-relationship-leads \
+  --source-path workspace/relationship_leads_peoplegrove_curated.csv \
+  --source-key peoplegrove_usc
+python main.py review-relationship-leads \
+  --staged-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
+  --reviewer Akshat \
+  --approve-all-ready \
+  --reject-all-blocked
+python main.py import-relationship-leads \
+  --source-path workspace/relationship_leads_peoplegrove_curated.staged.csv \
+  --source-key peoplegrove_usc \
+  --execute
+```
+
+Staging validates required identity/provenance, URL shape, email shape, source
+records, duplicates, and batch fingerprints. The review manifest binds decisions
+to the staged file so later edits cannot silently inherit approval. Imports are
+idempotent and stop on ambiguous identity conflicts instead of merging people or
+companies by guesswork.
 
 The source-key templates create clean one-time capture files and companion guides:
 
 - `workspace/relationship_leads_peoplegrove_usc.csv` for PeopleGrove/Trojan Network/USC founders, operators, product leaders, and recruiters
 - `workspace/relationship_leads_recent_mba_pm.csv` for recent MBA grads who moved into PM/product/product strategy
+
+Current baseline: the 28 USC profiles imported on July 4 are an early
+proof-of-flow seed, not complete PeopleGrove coverage. A separate July 11
+official-public-source batch imported 11 reviewed leads (6 USC and 5 recent
+MBA-to-product) with source URLs and no guessed emails. The signed-in July 11
+capture is now hundreds-scale and coverage-manifested: 1,845 unique profiles
+across 12 role/education queries, with seven exact-count queries exhausted and
+five broad queries explicitly retained as bounded best-match samples. Curate
+that capture for current-role/company accuracy and company/role usefulness,
+preserve stable source identities, dedupe, and run only the retained rows through
+the staged review gate. Do not claim the five sampled broad surfaces are
+exhaustive. This remains a low-frequency source pull, not a daily scraper.
 
 ## Communication Style
 
@@ -287,6 +372,10 @@ python main.py build-company-discovery-review \
   --run-id <run-id> \
   --capture-artifact artifacts/...linkedin-intelligence-capture.json \
   --source-metrics ../ResumeGenerator\ v1/discovery/source_validation/...source-run-metrics.json
+python main.py capture-company-news --per-source-limit 30
+python main.py build-company-discovery-review \
+  --run-id <same-run-id> \
+  --news-capture-artifact artifacts/...company-news-capture.json
 ```
 
 The builder dedupes candidates, preserves provenance, and writes an editable
@@ -304,13 +393,25 @@ python main.py build-company-discovery-review \
   --promote-approved
 ```
 
-Current ingestion combines the exact nightly LinkedIn-feed capture with the
-same-run ResumeGenerator startup relationship/apply report, including its YC
-and Built In lanes. Hiring, funding, launch, and warm-network discoveries also
-arrive through the feed. Additional company/news directories can reuse the same
-typed candidate API; the tracker remains memory after discovery, not the source
-of discovery. Run summaries include only exact current inputs, while the
-editable review queue remains cumulative.
+Current ingestion combines the exact nightly LinkedIn-feed capture, the same-run
+ResumeGenerator startup relationship/apply report (including YC and Built In),
+and the exact company/news capture. The default public feeds are TechCrunch
+Startups and Crunchbase News; Hacker News is opt-in because it is noisier.
+`--input-path` on `capture-company-news` also adapts reviewed CSV, JSON, or JSONL
+directory/news exports to the same typed candidate contract. The tracker remains
+memory after discovery, not the source of discovery. Run summaries include only
+exact current inputs, while the editable review queue remains cumulative.
+
+### High-affinity LinkedIn expansion
+
+Top, role-backed accounts now keep the exact-company people search as the base
+pass and add bounded Intuit, Gojek, USC, Marshall, Thapar, Hevo, Optum, and
+role-family searches. Product, Product Strategy, BizOps/Strategy,
+Program/Operations, and narrow Growth/GTM targets receive their own search terms.
+The pass preserves why a person surfaced even when LinkedIn omits past-employer
+detail on the compact card. A per-company invite cap can rise from 3 to at most 5
+only when enough real, scored affinity candidates exist and the global daily
+budget has unused headroom; all existing review, cadence, and send gates remain.
 
 ### Role-family coverage
 
@@ -628,6 +729,12 @@ This repo now covers:
 - target-action classification for `apply_now`, `outreach_now`, and `skip`
 - configurable LinkedIn home-feed discovery and a passive profile-viewer ledger
 - independent company-candidate review and human-approved watchlist promotion
+- public company/news feeds plus reviewed structured imports through that same
+  candidate contract, with source-aware tracker promotion
+- the run-stamped shared ResumeGenerator/Outreach daily company queue
+- bounded high-affinity LinkedIn passes for role-backed priority accounts
+- tamper-bound stage/review/import gates for low-frequency relationship-source
+  pulls, with hundreds-scale idempotency coverage
 - run-scoped role-family coverage with explicit source status
 - tracker-enforced LinkedIn/email cadence and explicitly gated SMTP delivery
 - gold/silver/negative communication examples plus advisory outcome learning

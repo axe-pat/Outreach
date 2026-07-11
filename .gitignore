@@ -30,6 +30,7 @@ workspace/shared_discovery/
 workspace/reports/
 workspace/role_surface/
 workspace/track2_review_queue_*.csv
+workspace/*.lock
 workspace/relationship_leads_peoplegrove*.csv
 workspace/relationship_leads_peoplegrove*.summary.json
 workspace/peoplegrove_capture*.json

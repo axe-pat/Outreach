@@ -277,15 +277,23 @@ def write_company_discovery_artifacts(
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = generated_at or utc_now_iso()
     signal_list = list(signals)
-    candidates = build_candidate_review_queue(signal_list, review_decisions=review_decisions)
-    watchlist = build_company_watchlist(candidates, promoted_at=timestamp)
-    summary = company_discovery_summary(signal_list, candidates, watchlist)
+    decision_list = list(review_decisions)
+    candidates = build_candidate_review_queue(signal_list, review_decisions=decision_list)
+    fresh_watchlist = build_company_watchlist(candidates, promoted_at=timestamp)
 
     payload_json = output_dir / "company_discovery_candidates.json"
     review_queue_csv = output_dir / "company_discovery_review.csv"
     watchlist_json = output_dir / "company_watchlist.json"
     watchlist_csv = output_dir / "company_watchlist.csv"
     summary_json = output_dir / "company_discovery_summary.json"
+    previous_watchlist = _load_existing_watchlist_entries(watchlist_json)
+    watchlist = _merge_cumulative_watchlist(
+        fresh=fresh_watchlist,
+        previous=previous_watchlist,
+        current_candidates=candidates,
+        review_decisions=decision_list,
+    )
+    summary = company_discovery_summary(signal_list, candidates, watchlist)
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -328,6 +336,80 @@ def write_company_discovery_artifacts(
         watchlist_json=watchlist_json,
         watchlist_csv=watchlist_csv,
         summary_json=summary_json,
+    )
+
+
+def _load_existing_watchlist_entries(path: Path) -> list[CompanyWatchlistEntry]:
+    """Load the durable approved set without silently discarding corrupt state."""
+
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Existing company watchlist is unreadable: {path}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        raise ValueError(f"Existing company watchlist has invalid entries: {path}")
+    try:
+        return [CompanyWatchlistEntry.model_validate(item) for item in payload["entries"]]
+    except ValueError as exc:
+        raise ValueError(f"Existing company watchlist contains an invalid entry: {path}") from exc
+
+
+def _merge_cumulative_watchlist(
+    *,
+    fresh: list[CompanyWatchlistEntry],
+    previous: list[CompanyWatchlistEntry],
+    current_candidates: list[CandidateCompany],
+    review_decisions: list[CompanyReviewDecision],
+) -> list[CompanyWatchlistEntry]:
+    """Keep prior approvals when known-company filtering removes their signals.
+
+    A candidate present in the current rebuild is authoritative: if it is no
+    longer eligible, its previous watchlist entry is removed. An explicit
+    non-approved decision is also authoritative even when the candidate's
+    signals are absent from this rebuild.
+    """
+
+    fresh_by_company = {
+        _normalize_company_name(entry.company_name): entry for entry in fresh
+    }
+    current_companies = {
+        _normalize_company_name(candidate.company_name) for candidate in current_candidates
+    }
+    merged = dict(fresh_by_company)
+    for entry in previous:
+        company_key = _normalize_company_name(entry.company_name)
+        if not company_key or company_key in merged or company_key in current_companies:
+            continue
+        decision = _watchlist_entry_review_decision(entry, review_decisions)
+        if decision is not None and decision.review_state != ReviewState.APPROVED:
+            continue
+        merged[company_key] = entry
+    return sorted(merged.values(), key=lambda entry: entry.company_name.casefold())
+
+
+def _watchlist_entry_review_decision(
+    entry: CompanyWatchlistEntry,
+    decisions: list[CompanyReviewDecision],
+) -> CompanyReviewDecision | None:
+    for decision in decisions:
+        if decision.candidate_id and decision.candidate_id == entry.candidate_id:
+            return decision
+    entry_domain = _website_domain(entry.website)
+    if entry_domain:
+        for decision in decisions:
+            if _website_domain(decision.website) == entry_domain:
+                return decision
+    entry_name = _normalize_company_name(entry.company_name)
+    return next(
+        (
+            decision
+            for decision in decisions
+            if decision.company_name
+            and _normalize_company_name(decision.company_name) == entry_name
+        ),
+        None,
     )
 
 

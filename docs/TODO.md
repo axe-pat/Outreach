@@ -43,19 +43,18 @@ paths visible instead of accidentally filtering them out.
    blockers in `What needs you` and Source Breakdown, and counts only exact
    delivery results as sends. The next step is one small reviewed live batch,
    not higher volume.
-5. **IMPLEMENTED MONITOR; TUNING REMAINS — protect adjacent role coverage.**
+5. **IMPLEMENTED AND EXACT-RUN VALIDATED; TUNING REMAINS — protect adjacent role coverage.**
    A separate run-scoped role-surface report keeps the account tracker
    company-level while showing discovered, scored, surfaced, and acted-on
    Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and narrow
-   Growth-adjacent roles by source. Product remains primary. A standalone July 11
-   exact-artifact diagnostic replay—not a nightly production run—covered 402
-   observations, 379 unique roles, and 220 companies from six source rows, with
-   no source failure/skip: Product 94 discovered and 5 scored/surfaced; Product
-   Strategy 1; BizOps 8 and 2/2; Program/Ops 24 and 5/5; narrow Growth 7 and 2/2.
-   No configured family was below its floor in that replay
-   (`artifacts/20260711-124409-role-surface-report.json`). Continue tuning and
-   verify several real nightly runs; this diagnostic does not establish ongoing
-   production coverage.
+   Growth-adjacent roles by source. Product remains primary. The final July 11
+   replay uses the completed nightly run's exact source-metrics pointer and covers
+   402 observations, 379 unique roles, and 220 companies from six ran sources,
+   with no source failure/skip: Product 94 discovered and 5 scored/surfaced;
+   Product Strategy 1; BizOps 8 and 2/2; Program/Ops 24 and 5/5; narrow Growth 7
+   and 2/2. No configured family is below its floor
+   (`artifacts/20260711-141856-role-surface-report.json`). Continue tuning and
+   verify several scheduled runs before treating this as ongoing coverage.
 6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
    LinkedIn intelligence pass checks the viewer ledger every seven days by
    default, dedupes repeated observations, and annotates target-company/role
@@ -83,11 +82,14 @@ paths visible instead of accidentally filtering them out.
   LinkedIn feed and profile-viewer pages (live-validated July 10, 2026).
 - [ ] Observe the capture for several scheduled daily cycles before changing
   its budget.
-- [ ] Review useful feed signals and set dispositions; review the generated
-  company CSV and explicitly approve candidates before running
-  `build-company-discovery-review --promote-approved`.
-- [x] Validate the role monitor against one exact ResumeGenerator source-metrics
-  artifact in a standalone diagnostic replay. Never fill a missing source with an
+- [x] Review the initial feed/news queue and promote only explicit approvals.
+  The July 11 queue has 11 unique companies: EdVisorly, Ollama, and PrimeIntellect
+  are approved/promoted; Litmus, ZML, SambaNova, Apollo.io, and Oratomic remain
+  needs-research; Hyperagent, USC BSEL, and a false Y Combinator attribution are
+  rejected. Re-running promotion changes no organization rows and retains the
+  durable three-company approved watchlist.
+- [x] Validate the role monitor against the completed nightly run's exact
+  ResumeGenerator source-metrics artifact. Never fill a missing source with an
   older workspace artifact.
 - [ ] Confirm the same exact-pointer contract in several scheduled nightly runs;
   the standalone replay is not evidence that the production stage ran.
@@ -100,8 +102,11 @@ paths visible instead of accidentally filtering them out.
 - [ ] Configure `PROSPEO_API_KEY` or `HUNTER_API_KEY` only if external email
   lookup is intentionally enabled; LinkedIn Contact Info research can remain
   the primary bounded path.
-- [ ] Review outcome-learning recommendations only after sufficient sample
-  size. Any prompt, rubric, or selection-policy change remains a human decision.
+- [x] Review the first outcome-learning recommendations after 623 sends, 49
+  accepts, and 17 replies. The July 11 review preserves the aggregate LinkedIn
+  follow-up pattern, keeps SLAC account-specific, and holds the three tiny account
+  samples for more evidence. It applies no automatic prompt, rubric, or selection
+  change (`workspace/comms_learning/outcome_recommendation_review_2026-07-11.json`).
 
 ### Implemented Cadence and Stop Rules
 
@@ -133,7 +138,7 @@ paths visible instead of accidentally filtering them out.
 - [x] Keep reverse cross-pollination review-first: Outreach-only companies surface
   as company/research actions in the shared queue and never write directly into
   `jobs.xlsx`. A live role remains required before the application lane owns it.
-- [ ] Canary and production-validate the implemented, default-off high-affinity
+- [x] Implement and live-canary validate the default-off high-affinity
   LinkedIn expansion pass for
   `application_plus_outreach` and other top, role-backed companies before sends:
   - exact-company people search remains the base pass
@@ -143,9 +148,23 @@ paths visible instead of accidentally filtering them out.
   - raise per-company caps from 3 to at most 5 only when actual scored affinity
     candidates exist and unused global daily headroom remains
   - optionally inspect full profiles only for top-priority companies where the card result misses obvious commonalities
-  - keep `--enable-affinity-expansion` off in scheduled production until bounded
-    runtime, partial-send reservation, and no-oversend tests pass against a live
-    canary
+  - hard per-candidate worker timeouts, pre-attempt slot reservation, explicit
+    `send_unknown_reserved` reconciliation, partial-progress preservation, and
+    no-oversend tests now guard live execution
+  - every live-send surface now fails closed when the exact company filter
+    fails, and coverage-only/startup candidates require independent structured
+    current-employer evidence; candidate names, cached match flags, and search
+    pass labels never authorize a send
+  - a second parallel July 11 nightly exposed the old gap by sending one
+    off-company Julia invite. The run was stopped before its remaining sends,
+    the invite was withdrawn in the signed-in session, no message was sent, and
+    the contact is retained as `Do not contact` with the withdrawal audit
+    (`artifacts/20260711-144345-invite-withdrawal-reconciliation.json`)
+  - the July 11 Delinea canary found four raw affinity hits but only two qualified
+    for lift, so the recommendation correctly stayed at the base cap of three
+    (`artifacts/20260711-142731-dry-run-pipeline.json`)
+  - keep `--enable-affinity-expansion` explicit/default-off until another bounded
+    scheduled run confirms the production browser path under these guards
 - [x] Add a merged daily queue that combines:
   - apply-backed outreach from the exact ResumeGenerator current-run action
     queue, ultimately derived from `ResumeGenerator v1/discovery/jobs.xlsx`
@@ -258,15 +277,20 @@ paths visible instead of accidentally filtering them out.
   Staged batch/row IDs, SHA-256 manifests, provenance, dedupe, tamper detection,
   finalized-decision locking, complete SHA-bound decision artifacts, non-mutating
   imports, and ambiguous workbook-identity conflict checks are implemented.
-- [ ] Reconcile and import the already curated signed-in PeopleGrove/Trojan Network
-  batch. Capture and curation are complete: 1,845 unique profiles across 12 USC
-  role/education queries became 153 curated candidates and 1,692 explicit
-  rejections. Its manifest records seven exact-count queries as exhausted and five
-  high-volume queries as deliberately bounded best-match samples. Reconcile the
-  intended 104-approved/49-rejected partition into one complete decision artifact,
-  reseal the staged file, verify exact counts and hashes, then import once and prove
-  an unchanged rerun. Do not import the existing inconsistent staged review or make
-  this low-frequency source a daily scraper.
+- [x] Complete the signed-in PeopleGrove/Trojan Network curation, review, and
+  import. The July 11 pull captured 1,845 unique profiles across 12 targeted USC
+  role/education queries; seven exact-count surfaces were exhausted and five
+  high-volume surfaces remain honestly bounded best-match samples. Structural
+  curation retained 154 and rejected 1,691 (`940` unparseable current
+  role/company, `353` students/interns, `348` without a high-signal role, plus
+  `50` other stale, irrelevant, duplicate, or job-seeker rows). Manual review
+  approved 104 of the 154. A separate public-corroboration pass researched 111
+  omitted/ambiguous profiles, resolved 51, and approved 31 more. The final 135
+  reviewed people were imported with no guessed email or LinkedIn field; 1,710
+  captured profiles were not imported. Exact reruns added or updated zero
+  organizations and zero contacts, leaving 174 total relationship-source
+  contacts including the earlier USC/MBA seeds. Keep this low-frequency and
+  high-signal; do not turn it into a daily scraper.
 
 ## Role-Family Coverage
 
@@ -278,6 +302,14 @@ paths visible instead of accidentally filtering them out.
   discovered, scored, and surfaced rather than silently treated as generic
   non-PM roles or deprioritized sales. Product Strategy and narrow Growth query
   coverage are explicit; generic sales/marketing growth remains excluded.
-- [ ] Add account-level role-watch tasks for strategic companies: a company can
-  remain active even when it has no current PM role, while a good adjacent
-  opening should create an application/research action.
+- [x] Add account-level role-watch tasks for strategic companies through the
+  existing shared queue, without creating another tracker. Strategic company rows
+  remain company-level and surface as buffered `role_watch` items when no PM role
+  exists. Strong exact-run Product Strategy, BizOps/Strategy,
+  Program/Operations, or narrow Growth-adjacent openings upgrade the same item to
+  human-gated `application_research` with role/source URL, run, upstream bucket,
+  decision, and write-gate provenance. The recovery path for
+  `scored_application_not_selected` requires fit >= 7 plus upstream
+  `Proceed`/`accepted` evidence and rejects generic growth marketing,
+  blocklisted, dropped, and rejected noise. It does not mutate `jobs.xlsx` or the
+  company tracker.

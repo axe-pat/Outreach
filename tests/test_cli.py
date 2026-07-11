@@ -2,6 +2,8 @@ from datetime import UTC, date, datetime
 import csv
 import json
 from pathlib import Path
+import sys
+import time
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
@@ -25,6 +27,7 @@ from outreach.cli import (
     build_organization_intel_items,
     build_relationship_loop_items,
     build_target_action_queue_items,
+    candidate_has_target_company_evidence,
     candidate_mentions_company,
     classify_opportunity_action,
     company_search_aliases,
@@ -67,6 +70,7 @@ from outreach.cli import (
     text_contains_signal,
     touchpoint_status_from_invite_result,
     _source_breakdown,
+    _run_invite_candidate_worker,
     _apply_linkedin_cadence_guards,
     _track_2_actual_actions,
     _write_comms_learning_artifact,
@@ -77,9 +81,60 @@ from outreach.cli import (
 from outreach.config import OutreachSettings
 from outreach.services.email_finder import EmailFinderResult
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
-from outreach.services.linkedin import LinkedInFollowupSendResult
+from outreach.services.linkedin import InviteSendResult, LinkedInFollowupSendResult
+from outreach.invite_reservations import load_invite_reservations, reservation_ledger_path
 from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
 from outreach.style_profile import CommunicationStyleProfile
+
+
+def _julia_failed_filter_payload() -> dict[str, object]:
+    return {
+        "company": "Julia",
+        "company_mode": "startup",
+        "company_filter_status": "failed_exact_company_suggestion",
+        "company_filter_error": (
+            "Could not find an exact company suggestion for 'Julia'."
+        ),
+        "startup_pool": {
+            "raw_count": 1,
+            "kept_count": 1,
+            "pool_mode": "micro",
+            "adaptive_send_min_score": -5,
+            "coverage_only": True,
+            "search_company": "Julia",
+        },
+        "pass_summaries": [
+            {
+                "pass_name": "startup_company_coverage",
+                "fallback_used": True,
+                "coverage_only": True,
+                "alias_errors": [
+                    "Julia: Could not find an exact company suggestion for 'Julia'."
+                ],
+            }
+        ],
+        "results": [
+            {
+                "name": "Julia (Gromis) Feuer",
+                "title": "MBA Candidate at UCLA Anderson Class of 2025",
+                "subtitle": "Julia (Gromis) Feuer",
+                "snippet": "Sai Chandan Reddy & 9 other mutual connections",
+                "raw_text": (
+                    "Julia (Gromis) Feuer MBA Candidate at UCLA Anderson Class of 2025"
+                ),
+                "linkedin_url": "https://www.linkedin.com/in/juliagromis/",
+                "connection_degree": "2nd",
+                "score": 20,
+                "passes": ["startup_company_coverage"],
+                "existing_connection": False,
+                "target_company_match": True,
+                "target_company_evidence_company": "julia",
+                "target_company_evidence_passes": ["startup_company_coverage"],
+                "note": "Unsafe Julia fallback note",
+                "note_qc": {"score": 90, "verdict": "send"},
+            }
+        ],
+    }
 
 
 def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp_path: Path) -> None:
@@ -1376,6 +1431,294 @@ def test_run_track_2_daily_plan_execute_is_cron_safe_without_live_linkedin(
     assert "5_send_linkedin_invites | status=queued" in result.output
 
 
+def test_track_2_invite_discovery_failure_is_isolated_per_company(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    fake_plan = {
+        "selected_count": 2,
+        "budget": {"max_linkedin_invites": 2},
+        "used": {"linkedin_invites": 2},
+        "summary": {"send_initial_invites": 2},
+        "phase_summary": {"5_send_linkedin_invites": 2},
+        "selected": [
+            {
+                "organization_id": "org-first",
+                "company": "First Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            },
+            {
+                "organization_id": "org-second",
+                "company": "Second Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            },
+        ],
+    }
+    monkeypatch.setattr("outreach.cli._build_daily_plan_for_workspace", lambda **_kwargs: fake_plan)
+    second_artifact = tmp_path / "second.json"
+    second_artifact.write_text(
+        json.dumps(
+            {
+                "company": "Second Co",
+                "company_mode": "startup",
+                "results": [],
+                "affinity_expansion": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_company_run(**kwargs):
+        company = str(kwargs["company"])
+        calls.append(company)
+        if company == "First Co":
+            raise RuntimeError("startup preflight could not resolve company")
+        return second_artifact
+
+    monkeypatch.setattr("outreach.cli.execute_linkedin_company_run", fake_company_run)
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["First Co", "Second Co"]
+    run_payload = next(payload for kind, payload in written if kind == "track-2-daily-run")
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["status"] == "partial_failed"
+    assert invite_phase["discovery_failed_count"] == 1
+    assert invite_phase["completed_company_count"] == 1
+    assert [run["status"] for run in invite_phase["runs"]] == [
+        "discovery_failed",
+        "no_eligible_candidates",
+    ]
+    assert "RuntimeError: startup preflight could not resolve company" in invite_phase["runs"][0]["error"]
+
+
+def test_track_2_blocks_failed_julia_filter_without_consuming_send_slot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    fake_plan = {
+        "selected_count": 1,
+        "budget": {"max_linkedin_invites": 1},
+        "used": {"linkedin_invites": 1},
+        "summary": {"send_initial_invites": 1},
+        "phase_summary": {"5_send_linkedin_invites": 1},
+        "selected": [
+            {
+                "organization_id": "org-julia",
+                "company": "Julia",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+    pipeline_path = tmp_path / "julia-failed-filter.json"
+    pipeline_path.write_text(
+        json.dumps(_julia_failed_filter_payload()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "outreach.cli.execute_linkedin_company_run",
+        lambda **_kwargs: pipeline_path,
+    )
+    send_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "outreach.cli.execute_invite_batch",
+        lambda **kwargs: send_calls.append(kwargs),
+    )
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+            "--send-linkedin",
+            "--max-linkedin-followups",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert send_calls == []
+    run_payload = next(
+        payload for kind, payload in written if kind == "track-2-daily-run"
+    )
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["status"] == "completed_no_sends"
+    assert invite_phase["sent_count"] == 0
+    assert invite_phase["company_filter_failed_count"] == 1
+    assert invite_phase["remaining_budget"] == 1
+    assert invite_phase["runs"][0]["candidate_count"] == 0
+    assert invite_phase["runs"][0]["status"] == "send_blocked_company_filter"
+    assert invite_phase["runs"][0]["target_company_evidence_rejected_count"] == 1
+
+
+def test_track_2_unknown_invite_slot_is_not_reused_and_summary_is_truthful(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    fake_plan = {
+        "selected_count": 2,
+        "budget": {"max_linkedin_invites": 2},
+        "used": {"linkedin_invites": 2},
+        "summary": {"send_initial_invites": 2},
+        "phase_summary": {"5_send_linkedin_invites": 2},
+        "selected": [
+            {
+                "organization_id": "org-first",
+                "company": "First Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            },
+            {
+                "organization_id": "org-second",
+                "company": "Second Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            },
+        ],
+    }
+    monkeypatch.setattr("outreach.cli._build_daily_plan_for_workspace", lambda **_kwargs: fake_plan)
+    pipeline_paths: dict[str, Path] = {}
+    for company in ("First Co", "Second Co"):
+        path = tmp_path / f"{company.lower().replace(' ', '-')}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "company": company,
+                    "company_mode": "default",
+                    "results": [
+                        {
+                            "name": f"{company} Person",
+                            "title": "Product Manager",
+                            "linkedin_url": (
+                                "https://www.linkedin.com/in/"
+                                + company.lower().replace(" ", "-")
+                            ),
+                            "score": 80,
+                            "note": "Hello",
+                            "note_qc": {"verdict": "send"},
+                        }
+                    ],
+                    "affinity_expansion": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        pipeline_paths[company] = path
+    monkeypatch.setattr(
+        "outreach.cli.execute_linkedin_company_run",
+        lambda **kwargs: pipeline_paths[str(kwargs["company"])],
+    )
+    send_calls: list[tuple[str, int, int]] = []
+
+    def fake_execute_batch(**kwargs):
+        company = str(kwargs["company"])
+        send_calls.append((company, len(kwargs["batch"]), int(kwargs["limit"])))
+        send_path = tmp_path / f"{company}-send.json"
+        progress_path = tmp_path / f"{company}-progress.json"
+        send_path.write_text("{}", encoding="utf-8")
+        progress_path.write_text("{}", encoding="utf-8")
+        counts = (
+            {"send_unknown_reserved": 1}
+            if company == "First Co"
+            else {"sent": 1}
+        )
+        return send_path, progress_path, counts, 0, 0
+
+    monkeypatch.setattr("outreach.cli.execute_invite_batch", fake_execute_batch)
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+            "--send-linkedin",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert send_calls == [("First Co", 1, 1), ("Second Co", 1, 1)]
+    run_payload = next(payload for kind, payload in written if kind == "track-2-daily-run")
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["status"] == "partial_send_unknown_reserved"
+    assert invite_phase["remaining_budget"] == 0
+    assert invite_phase["unknown_reserved_company_count"] == 1
+    assert invite_phase["unknown_reserved_count"] == 1
+    assert invite_phase["completed_company_count"] == 1
+    assert [run["status"] for run in invite_phase["runs"]] == [
+        "send_unknown_reserved",
+        "send_completed",
+    ]
+
+
 def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(
     tmp_path: Path,
     monkeypatch,
@@ -1654,6 +1997,109 @@ def test_candidate_mentions_company_requires_structured_single_word_match() -> N
         SimpleNamespace(title="Founding Partner at HedgeLegal", snippet="", raw_text=""),
         ["Hedge"],
     )
+    assert not candidate_mentions_company(
+        SimpleNamespace(
+            title="Product Manager at Intuit | Past: Founder at Icarus",
+            subtitle="",
+            snippet="",
+            raw_text="",
+        ),
+        ["Icarus"],
+    )
+
+
+def test_julia_name_and_pass_annotations_are_not_current_employer_evidence() -> None:
+    payload = _julia_failed_filter_payload()
+    candidate = payload["results"][0]
+
+    assert candidate_has_target_company_evidence(candidate, "Julia") is False
+    assert select_invite_candidates(
+        [candidate],
+        min_score=-5,
+        limit=1,
+        target_company="Julia",
+        company_mode="startup",
+        source_payload=payload,
+    ) == []
+
+
+def test_coverage_only_candidate_requires_independent_current_employer_evidence() -> None:
+    payload = _julia_failed_filter_payload()
+    payload["company_filter_status"] = "completed"
+    payload["company_filter_error"] = ""
+    payload["pass_summaries"] = [
+        {
+            "pass_name": "startup_preflight",
+            "coverage_only": True,
+        }
+    ]
+    candidate = {
+        **payload["results"][0],
+        "name": "Actual Julia PM",
+        "title": "Product Manager at Julia",
+        "subtitle": "Actual Julia PM",
+        "raw_text": "Actual Julia PM Product Manager at Julia",
+        "target_company_match": False,
+        "target_company_evidence_passes": [],
+    }
+
+    selected = select_invite_candidates(
+        [candidate],
+        min_score=-5,
+        limit=1,
+        target_company="Julia",
+        company_mode="startup",
+        source_payload=payload,
+    )
+
+    assert [item["name"] for item in selected] == ["Actual Julia PM"]
+    payload["company_filter_status"] = "failed_exact_company_suggestion"
+    assert select_invite_candidates(
+        [candidate],
+        min_score=-5,
+        limit=1,
+        target_company="Julia",
+        company_mode="startup",
+        source_payload=payload,
+    ) == []
+
+
+def test_startup_invite_selection_fails_closed_on_polluted_company_results() -> None:
+    candidates = [
+        {
+            "name": "Correct Person",
+            "title": "Founding Product Manager @ Icarus (YC S25)",
+            "linkedin_url": "https://www.linkedin.com/in/correct",
+            "score": 80,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "Wrong Intuit Person",
+            "title": "Group Product Manager at Intuit",
+            "linkedin_url": "https://www.linkedin.com/in/intuit-person",
+            "score": 95,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "Former Icarus Person",
+            "title": "Past: Product Manager at Icarus | Product Lead at Google",
+            "linkedin_url": "https://www.linkedin.com/in/former-icarus",
+            "score": 90,
+            "note_qc": {"verdict": "send"},
+        },
+    ]
+
+    selected = select_invite_candidates(
+        candidates,
+        limit=5,
+        target_company="Icarus",
+        company_mode="startup",
+    )
+
+    assert [item["name"] for item in selected] == ["Correct Person"]
+    assert candidate_has_target_company_evidence(candidates[0], "Icarus") is True
+    assert candidate_has_target_company_evidence(candidates[1], "Icarus") is False
+    assert candidate_has_target_company_evidence(candidates[2], "Icarus") is False
 
 
 def test_product_pass_rejects_non_product_noise() -> None:
@@ -1920,6 +2366,42 @@ def test_select_invite_candidates_filters_existing_connections_and_blocked_notes
     assert [item["name"] for item in selected] == ["A"]
 
 
+def test_manual_live_send_blocks_failed_julia_company_filter(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "julia-failed-filter.json"
+    artifact.write_text(
+        json.dumps(_julia_failed_filter_payload()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda _self: None,
+    )
+    execute_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "outreach.cli.execute_invite_batch",
+        lambda **kwargs: execute_calls.append(kwargs),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "send-invites",
+            "--artifact-path",
+            str(artifact),
+            "--min-score",
+            "-5",
+            "--execute",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "No eligible candidates" in result.output
+    assert execute_calls == []
+
+
 def test_relative_linkedin_profile_is_treated_as_fallback() -> None:
     settings = OutreachSettings(linkedin_chrome_user_data_dir=Path("playwright/chrome-data"))
 
@@ -1931,6 +2413,17 @@ def test_absolute_linkedin_profile_is_explicit_even_if_it_points_to_outreach_pro
 
     assert settings.using_fallback_linkedin_profile() is False
     settings.validate_explicit_linkedin_profile()
+
+
+def test_invite_worker_watchdog_keeps_grace_above_soft_attempt_timeout() -> None:
+    settings = OutreachSettings(
+        search={
+            "invite_candidate_timeout_seconds": 90,
+            "invite_worker_timeout_seconds": 60,
+        }
+    )
+
+    assert settings.search.effective_invite_worker_timeout_seconds == 105
 
 
 def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path: Path) -> None:
@@ -1963,23 +2456,16 @@ def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path
 
     monkeypatch.setattr("outreach.cli.write_artifact", _fake_write_artifact)
 
-    def _fake_send(self, batch, execute=False, on_result=None):
-        results = []
-        for candidate in batch:
-            result = SimpleNamespace(
-                name=candidate["name"],
-                linkedin_url=candidate["linkedin_url"],
-                status="sent",
-                detail="ok",
-                note=candidate.get("note", ""),
-                screenshot_path="",
-            )
-            results.append(result)
-            if on_result is not None:
-                on_result(candidate, result, list(results))
-        return results
+    def _fake_worker(*, candidate, **_kwargs):
+        return InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="sent",
+            detail="ok",
+            note=candidate.get("note", ""),
+        )
 
-    monkeypatch.setattr("outreach.cli.LinkedInScraper.send_connection_requests", _fake_send)
+    monkeypatch.setattr("outreach.cli._run_invite_candidate_worker", _fake_worker)
 
     batch = [
         {"name": "Alice", "linkedin_url": "https://www.linkedin.com/in/alice/", "note": "hi"},
@@ -2071,6 +2557,317 @@ def test_execute_invite_batch_dry_run_does_not_persist(monkeypatch, tmp_path: Pa
     assert touchpoints_added == 0
 
 
+def test_invite_worker_hard_timeout_returns_unknown_reserved(tmp_path: Path) -> None:
+    candidate = {
+        "name": "Timeout Person",
+        "linkedin_url": "https://www.linkedin.com/in/timeout-person/",
+        "note": "Hello",
+    }
+    started = time.monotonic()
+
+    result = _run_invite_candidate_worker(
+        candidate=candidate,
+        timeout_seconds=0.15,
+        working_dir=tmp_path,
+        worker_command=[sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+
+    assert time.monotonic() - started < 4
+    assert result.status == "send_unknown_reserved"
+    assert "hard 0.15s timeout" in result.detail
+    assert "signed-in reconciliation" in result.detail
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_live_invite_batch_fails_closed_when_worker_cannot_launch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    artifact_dir = tmp_path / "artifacts"
+    settings = OutreachSettings(tracking_workspace_dir=workspace)
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+    source_artifact = tmp_path / "pipeline.json"
+    source_artifact.write_text("{}", encoding="utf-8")
+    candidate = {
+        "name": "Launch Failure Person",
+        "title": "Product Manager",
+        "linkedin_url": "https://www.linkedin.com/in/launch-failure-person/",
+        "note": "Hello",
+    }
+
+    def fail_worker(**_kwargs):
+        raise OSError("could not launch worker")
+
+    monkeypatch.setattr("outreach.cli._run_invite_candidate_worker", fail_worker)
+
+    _, progress_path, status_counts, _, _ = execute_invite_batch(
+        settings=settings,
+        company="Launch Failure Co",
+        source_artifact_path=source_artifact,
+        batch=[candidate],
+        execute=True,
+        limit=1,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+
+    assert status_counts == {"send_unknown_reserved": 1}
+    progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress["attempts"][0]["status"] == "send_unknown_reserved"
+    assert "orchestration failed" in progress["results"][0]["detail"]
+    reservation = next(
+        iter(
+            load_invite_reservations(
+                reservation_ledger_path(workspace)
+            )["reservations"].values()
+        )
+    )
+    assert reservation["status"] == "send_unknown_reserved"
+    assert reservation["reconciliation_required"] is True
+
+
+def test_live_invite_batch_checkpoints_result_before_workbook_persistence(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifact_dir = tmp_path / "artifacts"
+    settings = OutreachSettings(tracking_workspace_dir=workspace)
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+    source_artifact = tmp_path / "pipeline.json"
+    source_artifact.write_text("{}", encoding="utf-8")
+    candidate = {
+        "name": "Checkpoint Person",
+        "linkedin_url": "https://www.linkedin.com/in/checkpoint-person/",
+        "note": "Hello",
+    }
+    monkeypatch.setattr(
+        "outreach.cli._run_invite_candidate_worker",
+        lambda **_kwargs: InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="sent",
+            detail="Invitation sent successfully.",
+            note=candidate["note"],
+        ),
+    )
+
+    def fail_persistence(**_kwargs):
+        raise OSError("workbook is unavailable")
+
+    monkeypatch.setattr("outreach.cli.persist_invite_send_results", fail_persistence)
+
+    try:
+        execute_invite_batch(
+            settings=settings,
+            company="Checkpoint Co",
+            source_artifact_path=source_artifact,
+            batch=[candidate],
+            execute=True,
+            limit=1,
+            start_at=0,
+            verdict="send",
+            min_score=35,
+        )
+    except OSError as exc:
+        assert "workbook is unavailable" in str(exc)
+    else:
+        raise AssertionError("workbook persistence failure was unexpectedly swallowed")
+
+    progress_paths = list(artifact_dir.glob("*-invite-progress.json"))
+    assert len(progress_paths) == 1
+    progress = json.loads(progress_paths[0].read_text(encoding="utf-8"))
+    assert progress["count"] == 1
+    assert progress["attempts"][0]["status"] == "sent"
+    assert progress["results"][0]["status"] == "sent"
+    reservation = next(
+        iter(
+            load_invite_reservations(
+                reservation_ledger_path(workspace)
+            )["reservations"].values()
+        )
+    )
+    assert reservation["status"] == "sent"
+
+
+def test_live_invite_batch_checkpoints_partial_progress_and_blocks_auto_retry(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    artifact_dir = tmp_path / "artifacts"
+    settings = OutreachSettings(tracking_workspace_dir=workspace)
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+    source_artifact = tmp_path / "pipeline.json"
+    source_artifact.write_text("{}", encoding="utf-8")
+    batch = [
+        {
+            "name": "Completed Person",
+            "title": "Product Lead",
+            "linkedin_url": "https://www.linkedin.com/in/completed-person/",
+            "note": "Completed note",
+        },
+        {
+            "name": "Unknown Person",
+            "title": "Product Manager",
+            "linkedin_url": "https://www.linkedin.com/in/unknown-person/",
+            "note": "Unknown note",
+        },
+    ]
+    worker_calls: list[str] = []
+
+    def fake_worker(*, candidate, **_kwargs):
+        worker_calls.append(candidate["name"])
+        if candidate["name"] == "Completed Person":
+            return InviteSendResult(
+                name=candidate["name"],
+                linkedin_url=candidate["linkedin_url"],
+                status="sent",
+                detail="Invitation sent successfully.",
+                note=candidate["note"],
+            )
+        return InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="send_unknown_reserved",
+            detail="Worker timed out after the click boundary.",
+            note=candidate["note"],
+        )
+
+    monkeypatch.setattr("outreach.cli._run_invite_candidate_worker", fake_worker)
+
+    _, progress_path, status_counts, _, _ = execute_invite_batch(
+        settings=settings,
+        company="Safe Co",
+        source_artifact_path=source_artifact,
+        batch=batch,
+        execute=True,
+        limit=2,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+
+    assert worker_calls == ["Completed Person", "Unknown Person"]
+    assert status_counts == {"sent": 1, "send_unknown_reserved": 1}
+    progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert [item["status"] for item in progress["attempts"]] == [
+        "sent",
+        "send_unknown_reserved",
+    ]
+    assert progress["reconciliation_required_count"] == 1
+    ledger_path = reservation_ledger_path(workspace)
+    ledger = load_invite_reservations(ledger_path)
+    assert sorted(
+        reservation["status"] for reservation in ledger["reservations"].values()
+    ) == ["send_unknown_reserved", "sent"]
+    contacts = OutreachWorkbook(workspace).list_contacts()
+    assert {contact.full_name: contact.status for contact in contacts} == {
+        "Completed Person": "Invited",
+        "Unknown Person": "Invite uncertain",
+    }
+    first_touchpoint_count = len(OutreachWorkbook(workspace).list_touchpoints())
+
+    def fail_if_retried(**_kwargs):
+        raise AssertionError("durably reserved candidates must not reach a worker again")
+
+    monkeypatch.setattr("outreach.cli._run_invite_candidate_worker", fail_if_retried)
+    _, retry_progress, retry_counts, retry_contacts, retry_touchpoints = execute_invite_batch(
+        settings=settings,
+        company="Safe Co",
+        source_artifact_path=source_artifact,
+        batch=batch,
+        execute=True,
+        limit=2,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+
+    assert retry_counts == {
+        "send_already_reserved": 1,
+        "send_unknown_reserved": 1,
+    }
+    retry_payload = json.loads(retry_progress.read_text(encoding="utf-8"))
+    assert all(item["reservation_reused"] for item in retry_payload["results"])
+    assert retry_contacts == 0
+    assert retry_touchpoints == 0
+    assert len(OutreachWorkbook(workspace).list_touchpoints()) == first_touchpoint_count
+
+
+def test_signed_in_reconcile_resolves_unknown_invite_reservation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    artifact_dir = tmp_path / "artifacts"
+    settings = OutreachSettings(tracking_workspace_dir=workspace)
+    monkeypatch.setattr(OutreachSettings, "artifacts_dir", property(lambda self: artifact_dir))
+    source_artifact = tmp_path / "pipeline.json"
+    source_artifact.write_text("{}", encoding="utf-8")
+    candidate = {
+        "name": "Pending Person",
+        "title": "Product Manager",
+        "linkedin_url": "https://www.linkedin.com/in/pending-person/",
+        "note": "Pending note",
+    }
+    monkeypatch.setattr(
+        "outreach.cli._run_invite_candidate_worker",
+        lambda **_kwargs: InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="send_unknown_reserved",
+            detail="Worker timed out after the click boundary.",
+            note=candidate["note"],
+        ),
+    )
+    execute_invite_batch(
+        settings=settings,
+        company="Pending Co",
+        source_artifact_path=source_artifact,
+        batch=[candidate],
+        execute=True,
+        limit=1,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+    workbook = OutreachWorkbook(workspace)
+    queue = build_linkedin_reconcile_queue_items(
+        organizations=workbook.list_organizations(),
+        contacts=workbook.list_contacts(),
+        touchpoints=workbook.list_touchpoints(),
+    )
+    assert [item["name"] for item in queue] == ["Pending Person"]
+
+    reconciliation = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "name": "Pending Person",
+                "linkedin_url": candidate["linkedin_url"],
+                "status": "pending",
+                "detail": "LinkedIn shows Pending.",
+            }
+        ],
+        source_artifact="signed-in-reconcile.json",
+        apply_changes=True,
+    )
+
+    assert reconciliation["summary"]["reservations_reconciled"] == 1
+    assert reconciliation["results"][0]["reservation_status"] == "reconciled_pending"
+    assert workbook.list_contacts()[0].status == "Invited"
+    ledger = load_invite_reservations(reservation_ledger_path(workspace))
+    reservation = next(iter(ledger["reservations"].values()))
+    assert reservation["status"] == "reconciled_pending"
+    assert reservation["reconciliation_required"] is False
+
+
 def test_build_linkedin_reconcile_queue_selects_stale_invites() -> None:
     organization = OrganizationRecord(
         organization_id="org-snyk",
@@ -2101,6 +2898,14 @@ def test_build_linkedin_reconcile_queue_selects_stale_invites() -> None:
         linkedin_url="https://www.linkedin.com/in/connected/",
         last_contacted_at="2026-06-24T08:00:00+00:00",
     )
+    unresolved_contact = ContactRecord(
+        contact_id="ct-unresolved",
+        organization_id="org-snyk",
+        full_name="Unresolved Invite",
+        status="Invite uncertain",
+        linkedin_url="https://www.linkedin.com/in/unresolved/",
+        last_contacted_at="2026-01-01T08:00:00+00:00",
+    )
     invite_touchpoint = TouchpointRecord(
         touchpoint_id="tp-stale",
         organization_id="org-snyk",
@@ -2113,16 +2918,21 @@ def test_build_linkedin_reconcile_queue_selects_stale_invites() -> None:
 
     items = build_linkedin_reconcile_queue_items(
         organizations=[organization],
-        contacts=[stale_contact, fresh_contact, connected_contact],
+        contacts=[
+            stale_contact,
+            fresh_contact,
+            connected_contact,
+            unresolved_contact,
+        ],
         touchpoints=[invite_touchpoint],
         min_age_hours=12,
         max_age_days=14,
         now=datetime(2026, 6, 25, 12, 0, tzinfo=UTC),
     )
 
-    assert [item["contact_id"] for item in items] == ["ct-stale"]
-    assert items[0]["company"] == "Snyk"
-    assert items[0]["original_invite_note"] == "Hi Mehak, would value a referral pointer."
+    assert [item["contact_id"] for item in items] == ["ct-unresolved", "ct-stale"]
+    assert items[1]["company"] == "Snyk"
+    assert items[1]["original_invite_note"] == "Hi Mehak, would value a referral pointer."
 
 
 def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_path: Path) -> None:

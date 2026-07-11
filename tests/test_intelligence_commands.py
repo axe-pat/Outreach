@@ -7,7 +7,11 @@ from typer.testing import CliRunner
 
 from outreach.cli import _apply_linkedin_cadence_guards, app
 from outreach.company_news import company_news_capture_snapshots, company_news_signal_id
-from outreach.company_watchlist import CandidateCompanySignal
+from outreach.company_watchlist import (
+    CandidateCompanySignal,
+    CompanyFitRubric,
+    RubricDimension,
+)
 from outreach.intelligence_commands import (
     _apply_email_approval,
     _capture_due,
@@ -50,6 +54,91 @@ def test_company_discovery_command_builds_review_queue(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert (workspace / "company_discovery" / "company_discovery_review.csv").exists()
     assert "Pending review in workspace: 1" in result.output
+
+
+def test_promoted_watchlist_approval_rehydrates_after_empty_artifact_rebuild(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace = _workspace(tmp_path)
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-durable-ai",
+            name="DurableAI",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="company-watchlist;track-2;relationship",
+            status="Reviewed watchlist",
+            website="https://durable.example",
+            notes=(
+                "Human-approved company discovery watchlist"
+                " | watchlist_review_state=approved"
+                " | watchlist_reviewer=reviewer-1"
+                " | watchlist_reviewed_at=2026-07-11T08:00:00+00:00"
+                " | watchlist_reviewer_notes=Strong reviewed fit"
+            ),
+        )
+    )
+    rubric = CompanyFitRubric(
+        domain_fit=RubricDimension(score=2, evidence="AI platform"),
+        technical_mba_story=RubricDimension(score=2, evidence="technical story"),
+        geography_remote=RubricDimension(score=2, evidence="US remote"),
+        growth_quality=RubricDimension(score=2, evidence="funding"),
+        role_surface=RubricDimension(score=2, evidence="product roles"),
+    )
+    signal = CandidateCompanySignal(
+        company_name="Durable AI",
+        website="https://durable.example",
+        rubric=rubric,
+        provenance=[
+            {
+                "source_name": "Fixture News",
+                "source_type": "company_news",
+                "source_run_id": "run-1",
+                "source_url": "https://news.example/durable",
+            }
+        ],
+    )
+    signal_id = company_news_signal_id(signal)
+    (workspace / "company_news_signals.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "signals": [
+                    {
+                        "signal_id": signal_id,
+                        "first_seen_at": "2026-07-11T08:00:00+00:00",
+                        "last_seen_at": "2026-07-11T08:00:00+00:00",
+                        "seen_run_ids": ["run-1"],
+                        "signal": signal.model_dump(mode="json"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = workspace / "company_discovery"
+    output_dir.mkdir(parents=True)
+    (output_dir / "company_watchlist.json").write_text(
+        json.dumps({"schema_version": "1.0", "entries": []}),
+        encoding="utf-8",
+    )
+
+    first = runner.invoke(
+        app,
+        ["build-company-discovery-review", "--workspace", str(workspace), "--run-id", "run-1"],
+    )
+    second = runner.invoke(
+        app,
+        ["build-company-discovery-review", "--workspace", str(workspace), "--run-id", "run-2"],
+    )
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    watchlist = json.loads((output_dir / "company_watchlist.json").read_text(encoding="utf-8"))
+    assert [entry["company_name"] for entry in watchlist["entries"]] == ["Durable AI"]
+    assert watchlist["entries"][0]["review_state"] == "approved"
 
 
 def test_failed_linkedin_capture_returns_nonzero_after_writing_artifact(

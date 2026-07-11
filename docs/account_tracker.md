@@ -152,6 +152,16 @@ in-person/hybrid fall roles outside LA should not lift Track 2 priority. Summer
 internships remain visible in Fit Score, but should not by themselves push a company
 into the relationship-campaign priority pool.
 
+Account-level role watching uses the existing shared daily queue, not another
+tracker. `strategic`/`wishlist`/`dream` organizations remain unchanged in the
+company-level workbook and surface as buffered `role_watch` items even with no live
+role. A strong adjacent role from the exact ResumeGenerator run upgrades that same
+queue row to human-gated `application_research`, with the role title/family, source
+URL, source name, queue bucket, decision, write gate, and run ID preserved. This
+surface is read-only with respect to both `organizations.csv` and ResumeGenerator's
+`jobs.xlsx`. A positive `--limit` can suppress low-priority watch-only rows; use
+`python -m outreach.shared_discovery ... --limit 0` for the complete watch surface.
+
 ## Company Context Enrichment
 
 `enrich-company-context` fills the `tags=...`, `description=...`, and `context_*`

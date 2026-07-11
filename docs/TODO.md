@@ -11,7 +11,13 @@ paths visible instead of accidentally filtering them out.
    nightly pipeline for several real cycles, then use its run-scoped report to
    correct source failures, review backlog, LinkedIn restrictions, and campaign
    execution. This comes first: every later optimization is noise if it is
-   based on stale snapshots or missing source runs.
+   based on stale snapshots or missing source runs. The production contract is
+   fail-closed: run claims come only from the nightly summary's exact
+   `daily_engine_manifest` and Track 2 phase pointers, never artifact mtimes.
+   Missing manifests/artifacts, a `None` Track 2 return code, queued live phases,
+   or phase failures must remain visibly incomplete/not-run and can never be
+   rendered as completed. `What needs you`, message review, auto-handled sends,
+   system holds, actual company actions, and plans remain separate report data.
 2. **IMPLEMENTED — operate the daily LinkedIn intelligence pass.** The
    configurable home-feed capture records good startups and other interesting
    company, role, hiring, funding, launch, and warm-network signals with post
@@ -31,7 +37,10 @@ paths visible instead of accidentally filtering them out.
    replies/stops, same-day channel suppression, and distinct second LinkedIn
    follow-ups. SMTP delivery exists only behind reviewed drafts, a due cadence
    decision, configured credentials, a bounded limit, and explicit `--execute`.
-   The next step is one small reviewed live batch, not higher volume.
+   The report keeps email drafts in `Messages to review`, surfaces SMTP/config
+   blockers in `What needs you` and Source Breakdown, and counts only exact
+   delivery results as sends. The next step is one small reviewed live batch,
+   not higher volume.
 5. **IMPLEMENTED MONITOR; TUNING REMAINS — protect adjacent role coverage.**
    A separate run-scoped role-surface report keeps the account tracker
    company-level while showing discovered, scored, surfaced, and acted-on
@@ -54,6 +63,14 @@ paths visible instead of accidentally filtering them out.
    outcomes before making those higher-order changes.
 
 ### Remaining Activation and Human Gates
+
+- [x] Add report contract tests proving a concurrent/manual/pytest artifact in
+  the same directory and time window cannot contaminate production run totals.
+- [ ] Require a final daily-engine manifest and exact artifact reconciliation
+  in the scheduled production run before treating its report as green.
+- [ ] Keep new pipeline stages disabled in production until isolated tests and
+  a fixture-backed end-to-end report test pass on a feature branch; merge and
+  enable them only after those gates succeed.
 
 - [x] Validate the signed-in dedicated Chrome session against the current
   LinkedIn feed and profile-viewer pages (live-validated July 10, 2026).

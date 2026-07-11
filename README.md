@@ -521,24 +521,68 @@ At the end of that LaunchAgent path, ResumeGenerator now calls:
 python main.py write-daily-run-report --workspace workspace --since <run-start> --nightly-summary <summary-json>
 ```
 
-That command refreshes the Outreach HTML/Markdown report from exact nightly
-summary pointers plus clearly labeled artifacts observed inside that pipeline's
-time window. It has two modes: the scheduled
+That command refreshes the Outreach HTML/Markdown report from the selected
+nightly summary. In run-scoped mode, `--since` identifies the run start but is
+never used to discover artifacts. Every claimed action must come from one of
+these explicit pointers:
+
+- `nightly_summary.daily_engine_manifest` for ResumeGenerator/app-queue invite,
+  follow-up, reply, and email-send artifacts
+- `nightly_summary.outreach_maintenance.track_2_daily_run_artifact` and that
+  artifact's exact phase/child-artifact pointers
+- named source, maintenance, and intelligence artifacts in the same nightly
+  summary
+
+An unrelated manual command, test, or concurrent run can create an artifact in
+the same directory and time window without affecting the report. It has two
+modes: the scheduled
 run-scoped mode (pass both `--since` and `--nightly-summary`) is the source of
 truth; an ad-hoc mode without them is only for local troubleshooting and is
 clearly labeled as a workspace snapshot. The report has a first-class Source
 Breakdown for LinkedIn, Handshake, JobSpy, startup sources, the
-ResumeGenerator/app queue, and Track 2 imports/maintenance. Sources that did
-not run are shown as `skipped` with zeroes rather than being inferred from old
-artifacts.
+ResumeGenerator/app queue, Track 2 imports/maintenance, and the cold-email
+channel. Sources that did
+not run are shown as `skipped`/`not_run` with zeroes rather than being inferred
+from old artifacts. Startup sources also show adapter and lane stages separately
+(`fetched`, `discovered`, and `selected/new`), so YC/Built In company discovery
+cannot be confused with startup job discovery.
 
 The report is action-first: it separates outcomes actually executed in that
 run (including per-company counts, such as invites sent or contacts mapped)
-from the next campaign plan. Its `What needs you` queue includes inbound
-LinkedIn replies that need a human action, such as a resume request; those open
-items persist in `workspace/linkedin_inbox_actions.csv` until marked done,
-snoozed, or not actionable. It never sends that email or other reply
-automatically.
+from the next campaign plan. It has distinct contracts:
+
+- `What needs you` contains only concrete human actions, such as a resume/email
+  request, routing decision, message-review batch, or explicit SMTP/configuration
+  blocker.
+- `Messages to review` contains unsent drafts behind a human-review gate and
+  shows the channel, recipient, subject/inbound context, draft, gate, and whether
+  it came from this run or the carried-over queue. Track 2 email drafts belong
+  here until approved; a draft is never counted as sent.
+- `Auto-handled messages` contains only exact send results with `status=sent`.
+- `LinkedIn actions` puts invite sends, inbox refresh/triage, follow-ups,
+  replies, mapping, Contact Info research, feed capture, viewer capture,
+  review holds, skips, and failures in one place.
+- `Execution by company` is derived from actual result artifacts; plan budgets
+  and campaign recommendations never count as completed work.
+- `Cold email actions` records reviewed delivery results separately. Email totals
+  increase only from an exact send artifact whose delivery status is `sent`;
+  manifest-reported SMTP blockers and sent/draft-count mismatches stay visible.
+
+Open inbox items persist in `workspace/linkedin_inbox_actions.csv` until marked
+done, snoozed, not actionable, or resolved by an exact auto-send result. Track 2
+with no return code/artifact is `not_run`, not `completed`; phase failures and
+queued/planned live work keep the run from being reported as green.
+
+### Production promotion contract
+
+The scheduled end-to-end path is the protected production path. New stages stay
+disabled there until they have isolated unit/contract tests, a fixture-backed
+end-to-end report test, and an explicit run-manifest schema. Production report
+tests must use temporary artifact/workspace directories and must prove that an
+unreferenced concurrent artifact cannot change totals. After those gates pass,
+the change can be merged and enabled in the scheduled config. A production run
+is complete only when its final nightly summary, daily-engine manifest, required
+stage results, Track 2 phase artifact, and daily report all exist and reconcile.
 
 Each run also writes a small reusable LinkedIn comms-learning corpus under
 `workspace/comms_learning/`: manual messages are `gold`, generated drafts

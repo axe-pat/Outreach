@@ -95,7 +95,10 @@ def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp
     assert by_source["Handshake"]["kept"] == 0
     assert by_source["JobSpy"]["kept"] == 0
     assert by_source["ResumeGenerator / app queue"]["status"] == "ran"
-    assert by_source["Track 2 imports / maintenance"]["status"] == "skipped"
+    assert by_source["Track 2 imports / maintenance"]["status"] == "not_run"
+    startup_adapters = by_source["Startup sources"]["details"]["adapters"]
+    assert len(startup_adapters) == 9
+    assert {row["status"] for row in startup_adapters} == {"skipped"}
 
 
 def test_source_breakdown_keeps_startup_lane_failures_explicit(tmp_path: Path) -> None:
@@ -346,6 +349,9 @@ def test_daily_report_surfaces_open_inbound_resume_request(tmp_path: Path) -> No
     assert payload["open_inbox_actions"][0]["company"] == "LemonLime"
     assert payload["open_inbox_actions"][0]["action_type"] == "email_resume_requested"
     assert payload["open_inbox_actions"][0]["email"] == "careers@lemonlime.ai"
+    assert payload["what_needs_you"][0]["action_type"] == "email_resume_requested"
+    assert payload["messages_to_review"] == []
+    assert payload["auto_handled"] == []
     assert "Email your resume" in report_path.read_text(encoding="utf-8")
     assert "Jordan Zietz" in html_path.read_text(encoding="utf-8")
     assert (workspace / "linkedin_inbox_actions.csv").exists()
@@ -359,6 +365,486 @@ def test_daily_report_cli_rejects_half_scoped_mode(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "Pass both --since and --nightly-summary" in result.output
+
+
+def test_daily_report_run_scope_ignores_unreferenced_concurrent_artifacts(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    exact_invites = artifacts / "exact-invite-send-batch.json"
+    exact_invites.write_text(
+        json.dumps(
+            {
+                "company": "ExactCo",
+                "results": [{"name": "A", "status": "sent"}, {"name": "B", "status": "sent"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # This looks like a valid same-window production artifact but is not owned
+    # by the selected run manifest. It must be invisible to all report totals.
+    contaminant = artifacts / "pytest-concurrent-invite-send-batch.json"
+    contaminant.write_text(
+        json.dumps(
+            {
+                "company": "PollutionCo",
+                "results": [{"status": "sent"} for _ in range(99)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "daily-engine-manifest.json"
+    manifest.write_text(
+        json.dumps({"artifacts": {"invite_send_batches": [str(exact_invites)]}}),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "created_at": "2026-07-11T01:00:00-07:00",
+                "daily_engine_manifest": str(manifest),
+                "outreach_maintenance": {"ran": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, report_path, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["invite_totals"] == {"sent": 2}
+    assert payload["run_outcome"]["total_outbound_sends"] == 2
+    assert [row["company"] for row in payload["company_execution"]] == ["ExactCo"]
+    assert payload["run_integrity"]["artifact_selection"] == "explicit_pointers_only"
+    assert "PollutionCo" not in report_path.read_text(encoding="utf-8")
+    assert str(contaminant) not in json.dumps(payload)
+
+
+def test_daily_report_missing_manifest_fails_closed_without_mtime_fallback(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "looks-current-invite-send-batch.json").write_text(
+        json.dumps({"company": "MustNotLeak", "results": [{"status": "sent"}]}),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 0,
+                    "track_2_daily_run_artifact": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, report_path, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["invite_totals"] == {}
+    assert payload["run_status"] == "failed_or_incomplete"
+    assert payload["run_integrity"]["daily_engine_manifest_status"] == "not_recorded"
+    assert payload["track_2_execution"]["status"] == "failed_missing_artifact"
+    assert "MustNotLeak" not in report_path.read_text(encoding="utf-8")
+
+
+def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(OrganizationRecord(organization_id="org-auto", name="AutoCo"))
+    workbook.upsert_organization(OrganizationRecord(organization_id="org-review", name="ReviewCo"))
+    workbook.upsert_contact(ContactRecord(contact_id="ct-auto", organization_id="org-auto", full_name="Auto Person", status="Replied"))
+    workbook.upsert_contact(ContactRecord(contact_id="ct-review", organization_id="org-review", full_name="Review Person", status="Replied"))
+    (workspace / "linkedin_message_state.json").write_text(
+        json.dumps(
+            {
+                "thread_states": {
+                    "auto": {"name": "Auto Person", "last_sender": "Auto Person", "latest_message": "Sounds good", "signature": "auto-1"},
+                    "review": {"name": "Review Person", "last_sender": "Review Person", "latest_message": "Can you clarify?", "signature": "review-1"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    drafts = artifacts / "exact-linkedin-followup-drafts.json"
+    drafts.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-auto", "company": "AutoCo", "name": "Auto Person",
+                        "draft_kind": "conversation_reply", "send_recommendation": "safe_to_review",
+                        "latest_message": "Sounds good", "draft_message": "Thanks, I will follow up.",
+                    },
+                    {
+                        "contact_id": "ct-review", "company": "ReviewCo", "name": "Review Person",
+                        "draft_kind": "conversation_reply", "send_recommendation": "review",
+                        "latest_message": "Can you clarify?", "draft_message": "Here is what I meant.",
+                    },
+                    {
+                        "contact_id": "ct-hold", "company": "HoldCo", "name": "Hold Person",
+                        "draft_kind": "accepted_follow_up", "send_recommendation": "cadence_hold",
+                        "latest_message": "", "draft_message": "Wait until due.",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    sends = artifacts / "exact-linkedin-followup-send-results.json"
+    sends.write_text(
+        json.dumps(
+            {
+                "count": 1,
+                "status_counts": {"sent": 1},
+                "results": [
+                    {
+                        "contact_id": "ct-auto", "company": "AutoCo", "name": "Auto Person",
+                        "draft_kind": "conversation_reply", "send_recommendation": "safe_to_review",
+                        "draft_message": "Thanks, I will follow up.", "status": "sent",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reconcile = artifacts / "exact-linkedin-message-reconcile.json"
+    reconcile.write_text(
+        json.dumps(
+            {
+                "thread_count": 2,
+                "new_result_count": 2,
+                "filtered_result_count": 2,
+                "results": [
+                    {"contact_id": "ct-auto", "name": "Auto Person", "status": "replied", "last_sender": "Auto Person", "latest_message": "Sounds good"},
+                    {"contact_id": "ct-review", "name": "Review Person", "status": "replied", "last_sender": "Review Person", "latest_message": "Can you clarify?"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+                {
+                    "linkedin_followup_draft_artifacts": [str(drafts)],
+                    "linkedin_followup_send_artifacts": [str(sends)],
+                    "linkedin_reconcile_artifacts": [str(reconcile)],
+                }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "summary.json"
+    nightly_summary.write_text(
+        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, report_path, html_path, _ = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert [row["person"] for row in payload["auto_handled"]] == ["Auto Person"]
+    assert [row["name"] for row in payload["messages_to_review"]] == ["Review Person"]
+    assert [row["name"] for row in payload["system_held_messages"]] == ["Hold Person"]
+    assert [row["action_type"] for row in payload["what_needs_you"]] == ["message_review"]
+    assert payload["track_2_execution"]["status"] == "not_run"
+    inbox_refresh = next(
+        row for row in payload["linkedin_actions"]
+        if row["action"] == "linkedin_inbox_refresh"
+    )
+    assert inbox_refresh["count"] == 2
+    with (workspace / "linkedin_inbox_actions.csv").open(encoding="utf-8", newline="") as handle:
+        inbox_rows = {row["person"]: row for row in csv.DictReader(handle)}
+    assert inbox_rows["Auto Person"]["status"] == "auto_handled"
+    assert inbox_rows["Review Person"]["status"] == "open"
+    assert "Track 2 execution: `not_run`" in report_path.read_text(encoding="utf-8")
+    html_text = html_path.read_text(encoding="utf-8")
+    assert "Messages to review" in html_text
+    assert "Auto-handled messages (this run)" in html_text
+
+
+def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    drafts = artifacts / "exact-track-2-email-drafts.json"
+    drafts.write_text(
+        json.dumps(
+            {
+                "count": 1,
+                "results": [
+                    {
+                        "organization_id": "org-email",
+                        "contact_id": "ct-email",
+                        "company": "EmailCo",
+                        "name": "Email Person",
+                        "email": "person@emailco.example",
+                        "subject": "Specific EmailCo role fit",
+                        "body": "Concise reviewed body that has not been approved or sent.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "track_2_email_draft_artifacts": [str(drafts)],
+                "track_2_email_send_artifacts": [],
+                "email_channel": {
+                    "status": "skipped_missing_credentials",
+                    "smtp_configured": False,
+                    "blockers": ["Configure SMTP_HOST and SMTP_FROM_EMAIL before reviewed delivery."],
+                    "approval_required": True,
+                    "nightly_delivery_enabled": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, report_path, html_path, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["run_outcome"]["emails_sent"] == 0
+    assert payload["messages_to_review"][0]["channel"] == "email"
+    assert payload["messages_to_review"][0]["subject"] == "Specific EmailCo role fit"
+    action_types = {row["action_type"] for row in payload["what_needs_you"]}
+    assert {"message_review", "email_channel_blocker"} <= action_types
+    email_source = next(row for row in payload["source_breakdown"] if row["source"] == "Cold email channel")
+    assert email_source["status"] == "skipped_missing_credentials"
+    assert email_source["raw"] == 1
+    assert email_source["kept"] == 0
+    assert "Configure SMTP_HOST" in report_path.read_text(encoding="utf-8")
+    assert "Cold email actions (this run)" in html_path.read_text(encoding="utf-8")
+
+
+def test_daily_report_counts_only_actual_sent_email_and_clears_matching_draft(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    draft_row = {
+        "organization_id": "org-email",
+        "contact_id": "ct-email",
+        "company": "EmailCo",
+        "name": "Email Person",
+        "email": "person@emailco.example",
+        "subject": "Specific EmailCo role fit",
+        "body": "Approved body.",
+    }
+    drafts = artifacts / "exact-track-2-email-drafts.json"
+    drafts.write_text(json.dumps({"results": [draft_row]}), encoding="utf-8")
+    sends = artifacts / "exact-track-2-email-send-results.json"
+    sends.write_text(
+        json.dumps({"results": [{**draft_row, "delivery_status": "sent"}]}),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "track_2_email_draft_artifacts": [str(drafts)],
+                "track_2_email_send_artifacts": [str(sends)],
+                "email_channel": {"status": "sent", "smtp_configured": True, "blockers": [], "sent_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps({"daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, _report, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["run_outcome"]["emails_sent"] == 1
+    assert payload["run_outcome"]["total_outbound_sends"] == 1
+    assert payload["messages_to_review"] == []
+    assert payload["email_actions"][0]["status"] == "sent"
+    assert payload["company_execution"] == [
+        {"company": "EmailCo", "counts": {"emails_sent": 1}, "summary": "emails sent 1"}
+    ]
+
+
+def test_daily_report_track_2_company_counts_are_actual_not_planned(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    mapping = artifacts / "exact-mapping.json"
+    mapping.write_text(json.dumps({"company": "Airbyte", "count": 3, "results": [{}, {}, {}]}), encoding="utf-8")
+    invites = artifacts / "exact-invite-send-batch.json"
+    invites.write_text(
+        json.dumps({"company": "Airbyte", "results": [{"status": "sent"}, {"status": "sent"}]}),
+        encoding="utf-8",
+    )
+    track = artifacts / "exact-track-2-daily-run.json"
+    track.write_text(
+        json.dumps(
+            {
+                "execute": True,
+                "used": {"linkedin_invites": 999, "company_mapping": 999},
+                "phase_results": [
+                    {"phase": "4_contact_mapping", "status": "ran", "runs": [{"company": "Airbyte", "artifact": str(mapping)}]},
+                    {"phase": "5_send_linkedin_invites", "status": "sent", "runs": [{"company": "Airbyte", "send_artifact": str(invites), "status_counts": {"sent": 2}}]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_metrics = tmp_path / "source-metrics.json"
+    source_metrics.write_text(
+        json.dumps({"sources": {}, "stage_metrics": {}, "action_queue": {"counts": {}}}),
+        encoding="utf-8",
+    )
+    action_queue = tmp_path / "action-queue.json"
+    action_queue.write_text(json.dumps({"counts": {"outreach_only_today": 0}}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "manifest_schema": "resume_generator.daily_engine_run_manifest",
+                "manifest_version": 1,
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "artifacts": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "daily_engine_returncode": 0,
+                "daily_engine_manifest": str(manifest),
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 0,
+                    "track_2_daily_run_artifact": str(track),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+
+    summary_path, _report, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    airbyte = payload["company_execution"][0]
+    assert airbyte["company"] == "Airbyte"
+    assert airbyte["counts"]["linkedin_invites_sent"] == 2
+    assert airbyte["counts"]["linkedin_profiles_mapped"] == 3
+    assert 999 not in airbyte["counts"].values()
+    assert payload["track_2_execution"]["status"] == "completed"
+    assert payload["run_status"] == "completed"
+
+
+def test_source_breakdown_exposes_each_startup_adapter_stage(tmp_path: Path) -> None:
+    relationship_artifact = tmp_path / "yc-sf.json"
+    relationship_artifact.write_text(json.dumps({"raw_count": 50, "count": 25}), encoding="utf-8")
+    startup_report = tmp_path / "startup-report.json"
+    startup_report.write_text(
+        json.dumps(
+            {
+                "relationship_lane": {
+                    "artifacts": {"yc_sf_bay_hiring": {"artifact": str(relationship_artifact), "count": 25, "status": "loaded"}},
+                    "source_counts": {"yc_sf_bay_hiring": 15},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    metrics = tmp_path / "metrics.json"
+    metrics.write_text(
+        json.dumps(
+            {
+                "sources": {"startup_apply": {"status": "ran"}, "startup_relationship": {"status": "ran"}},
+                "startup_source_report": {
+                    "artifact": str(startup_report),
+                    "startup_apply_discovered": {"a16z_job_board": 5},
+                    "startup_apply_new": {"a16z_job_board": 1},
+                    "relationship_source_counts": {"yc_sf_bay_hiring": 15},
+                    "relationship_targets": 15,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    startup = next(
+        row for row in _source_breakdown({"source_metrics": str(metrics)})
+        if row["source"] == "Startup sources"
+    )
+    adapters = {
+        (row["source"], row["lane"]): row
+        for row in startup["details"]["adapters"]
+    }
+    assert adapters[("yc_sf_bay_hiring", "company_relationship_discovery")] == {
+        "source": "yc_sf_bay_hiring",
+        "lane": "company_relationship_discovery",
+        "status": "loaded",
+        "fetched": 50,
+        "discovered": 25,
+        "selected": 15,
+        "artifact": str(relationship_artifact),
+    }
+    assert adapters[("a16z_job_board", "startup_job_discovery")]["selected"] == 1
+    assert adapters[("builtin_sf_job_lists", "startup_job_discovery")]["status"] == "ran"
+    assert adapters[("builtin_sf_job_lists", "startup_job_discovery")]["discovered"] == 0
 
 
 def test_comms_learning_writes_gold_negative_and_silver_examples(tmp_path: Path) -> None:

@@ -16,8 +16,11 @@ paths visible instead of accidentally filtering them out.
    `daily_engine_manifest` and Track 2 phase pointers, never artifact mtimes.
    Missing manifests/artifacts, a `None` Track 2 return code, queued live phases,
    or phase failures must remain visibly incomplete/not-run and can never be
-   rendered as completed. `What needs you`, message review, auto-handled sends,
-   system holds, actual company actions, and plans remain separate report data.
+   rendered as completed. Required Source Breakdown rows now fail overall run
+   health on failed/timeout/partial/incomplete statuses while intentional skips
+   and successful zero-result runs remain valid. `What needs you`, message
+   review, auto-handled sends, system holds, actual company actions, and plans
+   remain separate report data.
    Exact-company-filter failures, app-queue prep/send failures, and unknown
    invite delivery must likewise stay non-green and visible at company level;
    an unknown reserved invite requires signed-in reconciliation before retry.
@@ -75,6 +78,8 @@ paths visible instead of accidentally filtering them out.
 
 - [x] Add report contract tests proving a concurrent/manual/pytest artifact in
   the same directory and time window cannot contaminate production run totals.
+- [x] Add a fixture-backed report gate proving a timed-out required source stays
+  visible in Source Breakdown and cannot render the overall run completed.
 - [ ] Require a final daily-engine manifest and exact artifact reconciliation
   in the scheduled production run before treating its report as green.
 - [ ] Keep new pipeline stages disabled in production until isolated tests and

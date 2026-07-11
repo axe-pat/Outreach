@@ -74,6 +74,7 @@ from outreach.cli import (
     _run_invite_candidate_worker,
     _app_invite_report_status,
     _apply_linkedin_cadence_guards,
+    _required_source_failures,
     _track_2_actual_actions,
     _track_2_execution_status,
     _write_comms_learning_artifact,
@@ -166,6 +167,129 @@ def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp
     startup_adapters = by_source["Startup sources"]["details"]["adapters"]
     assert len(startup_adapters) == 9
     assert {row["status"] for row in startup_adapters} == {"skipped"}
+
+
+def test_required_source_failures_allows_explicit_skips_and_successful_zeroes() -> None:
+    rows = [
+        {"source": "LinkedIn", "status": "skipped", "raw": 0, "kept": 0},
+        {"source": "Handshake", "status": "ran", "raw": 0, "kept": 0},
+        {"source": "JobSpy", "status": "skipped", "raw": 0, "kept": 0},
+        {"source": "Startup sources", "status": "skipped", "raw": 0, "kept": 0},
+        {
+            "source": "ResumeGenerator / app queue",
+            "status": "ran",
+            "raw": 0,
+            "kept": 0,
+        },
+        {
+            "source": "Track 2 imports / maintenance",
+            "status": "completed_zero_actions",
+            "raw": 0,
+            "kept": 0,
+        },
+    ]
+
+    assert _required_source_failures(rows) == []
+
+
+def test_fixture_linkedin_timeout_is_non_green_and_visible_in_source_breakdown(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    source_metrics = (
+        Path(__file__).parent
+        / "fixtures"
+        / "nightly_source_metrics_linkedin_timed_out.json"
+    )
+    action_queue = tmp_path / "action-queue.json"
+    action_queue.write_text(json.dumps({"counts": {}}), encoding="utf-8")
+    manifest = tmp_path / "daily-engine-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "manifest_schema": "resume_generator.daily_engine_run_manifest",
+                "manifest_version": 1,
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "artifacts": {},
+                "app_invites": {
+                    "status": "completed",
+                    "target": 0,
+                    "sent": 0,
+                    "companies_attempted": 0,
+                    "company_runs": [],
+                    "failed_companies": [],
+                    "unresolved_companies": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    track = artifacts / "exact-track-2-daily-run.json"
+    track.write_text(
+        json.dumps(
+            {
+                "execute": True,
+                "phase_results": [
+                    {"phase": "1_2_linkedin_followups", "status": "ran"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(
+        json.dumps(
+            {
+                "daily_engine_returncode": 0,
+                "daily_engine_manifest": str(manifest),
+                "source_metrics": str(source_metrics),
+                "action_queue": str(action_queue),
+                "failures": [],
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 0,
+                    "track_2_daily_run_artifact": str(track),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_summary, markdown, html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 7, 11, 1, 0, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+    payload = json.loads(report_summary.read_text(encoding="utf-8"))
+    linkedin = next(
+        row for row in payload["source_breakdown"] if row["source"] == "LinkedIn"
+    )
+
+    assert payload["run_status"] == "failed_or_incomplete"
+    assert payload["run_integrity"]["required_source_failures"] == [
+        {"source": "LinkedIn", "status": "timed_out"}
+    ]
+    assert linkedin == {
+        "source": "LinkedIn",
+        "status": "timed_out",
+        "raw": 0,
+        "kept": 0,
+        "details": {"reason": "source_watchdog_timeout"},
+    }
+    assert "LinkedIn: `timed_out` · kept `0` / raw `0`" in markdown.read_text(
+        encoding="utf-8"
+    )
+    html_text = html.read_text(encoding="utf-8")
+    assert "Source Breakdown (this run)" in html_text
+    assert "<td>LinkedIn</td><td>timed_out</td>" in html_text
 
 
 def test_source_breakdown_keeps_startup_lane_failures_explicit(tmp_path: Path) -> None:

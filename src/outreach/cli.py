@@ -7334,6 +7334,45 @@ def _combined_source_status(*statuses: str) -> str:
     return "skipped"
 
 
+REQUIRED_RUN_SOURCE_NAMES = frozenset(
+    {
+        "LinkedIn",
+        "Handshake",
+        "JobSpy",
+        "Startup sources",
+        "ResumeGenerator / app queue",
+        "Track 2 imports / maintenance",
+    }
+)
+NON_GREEN_REQUIRED_SOURCE_STATUSES = frozenset(
+    {"failed", "timed_out", "timeout", "partial_failed", "incomplete"}
+)
+
+
+def _required_source_failures(
+    source_breakdown: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    """Return required source rows whose recorded status cannot be green.
+
+    A deliberate ``skipped`` source and a source that ran successfully but
+    produced zero rows are valid. Failure is status-driven so counts cannot
+    conceal a timeout or partial/incomplete execution.
+    """
+    failures: list[dict[str, str]] = []
+    for row in source_breakdown:
+        source = str(row.get("source") or "").strip()
+        if source not in REQUIRED_RUN_SOURCE_NAMES:
+            continue
+        recorded_status = str(row.get("status") or "").strip()
+        normalized_status = recorded_status.casefold().replace("-", "_")
+        if normalized_status in NON_GREEN_REQUIRED_SOURCE_STATUSES or any(
+            normalized_status.startswith(f"{status}_")
+            for status in NON_GREEN_REQUIRED_SOURCE_STATUSES
+        ):
+            failures.append({"source": source, "status": recorded_status})
+    return failures
+
+
 def _unscoped_source_breakdown() -> list[dict[str, object]]:
     return [
         {
@@ -8600,6 +8639,10 @@ def write_artifact_daily_report(
 
     track_2_returncode = track_execution.get("returncode")
     track_2_failed = str(track_execution.get("status") or "").startswith("failed") or track_execution.get("status") == "partial_failed"
+    required_source_failures = (
+        _required_source_failures(source_breakdown) if run_scoped else []
+    )
+    run_integrity["required_source_failures"] = required_source_failures
     app_invite_incomplete = app_invite_status in {
         "failed",
         "partial_failed",
@@ -8620,6 +8663,7 @@ def write_artifact_daily_report(
         or daily_engine_returncode != 0
         or run_integrity.get("missing_artifacts")
         or required_pointer_errors
+        or required_source_failures
     ):
         run_status = "failed_or_incomplete"
     elif manifest_status not in {"loaded", "inline"}:
@@ -8912,6 +8956,8 @@ def write_artifact_daily_report(
         lines.append(f"- Missing exact artifacts: `{run_integrity['missing_artifacts']}`")
     if required_pointer_errors:
         lines.append(f"- Required pointer errors: `{required_pointer_errors}`")
+    if required_source_failures:
+        lines.append(f"- Required source failures: `{required_source_failures}`")
 
     lines.extend(["", "## What needs you", ""])
     if what_needs_you:
@@ -9195,7 +9241,7 @@ def write_artifact_daily_report(
       <div class="card"><h2>Track 2</h2><p><strong>{esc(track_execution['status'])}</strong></p><p>Return code {esc(track_2_returncode)}. Planned counts are never shown as completed work.</p></div>
     </section>
     <section class="grid">
-      <div class="card"><h2>Run integrity</h2><p><strong>{esc(run_integrity.get('artifact_selection', ''))}</strong></p><p>Daily-engine manifest: {esc(manifest_status)} · missing exact artifacts: {esc(len(run_integrity.get('missing_artifacts') or []))} · required pointer errors: {esc(len(required_pointer_errors))}</p></div>
+      <div class="card"><h2>Run integrity</h2><p><strong>{esc(run_integrity.get('artifact_selection', ''))}</strong></p><p>Daily-engine manifest: {esc(manifest_status)} · missing exact artifacts: {esc(len(run_integrity.get('missing_artifacts') or []))} · required pointer errors: {esc(len(required_pointer_errors))} · required source failures: {esc(len(required_source_failures))}</p></div>
       <div class="card"><h2>Company review</h2><p><strong>{esc((company_discovery.get('workspace_summary') or {}).get('pending_review', 0))}</strong> candidates await a disposition before promotion.</p></div>
       <div class="card"><h2>Run health</h2><p>Daily engine <code>{esc(nightly_summary.get('daily_engine_returncode', ''))}</code> · app invites <code>{esc(app_invite_status)}</code> · JobSpy score-now <code>{esc(jobspy_metrics.get('jobspy_app_score_now', 0))}</code></p></div>
     </section>

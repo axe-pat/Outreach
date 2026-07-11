@@ -689,6 +689,12 @@ from old artifacts. Startup sources also show adapter and lane stages separately
 (`fetched`, `discovered`, and `selected/new`), so YC/Built In company discovery
 cannot be confused with startup job discovery.
 
+Overall run health is derived from those same exact-run rows. A required
+LinkedIn, Handshake, JobSpy, startup, app-queue, or Track 2 row with status
+`failed`, `timed_out`, `timeout`, `partial_failed`, or `incomplete` prevents the
+report from claiming `completed`. An explicitly configured `skipped` source and
+a successful source with zero results remain valid and visible.
+
 The report is action-first: it separates outcomes actually executed in that
 run (including per-company counts, such as invites sent or contacts mapped)
 from the next campaign plan. It has distinct contracts:

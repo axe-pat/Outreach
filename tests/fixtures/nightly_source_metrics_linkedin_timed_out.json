@@ -1,0 +1,76 @@
+{
+  "generated_at": "2026-07-11T01:10:00-07:00",
+  "run_started_at": "2026-07-11T01:00:00-07:00",
+  "window": "24h",
+  "stage_metrics": {
+    "linkedin": {
+      "status": "timed_out",
+      "runtime_seconds": 600.0,
+      "returncode": 124
+    },
+    "handshake": {
+      "status": "ran",
+      "runtime_seconds": 3.0
+    },
+    "jobspy": {
+      "status": "skipped",
+      "runtime_seconds": 0
+    },
+    "startup_apply": {
+      "status": "skipped",
+      "runtime_seconds": 0
+    },
+    "relationship_discovery": {
+      "status": "skipped",
+      "runtime_seconds": 0
+    }
+  },
+  "sources": {
+    "linkedin": {
+      "status": "timed_out",
+      "runtime_seconds": 600.0,
+      "raw_count": 0,
+      "accepted_for_write": 0,
+      "error_count": 1,
+      "details": {
+        "reason": "source_watchdog_timeout"
+      }
+    },
+    "handshake": {
+      "status": "ran",
+      "runtime_seconds": 3.0,
+      "raw_count": 0,
+      "accepted_for_write": 0,
+      "error_count": 0,
+      "details": {}
+    },
+    "jobspy": {
+      "status": "skipped",
+      "runtime_seconds": 0,
+      "raw_count": 0,
+      "accepted_for_write": 0,
+      "error_count": 0,
+      "details": {
+        "reason": "disabled_for_fixture"
+      }
+    },
+    "startup_apply": {
+      "status": "skipped",
+      "runtime_seconds": 0,
+      "raw_count": 0,
+      "accepted_for_write": 0,
+      "error_count": 0,
+      "details": {}
+    },
+    "startup_relationship": {
+      "status": "skipped",
+      "runtime_seconds": 0,
+      "relationship_targets": 0,
+      "source_counts": {},
+      "details": {}
+    }
+  },
+  "action_queue": {
+    "counts": {}
+  }
+}

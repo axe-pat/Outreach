@@ -264,6 +264,7 @@ _LINKEDIN_COMPANY_SEARCH_NAMES = {
     # LinkedIn exposes the exact typeahead identity under the legal name.
     "globalization partners": "Globalization Partners International",
     "parsec automation": "Parsec Automation, LLC",
+    "justinian": "Justinian (YC S26)",
 }
 
 
@@ -6811,6 +6812,35 @@ def _exact_run_artifacts(
     if not isinstance(email_channel, dict):
         email_channel = manifest.get("email")
     email_channel = email_channel if isinstance(email_channel, dict) else {}
+    app_invites = manifest.get("app_invites")
+    app_invites_recorded = isinstance(app_invites, dict)
+    if not app_invites_recorded:
+        outreach_execution = manifest.get("outreach_execution")
+        outreach_execution = (
+            outreach_execution if isinstance(outreach_execution, dict) else {}
+        )
+        if outreach_execution:
+            app_invites_recorded = True
+            app_invites = {
+                "status": "",
+                "target": int(outreach_execution.get("target_sends") or 0),
+                "sent": int(outreach_execution.get("sent_total") or 0),
+                "companies_attempted": int(
+                    outreach_execution.get("companies_attempted") or 0
+                ),
+                "company_runs": list(outreach_execution.get("company_runs") or []),
+                "failed_companies": list(
+                    outreach_execution.get("failed_companies") or []
+                ),
+                "skipped_companies": list(
+                    outreach_execution.get("skipped_companies") or []
+                ),
+                "unresolved_companies": list(
+                    outreach_execution.get("unresolved_companies") or []
+                ),
+            }
+        else:
+            app_invites = {}
     integrity = {
         "artifact_selection": "explicit_pointers_only",
         "daily_engine_manifest": manifest_display,
@@ -6819,6 +6849,8 @@ def _exact_run_artifacts(
         "daily_engine_manifest_version": manifest.get("manifest_version"),
         "manifest_source_metrics": str(manifest.get("source_metrics") or ""),
         "manifest_action_queue": str(manifest.get("action_queue") or ""),
+        "app_invites": app_invites,
+        "app_invites_recorded": app_invites_recorded,
         "email_channel": email_channel,
         "exact_artifacts": {key: [str(path) for path in paths] for key, paths in resolved.items()},
         "missing_artifacts": [
@@ -6842,12 +6874,27 @@ def _track_2_execution_status(
     failed_phases = {
         name: status
         for name, status in phase_statuses.items()
-        if "fail" in status.casefold() or status.casefold() in {"error", "timed_out", "timeout"}
+        if "fail" in status.casefold()
+        or status.casefold() in {"error", "timed_out", "timeout"}
     }
+    for phase in phase_rows:
+        name = str(phase.get("phase") or "unknown")
+        if int(phase.get("company_filter_failed_count") or 0) > 0:
+            failed_phases[name] = str(
+                phase.get("status") or "company_filter_failed"
+            )
     incomplete_phases = {
         name: status
         for name, status in phase_statuses.items()
-        if status.casefold() in {"planned", "queued", "prepared", "unknown"}
+        if status.casefold()
+        in {
+            "planned",
+            "queued",
+            "prepared",
+            "unknown",
+            "send_unknown_reserved",
+            "partial_send_unknown_reserved",
+        }
         or (name == "1_2_linkedin_followups" and status.casefold() == "drafted")
     }
     if returncode is None and not artifact_value:
@@ -6884,6 +6931,50 @@ def _track_2_execution_status(
         "incomplete_phases": incomplete_phases,
         "planned": track_payload.get("used") if isinstance(track_payload.get("used"), dict) else {},
     }
+
+
+APP_INVITE_FAILED_STATUSES = {
+    "prep_failed",
+    "prep_artifact_missing",
+    "send_failed",
+    "send_artifact_missing",
+}
+APP_INVITE_UNRESOLVED_STATUSES = {
+    "send_unknown_reserved",
+    "partial_send_unknown_reserved",
+}
+
+
+def _app_invite_report_status(app_invites: dict[str, object]) -> str:
+    if not app_invites:
+        return "not_recorded"
+    rows = [
+        row
+        for row in list(app_invites.get("company_runs") or [])
+        if isinstance(row, dict)
+    ]
+    failed = [
+        row
+        for row in rows
+        if str(row.get("status") or "").casefold() in APP_INVITE_FAILED_STATUSES
+    ]
+    unresolved = [
+        row
+        for row in rows
+        if str(row.get("status") or "").casefold()
+        in APP_INVITE_UNRESOLVED_STATUSES
+    ]
+    completed = [row for row in rows if row not in failed and row not in unresolved]
+    if failed or list(app_invites.get("failed_companies") or []):
+        return "partial_failed" if completed or unresolved else "failed"
+    if unresolved or list(app_invites.get("unresolved_companies") or []):
+        return (
+            "partial_send_unknown_reserved"
+            if completed
+            else "send_unknown_reserved"
+        )
+    recorded = str(app_invites.get("status") or "").strip()
+    return recorded or "completed"
 
 
 def _render_status_counts(counts: dict[str, int]) -> str:
@@ -7450,10 +7541,23 @@ def _source_summary(row: dict[str, object]) -> str:
         )
     if source == "ResumeGenerator / app queue":
         counts = details.get("action_queue_counts") if isinstance(details.get("action_queue_counts"), dict) else {}
-        return (
+        app_invites = (
+            details.get("app_invites")
+            if isinstance(details.get("app_invites"), dict)
+            else {}
+        )
+        summary = (
             f"{int(counts.get('application_plus_outreach') or 0)} application+outreach; "
             f"{int(counts.get('follow_up') or 0)} follow-up candidates."
         )
+        if app_invites:
+            summary += (
+                f" App invites {_app_invite_report_status(app_invites)}: "
+                f"{int(app_invites.get('sent') or 0)}/{int(app_invites.get('target') or 0)} sent; "
+                f"failed companies {len(list(app_invites.get('failed_companies') or []))}; "
+                f"unresolved companies {len(list(app_invites.get('unresolved_companies') or []))}."
+            )
+        return summary
     if source == "Cold email channel":
         blockers = details.get("blockers") if isinstance(details.get("blockers"), list) else []
         summary = (
@@ -7613,10 +7717,40 @@ def _track_2_actual_actions(
             for run in list(phase.get("runs") or []):
                 if not isinstance(run, dict):
                     continue
+                company = str(run.get("company") or "")
+                status_counts = (
+                    run.get("status_counts")
+                    if isinstance(run.get("status_counts"), dict)
+                    else {}
+                )
+                sent_count = int(status_counts.get("sent") or 0) + int(
+                    status_counts.get("sent_without_note") or 0
+                )
                 add(
-                    str(run.get("company") or ""),
+                    company,
                     "contacts_added",
                     int(run.get("contacts_added") or 0),
+                )
+                actions.append(
+                    {
+                        "action": "track_2_linkedin_company_attempt",
+                        "status": str(run.get("status") or phase_status),
+                        "company": company,
+                        "count": sent_count,
+                        "detail": (
+                            f"{int(run.get('candidate_count') or 0)} candidates; "
+                            f"{sent_count} invites sent; "
+                            f"company-filter failures "
+                            f"{int(bool(run.get('company_filter_failed')))}; "
+                            f"statuses {_render_status_counts(status_counts)}."
+                        ),
+                        "artifact": str(
+                            run.get("send_artifact")
+                            or run.get("pipeline_artifact")
+                            or ""
+                        ),
+                        "source_lane": "track_2",
+                    }
                 )
         elif phase_name == "7_context_enrichment" and phase_status == "ran":
             companies = [str(item) for item in list(phase.get("companies") or []) if str(item)]
@@ -7629,8 +7763,10 @@ def _company_execution_rows(
     invite_runs: list[dict[str, object]],
     followup_payloads: list[dict[str, object]],
     extra_counts: dict[str, dict[str, int]] | None = None,
+    app_company_runs: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     by_company: dict[str, dict[str, int]] = {}
+    operational_statuses: dict[str, list[str]] = {}
 
     def add(company: str, key: str, amount: int) -> None:
         if not company or amount <= 0:
@@ -7640,6 +7776,22 @@ def _company_execution_rows(
 
     for run in invite_runs:
         add(str(run.get("company") or ""), "linkedin_invites_sent", int((run.get("status_counts") or {}).get("sent") or 0))
+    for run in app_company_runs or []:
+        company = str(run.get("company") or "")
+        if not company:
+            continue
+        by_company.setdefault(company, {})
+        status = str(run.get("status") or "unknown")
+        detail = status.replace("_", " ")
+        if run.get("safe_candidate_count") is not None:
+            detail += f"; safe candidates {int(run.get('safe_candidate_count') or 0)}"
+        error = str(run.get("prep_error") or run.get("send_error") or "").strip()
+        if error:
+            detail += f"; {error}"
+        source_lane = str(run.get("source_lane") or "app queue").replace("_", " ")
+        operational_statuses.setdefault(company, []).append(
+            f"{source_lane} invite attempt {detail}"
+        )
     for payload in followup_payloads:
         for item in list(payload.get("results") or []):
             if isinstance(item, dict) and str(item.get("status") or "") == "sent":
@@ -7650,11 +7802,19 @@ def _company_execution_rows(
             add(company, key, int(amount or 0))
     rows = []
     for company, counts in by_company.items():
-        summary = "; ".join(
+        summary_parts = [
             label.replace("_", " ") + f" {count}"
             for label, count in sorted(counts.items())
-        )
-        rows.append({"company": company, "counts": counts, "summary": summary})
+        ]
+        summary_parts.extend(operational_statuses.get(company, []))
+        row: dict[str, object] = {
+            "company": company,
+            "counts": counts,
+            "summary": "; ".join(summary_parts),
+        }
+        if operational_statuses.get(company):
+            row["operational_statuses"] = operational_statuses[company]
+        rows.append(row)
     return sorted(rows, key=lambda row: row["company"].casefold())
 
 
@@ -8062,6 +8222,45 @@ def write_artifact_daily_report(
     source_breakdown = (
         _source_breakdown(nightly_summary) if run_scoped else _unscoped_source_breakdown()
     )
+    app_invites = (
+        run_integrity.get("app_invites")
+        if isinstance(run_integrity.get("app_invites"), dict)
+        else {}
+    )
+    app_invite_status = (
+        _app_invite_report_status(app_invites) if run_scoped else "not_scoped"
+    )
+    app_company_runs = [
+        row
+        for row in list(app_invites.get("company_runs") or [])
+        if isinstance(row, dict)
+    ]
+    app_queue_row = next(
+        (
+            row
+            for row in source_breakdown
+            if row.get("source") == "ResumeGenerator / app queue"
+        ),
+        None,
+    )
+    if app_queue_row is not None and run_scoped:
+        app_details = (
+            app_queue_row.get("details")
+            if isinstance(app_queue_row.get("details"), dict)
+            else {}
+        )
+        app_queue_row["details"] = {
+            **app_details,
+            "app_invites": app_invites,
+            "app_invite_status": app_invite_status,
+        }
+        if app_invite_status in {
+            "failed",
+            "partial_failed",
+            "send_unknown_reserved",
+            "partial_send_unknown_reserved",
+        }:
+            app_queue_row["status"] = app_invite_status
     email_channel = (
         run_integrity.get("email_channel")
         if isinstance(run_integrity.get("email_channel"), dict)
@@ -8170,6 +8369,14 @@ def write_artifact_daily_report(
             manifest_action_queue is None or not _load_json_file(manifest_action_queue)
         ):
             required_pointer_errors.append("daily_engine_manifest.action_queue missing_or_invalid")
+        if (
+            run_integrity.get("daily_engine_manifest_schema")
+            == "resume_generator.daily_engine_run_manifest"
+            and not bool(run_integrity.get("app_invites_recorded"))
+        ):
+            required_pointer_errors.append(
+                "daily_engine_manifest.app_invites missing_or_invalid"
+            )
         manifest_email_sent_count = int(email_channel.get("sent_count") or 0)
         if email_channel.get("draft_count") is not None and int(email_channel.get("draft_count") or 0) != email_draft_count:
             required_pointer_errors.append("email_channel draft_count pointer_mismatch")
@@ -8210,10 +8417,22 @@ def write_artifact_daily_report(
             continue
         counts_for_company = track_company_counts.setdefault(company, {})
         counts_for_company["emails_sent"] = counts_for_company.get("emails_sent", 0) + 1
+    track_invite_company_runs = [
+        {**run, "source_lane": "track_2"}
+        for phase in list(track_payload.get("phase_results") or [])
+        if isinstance(phase, dict)
+        and str(phase.get("phase") or "") == "5_send_linkedin_invites"
+        for run in list(phase.get("runs") or [])
+        if isinstance(run, dict)
+    ]
     company_execution = _company_execution_rows(
         invite_runs,
         followup_payloads,
         track_company_counts,
+        [
+            *[{**run, "source_lane": "app_queue"} for run in app_company_runs],
+            *track_invite_company_runs,
+        ],
     )
     auto_reply_contact_ids = {
         str(item.get("contact_id") or "")
@@ -8260,6 +8479,30 @@ def write_artifact_daily_report(
                 "detail": _render_status_counts(run.get("status_counts") or {}),
                 "artifact": run.get("artifact", ""),
                 "source_lane": run.get("source_lane", ""),
+            }
+        )
+    for run in app_company_runs:
+        status = str(run.get("status") or "unknown")
+        error = str(run.get("prep_error") or run.get("send_error") or "").strip()
+        detail_parts = [
+            f"safe candidates {int(run.get('safe_candidate_count') or 0)}",
+            f"sent {int(run.get('sent_count') or 0)}",
+        ]
+        if error:
+            detail_parts.append(error)
+        linkedin_actions.append(
+            {
+                "action": "app_queue_linkedin_company_attempt",
+                "status": status,
+                "company": str(run.get("company") or ""),
+                "count": int(run.get("sent_count") or 0),
+                "detail": "; ".join(detail_parts),
+                "artifact": str(
+                    run.get("invite_send_artifact")
+                    or run.get("prep_artifact")
+                    or ""
+                ),
+                "source_lane": "daily_engine",
             }
         )
     for run in reconcile_runs:
@@ -8335,6 +8578,12 @@ def write_artifact_daily_report(
 
     track_2_returncode = track_execution.get("returncode")
     track_2_failed = str(track_execution.get("status") or "").startswith("failed") or track_execution.get("status") == "partial_failed"
+    app_invite_incomplete = app_invite_status in {
+        "failed",
+        "partial_failed",
+        "send_unknown_reserved",
+        "partial_send_unknown_reserved",
+    }
     failures = list(nightly_summary.get("failures") or [])
     track_status = str(track_execution.get("status") or "not_run")
     track_complete = track_status in {"completed", "completed_zero_actions"}
@@ -8345,6 +8594,7 @@ def write_artifact_daily_report(
         failures
         or track_2_failed
         or not track_complete
+        or app_invite_incomplete
         or daily_engine_returncode != 0
         or run_integrity.get("missing_artifacts")
         or required_pointer_errors
@@ -8403,6 +8653,57 @@ def write_artifact_daily_report(
                 "scope": "run_configuration",
             }
         )
+    seen_invite_action_keys: set[tuple[str, str, str]] = set()
+    for lane, run in [
+        *[("app_queue", row) for row in app_company_runs],
+        *[("track_2", row) for row in track_invite_company_runs],
+    ]:
+        company = str(run.get("company") or "")
+        status = str(run.get("status") or "unknown")
+        action_key = (lane, company.casefold(), status)
+        if action_key in seen_invite_action_keys:
+            continue
+        seen_invite_action_keys.add(action_key)
+        if status in APP_INVITE_UNRESOLVED_STATUSES:
+            what_needs_you.append(
+                {
+                    "action_type": "linkedin_invite_reconciliation",
+                    "priority": "high",
+                    "company": company,
+                    "person": "",
+                    "message": "",
+                    "recommended_action": (
+                        "Check the signed-in LinkedIn profile for pending/connected state; "
+                        "delivery is unknown and automatic retry is blocked."
+                    ),
+                    "count": int(run.get("unknown_reserved_count") or 1),
+                    "scope": "this_run",
+                }
+            )
+        elif status in APP_INVITE_FAILED_STATUSES or status in {
+            "discovery_failed",
+            "send_blocked_company_filter",
+        }:
+            what_needs_you.append(
+                {
+                    "action_type": "linkedin_company_identity_review",
+                    "priority": "medium",
+                    "company": company,
+                    "person": "",
+                    "message": str(
+                        run.get("prep_error")
+                        or run.get("send_error")
+                        or run.get("error")
+                        or ""
+                    ),
+                    "recommended_action": (
+                        "No invite was counted. Verify the exact LinkedIn company identity "
+                        "or company evidence before a future retry."
+                    ),
+                    "count": 1,
+                    "scope": "this_run",
+                }
+            )
     messages_sent = len(auto_handled)
     replies_sent = sum(item.get("message_type") == "reply" for item in auto_handled)
     followups_sent = messages_sent - replies_sent
@@ -8499,6 +8800,9 @@ def write_artifact_daily_report(
         "generation_ran": nightly_summary.get("generation_ran", ""),
         "invite_runs": invite_runs,
         "invite_totals": invite_totals,
+        "app_invites": app_invites,
+        "app_invite_status": app_invite_status,
+        "app_company_runs": app_company_runs,
         "followup_runs": followup_runs,
         "pending_review_count": len(deduped_review_items),
         "messages_to_review": deduped_review_items,
@@ -8577,6 +8881,7 @@ def write_artifact_daily_report(
         f"- Cold emails sent: `{emails_sent}`",
         f"- Companies actually touched: `{len(company_execution)}`",
         f"- App generation selected: `{nightly_summary.get('generation_selected_count', '')}`",
+        f"- App-queue LinkedIn execution: `{app_invite_status}`",
         f"- Track 2 execution: `{track_execution['status']}` (return code `{track_2_returncode}`)",
     ]
     if run_integrity.get("missing_artifacts"):
@@ -8868,7 +9173,7 @@ def write_artifact_daily_report(
     <section class="grid">
       <div class="card"><h2>Run integrity</h2><p><strong>{esc(run_integrity.get('artifact_selection', ''))}</strong></p><p>Daily-engine manifest: {esc(manifest_status)} · missing exact artifacts: {esc(len(run_integrity.get('missing_artifacts') or []))} · required pointer errors: {esc(len(required_pointer_errors))}</p></div>
       <div class="card"><h2>Company review</h2><p><strong>{esc((company_discovery.get('workspace_summary') or {}).get('pending_review', 0))}</strong> candidates await a disposition before promotion.</p></div>
-      <div class="card"><h2>Run health</h2><p>Daily engine <code>{esc(nightly_summary.get('daily_engine_returncode', ''))}</code> · JobSpy score-now <code>{esc(jobspy_metrics.get('jobspy_app_score_now', 0))}</code></p></div>
+      <div class="card"><h2>Run health</h2><p>Daily engine <code>{esc(nightly_summary.get('daily_engine_returncode', ''))}</code> · app invites <code>{esc(app_invite_status)}</code> · JobSpy score-now <code>{esc(jobspy_metrics.get('jobspy_app_score_now', 0))}</code></p></div>
     </section>
     <section><h2>What needs you</h2>{inbox_action_cards or '<div class="card">No open human action.</div>'}</section>
     <section><h2>Messages to review</h2>{review_rows and '<table class="review-table"><thead><tr><th>Channel</th><th>Company</th><th>Person</th><th>Email</th><th>Subject</th><th>Gate</th><th>Scope</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>' + review_rows + '</tbody></table>' or '<div class="card">No message currently requires human review.</div>'}<p>System-held, no action yet: <strong>{esc(len(deduped_held_items))}</strong>.</p></section>
@@ -10119,6 +10424,12 @@ def run_track_2_daily_plan_cmd(
             send_failed_runs = [
                 run for run in invite_runs if run.get("status") == "send_failed"
             ]
+            company_filter_failed_runs = [
+                run
+                for run in invite_runs
+                if run.get("status") == "send_blocked_company_filter"
+                or bool(run.get("company_filter_failed"))
+            ]
             unknown_reserved_runs = [
                 run
                 for run in invite_runs
@@ -10137,12 +10448,17 @@ def run_track_2_daily_plan_cmd(
                 not in {
                     "discovery_failed",
                     "send_failed",
+                    "send_blocked_company_filter",
                     "send_unknown_reserved",
                     "partial_send_unknown_reserved",
                 }
+                and not bool(run.get("company_filter_failed"))
             ]
             invite_result["discovery_failed_count"] = len(discovery_failed_runs)
             invite_result["send_failed_count"] = len(send_failed_runs)
+            invite_result["company_filter_failed_count"] = len(
+                company_filter_failed_runs
+            )
             invite_result["unknown_reserved_company_count"] = len(
                 unknown_reserved_runs
             )
@@ -10157,10 +10473,11 @@ def run_track_2_daily_plan_cmd(
                 for run in invite_runs
             )
             invite_result["sent_count"] = actual_sent_count
-            invite_result["company_filter_failed_count"] = sum(
-                bool(run.get("company_filter_failed")) for run in invite_runs
-            )
-            failed_runs = [*discovery_failed_runs, *send_failed_runs]
+            failed_runs = [
+                *discovery_failed_runs,
+                *send_failed_runs,
+                *company_filter_failed_runs,
+            ]
             if failed_runs and nonfailed_runs:
                 invite_result["status"] = "partial_failed"
             elif failed_runs:

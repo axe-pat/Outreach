@@ -29,8 +29,11 @@ workspace/company_news_manual_*.json
 workspace/shared_discovery/
 workspace/reports/
 workspace/role_surface/
-workspace/track2_review_queue_*.csv
+workspace/role_watch/
+workspace/linkedin_invite_send_reservations.json
+workspace/linkedin_invite_send_reservations.json.lock
 workspace/*.lock
+workspace/track2_review_queue_*.csv
 workspace/relationship_leads_peoplegrove*.csv
 workspace/relationship_leads_peoplegrove*.summary.json
 workspace/peoplegrove_capture*.json

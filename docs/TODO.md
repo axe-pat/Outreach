@@ -18,6 +18,9 @@ paths visible instead of accidentally filtering them out.
    or phase failures must remain visibly incomplete/not-run and can never be
    rendered as completed. `What needs you`, message review, auto-handled sends,
    system holds, actual company actions, and plans remain separate report data.
+   Exact-company-filter failures, app-queue prep/send failures, and unknown
+   invite delivery must likewise stay non-green and visible at company level;
+   an unknown reserved invite requires signed-in reconciliation before retry.
 2. **IMPLEMENTED — operate the daily LinkedIn intelligence pass.** The
    configurable home-feed capture records good startups and other interesting
    company, role, hiring, funding, launch, and warm-network signals with post

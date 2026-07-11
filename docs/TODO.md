@@ -47,10 +47,15 @@ paths visible instead of accidentally filtering them out.
    A separate run-scoped role-surface report keeps the account tracker
    company-level while showing discovered, scored, surfaced, and acted-on
    Product/PM, Product Strategy, BizOps/Strategy, Program/Operations, and narrow
-   Growth-adjacent roles by source. Product remains primary. Use real reports to
-   audit and then tune ResumeGenerator queries/classifiers where adjacent lanes
-   are genuinely missing; the monitor itself does not prove discovery breadth
-   is already adequate.
+   Growth-adjacent roles by source. Product remains primary. A standalone July 11
+   exact-artifact diagnostic replay—not a nightly production run—covered 402
+   observations, 379 unique roles, and 220 companies from six source rows, with
+   no source failure/skip: Product 94 discovered and 5 scored/surfaced; Product
+   Strategy 1; BizOps 8 and 2/2; Program/Ops 24 and 5/5; narrow Growth 7 and 2/2.
+   No configured family was below its floor in that replay
+   (`artifacts/20260711-124409-role-surface-report.json`). Continue tuning and
+   verify several real nightly runs; this diagnostic does not establish ongoing
+   production coverage.
 6. **IMPLEMENTED — retain profile viewers as weekly passive context.** The
    LinkedIn intelligence pass checks the viewer ledger every seven days by
    default, dedupes repeated observations, and annotates target-company/role
@@ -81,8 +86,11 @@ paths visible instead of accidentally filtering them out.
 - [ ] Review useful feed signals and set dispositions; review the generated
   company CSV and explicitly approve candidates before running
   `build-company-discovery-review --promote-approved`.
-- [ ] Pass the current run's ResumeGenerator source-metrics JSON into the role
-  monitor. Never fill a missing source with an older workspace artifact.
+- [x] Validate the role monitor against one exact ResumeGenerator source-metrics
+  artifact in a standalone diagnostic replay. Never fill a missing source with an
+  older workspace artifact.
+- [ ] Confirm the same exact-pointer contract in several scheduled nightly runs;
+  the standalone replay is not evidence that the production stage ran.
 - [ ] Configure `SMTP_HOST` and `SMTP_FROM_EMAIL` plus the appropriate port,
   username/password, STARTTLS/SSL settings; verify sender authorization outside
   the production batch.
@@ -263,9 +271,10 @@ paths visible instead of accidentally filtering them out.
   that reports whether the discovery/application lanes are surfacing Product
   Strategy, BizOps/Strategy, Program/Operations, and narrowly defined
   Growth/GTM-adjacent roles alongside the primary Product lane.
-- Audit ResumeGenerator title/query filters and scoring so those families are
+- [x] Audit ResumeGenerator title/query filters and scoring so those families are
   discovered, scored, and surfaced rather than silently treated as generic
-  non-PM roles or deprioritized sales.
-- Add account-level role-watch tasks for strategic companies: a company can
+  non-PM roles or deprioritized sales. Product Strategy and narrow Growth query
+  coverage are explicit; generic sales/marketing growth remains excluded.
+- [ ] Add account-level role-watch tasks for strategic companies: a company can
   remain active even when it has no current PM role, while a good adjacent
   opening should create an application/research action.

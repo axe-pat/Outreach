@@ -11,6 +11,7 @@ from outreach.relationship_leads import (
     RelationshipLeadReviewError,
     _program_tag,
     _school_tag,
+    _source_kind_for_lead,
     ensure_relationship_leads_template,
     import_relationship_leads,
     load_relationship_leads,
@@ -92,6 +93,8 @@ def test_source_preset_template_writes_csv_and_capture_guide(tmp_path: Path) -> 
     guide_text = guide.read_text(encoding="utf-8")
     assert "PeopleGrove" in guide_text
     assert "source_type`: `peoplegrove`" in guide_text
+    assert "role-specific target lists" in guide_text
+    assert "usc-founder;usc-operator" not in guide_text
 
 
 def test_school_and_program_tags_are_safe_single_tokens() -> None:
@@ -99,6 +102,12 @@ def test_school_and_program_tags_are_safe_single_tokens() -> None:
         "school-university-of-california-berkeley-haas-school-of-business"
     )
     assert _program_tag("MBA / Product Strategy") == "program-mba-product-strategy"
+
+
+def test_peoplegrove_public_corroboration_retains_directory_provenance() -> None:
+    assert _source_kind_for_lead("peoplegrove_public_web") == (
+        SourceKind.UNIVERSITY_DIRECTORY
+    )
 
 
 def test_import_relationship_leads_applies_recent_mba_pm_preset_defaults(tmp_path: Path) -> None:

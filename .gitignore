@@ -25,6 +25,7 @@ workspace/outreach_cadence_plan.json
 workspace/comms_learning/
 workspace/company_discovery/
 workspace/company_news_signals.json
+workspace/company_news_manual_*.json
 workspace/shared_discovery/
 workspace/reports/
 workspace/role_surface/
@@ -34,6 +35,7 @@ workspace/relationship_leads_peoplegrove*.summary.json
 workspace/peoplegrove_capture*.json
 workspace/peoplegrove_manual_review_*.json
 workspace/peoplegrove_*decision*.json
+workspace/peoplegrove_manual_corrections_*.json
 workspace/peoplegrove_*enrichment*.json
 workspace/peoplegrove_career_journey*.json
 workspace/relationship_leads_public_web_*.csv

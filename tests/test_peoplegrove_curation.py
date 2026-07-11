@@ -257,6 +257,12 @@ def test_only_founders_get_non_at_company_separator_parsing() -> None:
         )
         is None
     )
+    assert (
+        parse_current_title_company(
+            "HealthTech Product Management Leader: spearheading innovative digital health solutions at the AMA."
+        )
+        is None
+    )
 
 
 def test_current_company_aliases_use_existing_workbook_accounts() -> None:
@@ -279,6 +285,10 @@ def test_current_company_aliases_use_existing_workbook_accounts() -> None:
     assert parse_current_title_company("Lead Program Manager at YouTube") == (
         "Lead Program Manager",
         "Google",
+    )
+    assert parse_current_title_company("Chief of Staff to CSO & CFO at ApolloMed (NASDAQ: AMEH)") == (
+        "Chief of Staff to CSO & CFO",
+        "ApolloMed",
     )
 
 

@@ -94,6 +94,7 @@ RELATIONSHIP_SOURCE_PRESETS: dict[str, dict[str, str | list[str]]] = {
         "instructions": [
             "Use this for PeopleGrove/Trojan Network/USC manual captures.",
             "Prioritize founders, C-suite, product leaders, operators, recruiters, and startup-adjacent USC people.",
+            "Assign role-specific target lists such as usc-founder, usc-product, usc-startup-operator, or usc-recruiting per curated row; never apply founder/operator lists to the whole batch.",
             "Paste one person per row. company and full_name are required; LinkedIn URL is strongly preferred.",
         ],
     },
@@ -1636,7 +1637,14 @@ def _positive_int(value: object) -> int:
 
 def _source_kind_for_lead(source_type: str) -> SourceKind:
     normalized = _normalized_source_type(source_type)
-    if normalized in {"peoplegrove", "handshake", "usc", "usc-founder", "usc-alumni"}:
+    if normalized in {
+        "peoplegrove",
+        "peoplegrove-public-web",
+        "handshake",
+        "usc",
+        "usc-founder",
+        "usc-alumni",
+    }:
         return SourceKind.UNIVERSITY_DIRECTORY
     if normalized in {"linkedin", "recent-mba-pm", "linkedin-recent-mba-pm"}:
         return SourceKind.LINKEDIN

@@ -21,7 +21,7 @@ Recommended columns:
 Defaults applied during import when a row leaves fields blank:
 
 - `source_type`: `peoplegrove`
-- `target_lists`: `peoplegrove;usc-network;usc-founder;usc-operator`
+- `target_lists`: `peoplegrove;usc-network`
 - `tags`: `usc,peoplegrove,warm-network`
 - `priority`: `medium`
 
@@ -29,6 +29,9 @@ Capture rules:
 
 - Use this for PeopleGrove/Trojan Network/USC manual captures.
 - Prioritize founders, C-suite, product leaders, operators, recruiters, and startup-adjacent USC people.
+- Assign role-specific lists such as `usc-founder`, `usc-product`,
+  `usc-startup-operator`, or `usc-recruiting` per curated row. Do not apply
+  founder/operator lists to the whole source batch.
 - Paste one person per row. company and full_name are required; LinkedIn URL is strongly preferred.
 
 Review workflow:

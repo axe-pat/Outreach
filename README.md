@@ -246,6 +246,13 @@ and artifact hash remain in the notes and decision audit. If an existing explici
 company alias is used for account dedupe, the exact captured title and company
 remain separately recorded as enrichment evidence.
 
+That loader is deliberately limited to signed-in PeopleGrove Career Journey
+data bound to the exact raw-capture hash. Public-web corroboration is not a
+valid `--enrichment-path` input. Research from official pages, LinkedIn public
+profiles, or professional directories must be manually reviewed, converted
+into a separate staged relationship batch with its evidence URL/status intact,
+and imported under `peoplegrove_public_web` university-directory provenance.
+
 Keep a capture manifest beside the raw JSON with each query's advertised count,
 profiles captured, card batches/scrolls, and an honest termination state. An
 exact-count query may be marked exhausted; a high-volume query stopped at a
@@ -273,8 +280,8 @@ records, duplicates, and batch fingerprints. For a reviewed batch, the decision
 artifact must contain `schema_version`, `batch_id`, the original `source_sha256`,
 the pre-review `staged_sha256`, exact `approved_row_ids`/`rejected_row_ids`, and
 matching `rows_total`/`rows_approved`/`rows_rejected` counts. Those lists must
-partition every staged row
-exactly once. The review manifest records the decision artifact's own SHA-256 and
+partition every staged row exactly once. The review manifest records the
+decision artifact's own SHA-256 and
 its source/stage binding, so later edits fail import. Bulk flags affect only
 pending rows; changing a finalized decision requires the explicit
 `--override-finalized` flag. Imports never create or rewrite their source and

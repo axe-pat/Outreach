@@ -6,13 +6,24 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from outreach.cli import _apply_linkedin_cadence_guards, app
+from outreach.company_news import company_news_capture_snapshots, company_news_signal_id
+from outreach.company_watchlist import CandidateCompanySignal
 from outreach.intelligence_commands import (
     _apply_email_approval,
     _capture_due,
     _email_is_approved,
     _email_is_verified,
+    _promote_approved_watchlist,
 )
-from outreach.tracking import ContactRecord, OutreachChannel, OutreachWorkbook, TouchpointRecord
+from outreach.tracking import (
+    ContactRecord,
+    OrganizationRecord,
+    OrganizationType,
+    OutreachChannel,
+    OutreachWorkbook,
+    SourceKind,
+    TouchpointRecord,
+)
 from outreach.email_delivery import EmailDeliveryResult
 
 
@@ -133,6 +144,186 @@ def test_company_discovery_report_is_capture_scoped_but_review_queue_is_cumulati
     assert result.exit_code == 0, result.output
     assert "Company signals this run: 1" in result.output
     assert "Pending review in workspace: 2" in result.output
+
+
+def test_company_news_capture_does_not_claim_old_linkedin_ledger_as_same_run(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    feed = workspace / "linkedin_feed_signals.csv"
+    with feed.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "signal_id",
+                "company",
+                "signal_kinds",
+                "review_disposition",
+                "post_text",
+                "post_url",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "signal_id": "old-linkedin",
+                "company": "Old Feed Co",
+                "signal_kinds": "company_discovery;hiring",
+                "review_disposition": "pending",
+                "post_text": "Old AI startup hiring",
+                "post_url": "https://linkedin.test/old",
+            }
+        )
+    signals = []
+    for signal_id, company in (("news-new", "New News Co"), ("news-old", "Old News Co")):
+        signals.append(
+            {
+                "signal_id": signal_id,
+                "first_seen_at": "2026-07-10T08:00:00+00:00",
+                "last_seen_at": "2026-07-10T08:00:00+00:00",
+                "seen_run_ids": ["run-1"],
+                "signal": {
+                    "company_name": company,
+                    "provenance": [
+                        {
+                            "source_name": "Fixture News",
+                            "source_type": "company_news",
+                            "source_run_id": "run-1",
+                            "source_url": f"https://news.test/{signal_id}",
+                        }
+                    ],
+                },
+            }
+        )
+    (workspace / "company_news_signals.json").write_text(
+        json.dumps({"schema_version": "1.0", "signals": signals}),
+        encoding="utf-8",
+    )
+    capture = tmp_path / "news-capture.json"
+    captured_signal = CandidateCompanySignal.model_validate(signals[0]["signal"])
+    snapshots, snapshots_sha256 = company_news_capture_snapshots([captured_signal])
+    capture.write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "captured_signal_ids": [company_news_signal_id(captured_signal)],
+                "captured_signal_snapshots": snapshots,
+                "captured_signal_snapshots_sha256": snapshots_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "build-company-discovery-review",
+            "--workspace",
+            str(workspace),
+            "--run-id",
+            "run-1",
+            "--news-capture-artifact",
+            str(capture),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Company signals this run: 1" in result.output
+    assert "Pending review in workspace: 3" in result.output
+
+
+def test_watchlist_promotion_preserves_non_linkedin_source_provenance(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    watchlist = tmp_path / "company_watchlist.json"
+    watchlist.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "company_name": "News Discovered Co",
+                        "rubric_total": 13,
+                        "reviewer_notes": "Approved after product-surface review",
+                        "provenance": [
+                            {
+                                "source_type": "funding_news",
+                                "source_run_id": "news-run-1",
+                                "source_url": "https://news.example/company",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _promote_approved_watchlist(workspace, watchlist) == 1
+    organization = OutreachWorkbook(workspace).list_organizations()[0]
+    assert organization.source_kind == SourceKind.OTHER
+    assert organization.source_url == "https://news.example/company"
+    assert "source_types=funding_news" in organization.notes
+    assert "source_run_ids=news-run-1" in organization.notes
+
+
+def test_watchlist_promotion_merges_existing_organization_idempotently(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-news-discovered-co",
+            name="News Discovered Co",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="existing-list",
+            status="Researching",
+            source_kind=SourceKind.MANUAL,
+            notes="Existing account context | owner=akshat",
+        )
+    )
+    watchlist = tmp_path / "company_watchlist.json"
+    watchlist.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "company_name": "News Discovered Co",
+                        "rubric_total": 13,
+                        "reviewer": "reviewer-1",
+                        "reviewed_at": "2026-07-11T08:00:00+00:00",
+                        "reviewer_notes": "Approved after product-surface review",
+                        "provenance": [
+                            {
+                                "source_type": "funding_news",
+                                "source_run_id": "news-run-1",
+                                "source_url": "https://news.example/company",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _promote_approved_watchlist(workspace, watchlist) == 0
+    organization = workbook.list_organizations()[0]
+    assert organization.status == "Reviewed watchlist"
+    assert organization.target_lists == (
+        "existing-list;company-watchlist;track-2;relationship"
+    )
+    assert organization.source_kind == SourceKind.OTHER
+    assert organization.source_url == "https://news.example/company"
+    assert "Existing account context" in organization.notes
+    assert "owner=akshat" in organization.notes
+    assert "watchlist_review_state=approved" in organization.notes
+    assert "watchlist_source_types=funding_news" in organization.notes
+    first_content = (workspace / "organizations.csv").read_text(encoding="utf-8")
+
+    assert _promote_approved_watchlist(workspace, watchlist) == 0
+    assert (workspace / "organizations.csv").read_text(encoding="utf-8") == first_content
 
 
 def test_role_cadence_and_learning_commands_emit_artifacts(tmp_path: Path) -> None:

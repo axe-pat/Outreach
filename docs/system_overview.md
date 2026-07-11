@@ -220,6 +220,17 @@ flowchart TD
     D --> E["greenlight for LinkedIn / email / skip"]
 ```
 
+### Path C: Cross-Repo Daily Decision Queue
+
+```mermaid
+flowchart TD
+    A["Exact ResumeGenerator nightly/action queue"] --> D["shared_discovery"]
+    B["YC, Built In, and reviewed company/news signals"] --> D
+    C["Outreach warm contacts and approved watchlist"] --> D
+    D --> E["Deduped company queue with roles + provenance"]
+    E --> F["Ready / human review / buffered gate"]
+```
+
 ## What We Pull Today
 
 Depending on source and enrichment depth, the system can already capture:
@@ -236,6 +247,7 @@ Depending on source and enrichment depth, the system can already capture:
 - opportunity titles and apply links
 - founders and LinkedIn URLs for YC detail pages
 - org-level fit reasoning for Akshat
+- review-gated public company/news signals plus structured directory imports
 - recommended next outreach channel
 
 What is still partial today:
@@ -247,7 +259,7 @@ What is still partial today:
 
 ## Ranking Layer
 
-There are currently two ranking views:
+There are currently five ranking/decision views:
 
 ### 1. LinkedIn Company Queue
 
@@ -319,6 +331,22 @@ Output: `workspace/account_tracker.xlsx` with three sheets:
 
 See [docs/account_tracker.md](/Users/akshat/Desktop/Claude projects/Outreach/docs/account_tracker.md) for scoring formula and stage definitions.
 
+### 5. Shared Daily Queue
+
+Implemented in `src/outreach/shared_discovery.py`.
+
+Purpose:
+
+- combine application roles, startup-company discovery, approved watchlist entries,
+  and warm-company context without adding a third mutable tracker
+- reject stale/mismatched run pointers and preserve exact provenance
+- dedupe company observations before ranking and cap only after the merge
+- label every item for next-stage execution, human review, or buffering
+
+Output: run-stamped and current JSON/CSV under `workspace/shared_discovery/`.
+Each row embeds the queue run ID and scope so the exact ResumeGenerator run is
+not confused with the Outreach/watchlist snapshots merged into the same view.
+
 ## LinkedIn As A Subsystem
 
 Implemented mainly in [src/outreach/services/linkedin.py](/Users/akshat/Desktop/Claude projects/Outreach/src/outreach/services/linkedin.py),
@@ -346,6 +374,8 @@ The important commands now group into four buckets:
 
 - `list-discovery-sources`
 - `discover-source`
+- `capture-company-news`
+- `build-company-discovery-review`
 
 ### Workbook Management
 
@@ -362,6 +392,7 @@ The important commands now group into four buckets:
 - `dispatch-linkedin-company-queue`
 - `build-organization-intel`
 - `account-tracker` — score all companies, assign tiers, derive stages, write `workspace/account_tracker.xlsx`
+- `python -m outreach.shared_discovery` — build the merged run-stamped company queue
 
 ### LinkedIn Execution
 

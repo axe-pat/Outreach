@@ -30,12 +30,24 @@ outreach import-story-fit-targets \
 outreach init-relationship-leads
 outreach init-relationship-leads --source-key peoplegrove_usc
 outreach init-relationship-leads --source-key recent_mba_pm
+outreach curate-peoplegrove-capture \
+  --input-path workspace/peoplegrove_capture_2026-07-11.json \
+  --output-path workspace/relationship_leads_peoplegrove_curated_2026-07-11.csv \
+  --workspace workspace
+outreach stage-relationship-leads \
+  --source-path workspace/relationship_leads_peoplegrove_curated_2026-07-11.csv \
+  --source-key peoplegrove_usc
+outreach review-relationship-leads \
+  --staged-path workspace/relationship_leads_peoplegrove_curated_2026-07-11.staged.csv \
+  --reviewer Akshat \
+  --approve-all-ready \
+  --reject-all-blocked
 outreach import-relationship-leads \
   --workspace workspace \
-  --source-path workspace/relationship_leads.csv \
+  --source-path workspace/relationship_leads_peoplegrove_curated_2026-07-11.staged.csv \
+  --source-key peoplegrove_usc \
   --execute
-outreach import-relationship-leads --workspace workspace --source-key peoplegrove_usc --execute
-outreach import-relationship-leads --workspace workspace --source-key recent_mba_pm --execute
+# Repeat the same stage -> review -> import sequence for recent_mba_pm.
 
 # Broad ResumeGenerator company universe. This intentionally ignores Lane 1's
 # score/age gates so applied/discovered companies are still available for

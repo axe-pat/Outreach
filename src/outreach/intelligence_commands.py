@@ -22,7 +22,19 @@ from outreach.company_watchlist import (
     load_company_review_decisions,
     write_company_discovery_artifacts,
 )
+from outreach.company_news import (
+    DEFAULT_COMPANY_NEWS_LEDGER,
+    capture_company_news,
+    company_news_capture_snapshots,
+    company_news_signal_id,
+    load_company_news_capture_snapshots,
+    load_company_news_signals,
+    structured_company_signals_from_path,
+    upsert_company_news_ledger,
+)
+from outreach.company_enrichment import format_notes_parts, parse_notes_parts
 from outreach.config import OutreachSettings
+from outreach.discovery.http import HttpTextDownloader
 from outreach.email_delivery import (
     EmailDeliveryConfig,
     EmailDeliveryResult,
@@ -61,6 +73,7 @@ from outreach.tracking import (
 
 def register_intelligence_commands(app: typer.Typer) -> None:
     app.command("capture-linkedin-intelligence")(capture_linkedin_intelligence_cmd)
+    app.command("capture-company-news")(capture_company_news_cmd)
     app.command("review-linkedin-feed-signal")(review_linkedin_feed_signal_cmd)
     app.command("build-company-discovery-review")(build_company_discovery_review_cmd)
     app.command("build-role-surface-report")(build_role_surface_report_cmd)
@@ -120,6 +133,84 @@ def review_linkedin_feed_signal_cmd(
     typer.echo(f"Reviewed {signal_id}: {row['review_disposition']}")
 
 
+def capture_company_news_cmd(
+    workspace: Annotated[Path, typer.Option(help="Outreach workspace directory")] = Path("workspace"),
+    run_id: Annotated[str, typer.Option(help="Run id for source provenance")] = "",
+    source_id: Annotated[
+        list[str] | None,
+        typer.Option("--source-id", help="Public feed source id; repeat to override defaults"),
+    ] = None,
+    input_path: Annotated[
+        list[Path] | None,
+        typer.Option("--input-path", help="Reviewed CSV/JSON/JSONL company-signal input; repeatable"),
+    ] = None,
+    per_source_limit: Annotated[
+        int,
+        typer.Option(help="Maximum recent entries read from each public feed"),
+    ] = 30,
+) -> None:
+    """Capture public company/news signals into the existing human-review pipeline."""
+
+    settings = OutreachSettings()
+    run_id = run_id or artifact_timestamp()
+    workbook = OutreachWorkbook(workspace)
+    known_companies = [item.name for item in workbook.list_organizations()]
+    ledger_path = workspace / DEFAULT_COMPANY_NEWS_LEDGER.name
+    downloader = HttpTextDownloader(timeout_seconds=20)
+    result = capture_company_news(
+        run_id=run_id,
+        ledger_path=ledger_path,
+        fetch_text=downloader.fetch_text,
+        source_ids=source_id or (),
+        known_companies=known_companies,
+        per_source_limit=per_source_limit,
+    )
+    structured_signals: list[CandidateCompanySignal] = []
+    structured_inputs: list[dict[str, object]] = []
+    for path in input_path or []:
+        signals = structured_company_signals_from_path(
+            path,
+            run_id=run_id,
+            known_companies=known_companies,
+            default_source_name=path.stem,
+        )
+        structured_signals.extend(signals)
+        structured_inputs.append({"path": str(path), "status": "completed", "signals": len(signals)})
+    structured_added = upsert_company_news_ledger(
+        ledger_path,
+        structured_signals,
+        observed_at=utc_now_iso(),
+        run_id=run_id,
+    ) if structured_signals else []
+    structured_ids = [company_news_signal_id(item) for item in structured_signals]
+    capture_snapshots, capture_snapshots_sha256 = company_news_capture_snapshots(
+        [*result.signals, *structured_signals]
+    )
+    status = result.status
+    if structured_signals and status == "failed":
+        status = "partial"
+    payload = {
+        "run_id": run_id,
+        "status": status,
+        "ledger_path": str(ledger_path),
+        "sources": result.source_summaries,
+        "structured_inputs": structured_inputs,
+        "captured_signal_ids": sorted({*result.captured_signal_ids, *structured_ids}),
+        "captured_signal_snapshots": capture_snapshots,
+        "captured_signal_snapshots_sha256": capture_snapshots_sha256,
+        "added_signal_ids": sorted({*result.added_signal_ids, *structured_added}),
+        "captured": len({*result.captured_signal_ids, *structured_ids}),
+        "added": len({*result.added_signal_ids, *structured_added}),
+    }
+    artifact = write_artifact(settings.artifacts_dir, "company-news-capture", payload)
+    typer.echo(f"Company/news capture: {status}")
+    typer.echo(f"Captured: {payload['captured']}; added: {payload['added']}")
+    typer.echo(f"Ledger: {ledger_path}")
+    typer.echo(f"Artifact: {artifact}")
+    if status == "failed" and not structured_signals:
+        raise typer.Exit(code=1)
+
+
 def build_company_discovery_review_cmd(
     workspace: Annotated[Path, typer.Option(help="Outreach workspace directory")] = Path("workspace"),
     run_id: Annotated[str, typer.Option(help="Run id for provenance")] = "",
@@ -133,11 +224,16 @@ def build_company_discovery_review_cmd(
         Path | None,
         typer.Option(help="Exact ResumeGenerator source-metrics artifact for same-run startup discovery"),
     ] = None,
+    news_capture_artifact: Annotated[
+        Path | None,
+        typer.Option(help="Exact company/news capture artifact for same-run discovery scope"),
+    ] = None,
     promote_approved: Annotated[bool, typer.Option(help="Write human-approved, rubric-qualified watchlist entries into organizations.csv")] = False,
 ) -> None:
     settings = OutreachSettings()
     run_id = run_id or artifact_timestamp()
     feed_path = workspace / "linkedin_feed_signals.csv"
+    news_ledger_path = workspace / DEFAULT_COMPANY_NEWS_LEDGER.name
     output_dir = workspace / "company_discovery"
     review_path = output_dir / "company_discovery_review.csv"
     known_companies = [item.name for item in OutreachWorkbook(workspace).list_organizations()]
@@ -148,6 +244,10 @@ def build_company_discovery_review_cmd(
     feed_ledger_signals = company_signals_from_feed_ledger(
         feed_path,
         run_id="workspace-ledger",
+        known_companies=known_companies,
+    )
+    news_ledger_signals = load_company_news_signals(
+        news_ledger_path,
         known_companies=known_companies,
     )
     source_signals = (
@@ -186,10 +286,30 @@ def build_company_discovery_review_cmd(
         )
         capture_status = str(feed_capture.get("status") or "failed")
     else:
-        run_signals = list(feed_ledger_signals) if source_metrics is None else []
-        capture_status = "not_scheduled" if source_metrics is not None else "manual_workspace_rebuild"
+        exact_non_linkedin_input = source_metrics is not None or news_capture_artifact is not None
+        run_signals = [] if exact_non_linkedin_input else list(feed_ledger_signals)
+        capture_status = "not_scheduled" if exact_non_linkedin_input else "manual_workspace_rebuild"
+    news_capture_payload = _load_json(news_capture_artifact) if news_capture_artifact else {}
+    if news_capture_artifact is not None:
+        run_news_signals = load_company_news_capture_snapshots(
+            news_capture_payload,
+            artifact_label=str(news_capture_artifact),
+        )
+        news_capture_status = str(news_capture_payload.get("status") or "failed")
+    elif capture_artifact is None and source_metrics is None:
+        run_news_signals = list(news_ledger_signals)
+        news_capture_status = "manual_workspace_rebuild"
+    else:
+        run_news_signals = []
+        news_capture_status = "not_scheduled"
+    run_signals.extend(run_news_signals)
     run_signals.extend(source_signals)
-    all_signals = [*historical_signals, *feed_ledger_signals, *source_signals]
+    all_signals = [
+        *historical_signals,
+        *feed_ledger_signals,
+        *news_ledger_signals,
+        *source_signals,
+    ]
     reviews = load_company_review_decisions(review_path)
     artifacts = write_company_discovery_artifacts(
         output_dir,
@@ -202,11 +322,14 @@ def build_company_discovery_review_cmd(
     run_watchlist = build_company_watchlist(run_candidates)
     run_summary = company_discovery_summary(run_signals, run_candidates, run_watchlist)
     run_summary["capture_status"] = capture_status
+    run_summary["company_news_capture_status"] = news_capture_status
     scope_parts: list[str] = []
     if capture_artifact is not None:
         scope_parts.append("same LinkedIn capture artifact")
     if source_metrics is not None:
         scope_parts.append("same-run startup source metrics")
+    if news_capture_artifact is not None:
+        scope_parts.append("same company/news capture artifact")
     run_summary["scope"] = " + ".join(scope_parts) or "manual workspace rebuild"
     promoted = _promote_approved_watchlist(workspace, artifacts.watchlist_json) if promote_approved else 0
     payload = {
@@ -214,6 +337,8 @@ def build_company_discovery_review_cmd(
         "source": str(feed_path),
         "capture_artifact": str(capture_artifact or ""),
         "source_metrics": str(source_metrics or ""),
+        "news_capture_artifact": str(news_capture_artifact or ""),
+        "news_ledger": str(news_ledger_path),
         "summary": run_summary,
         "workspace_summary": workspace_summary,
         "promote_approved": promote_approved,
@@ -556,12 +681,30 @@ def _promote_approved_watchlist(workspace: Path, path: Path) -> int:
     for item in entries:
         provenance = list(item.get("provenance") or [])
         source_url = str((provenance[0] if provenance else {}).get("source_url") or item.get("linkedin_company_url") or item.get("website") or "")
-        notes = (
-            "Human-approved company discovery watchlist | "
-            f"rubric_total={item.get('rubric_total', 0)} | "
-            f"reviewer_notes={item.get('reviewer_notes', '')}"
+        source_types = sorted(
+            {
+                str(value.get("source_type") or "").strip()
+                for value in provenance
+                if isinstance(value, dict) and str(value.get("source_type") or "").strip()
+            }
         )
-        _, created = workbook.upsert_organization(
+        source_run_ids = sorted(
+            {
+                str(value.get("source_run_id") or "").strip()
+                for value in provenance
+                if isinstance(value, dict) and str(value.get("source_run_id") or "").strip()
+            }
+        )
+        notes = _watchlist_promotion_notes(
+            rubric_total=item.get("rubric_total", 0),
+            reviewer=str(item.get("reviewer") or ""),
+            reviewed_at=str(item.get("reviewed_at") or ""),
+            reviewer_notes=str(item.get("reviewer_notes") or ""),
+            source_types=source_types,
+            source_run_ids=source_run_ids,
+        )
+        source_kind = _watchlist_source_kind(provenance)
+        organization, created = workbook.upsert_organization(
             OrganizationRecord(
                 organization_id=workbook.make_organization_id(str(item.get("company_name") or "")),
                 name=str(item.get("company_name") or ""),
@@ -569,13 +712,110 @@ def _promote_approved_watchlist(workspace: Path, path: Path) -> int:
                 target_lists="company-watchlist;track-2;relationship",
                 status="Reviewed watchlist",
                 website=str(item.get("website") or ""),
-                source_kind=SourceKind.LINKEDIN,
+                source_kind=source_kind,
                 source_url=source_url,
                 notes=notes,
             )
         )
         added += int(created)
+        if created:
+            continue
+        merged_notes = _merge_watchlist_promotion_notes(organization.notes, notes)
+        updates: dict[str, str] = {}
+        merged_target_lists = _merge_semicolon_values(
+            organization.target_lists,
+            "company-watchlist;track-2;relationship",
+        )
+        if merged_target_lists != organization.target_lists:
+            updates["target_lists"] = merged_target_lists
+        if organization.status != "Reviewed watchlist":
+            updates["status"] = "Reviewed watchlist"
+        if not organization.website and item.get("website"):
+            updates["website"] = str(item.get("website") or "")
+        if organization.source_kind == SourceKind.MANUAL and source_kind != SourceKind.MANUAL:
+            updates["source_kind"] = source_kind.value
+        if not organization.source_url and source_url:
+            updates["source_url"] = source_url
+        if merged_notes != organization.notes:
+            updates["notes"] = merged_notes
+        if updates:
+            updates["last_updated_at"] = utc_now_iso()
+            workbook.update_organization(organization.organization_id, **updates)
     return added
+
+
+def _watchlist_promotion_notes(
+    *,
+    rubric_total: object,
+    reviewer: str,
+    reviewed_at: str,
+    reviewer_notes: str,
+    source_types: list[str],
+    source_run_ids: list[str],
+) -> str:
+    metadata = {
+        "rubric_total": str(rubric_total),
+        "reviewer_notes": reviewer_notes,
+        "source_types": ";".join(source_types),
+        "source_run_ids": ";".join(source_run_ids),
+        "watchlist_review_state": "approved",
+        "watchlist_rubric_total": str(rubric_total),
+        "watchlist_reviewer": reviewer,
+        "watchlist_reviewed_at": reviewed_at,
+        "watchlist_reviewer_notes": reviewer_notes,
+        "watchlist_source_types": ";".join(source_types),
+        "watchlist_source_run_ids": ";".join(source_run_ids),
+    }
+    return format_notes_parts(
+        ["Human-approved company discovery watchlist"],
+        metadata,
+    )
+
+
+def _merge_watchlist_promotion_notes(existing: str, incoming: str) -> str:
+    existing_freeform, existing_metadata = parse_notes_parts(existing)
+    incoming_freeform, incoming_metadata = parse_notes_parts(incoming)
+    freeform = list(existing_freeform)
+    existing_tokens = {item.casefold() for item in freeform}
+    for item in incoming_freeform:
+        if item.casefold() not in existing_tokens:
+            freeform.append(item)
+            existing_tokens.add(item.casefold())
+    return format_notes_parts(freeform, {**existing_metadata, **incoming_metadata})
+
+
+def _merge_semicolon_values(*values: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for item in value.split(";"):
+            cleaned = item.strip()
+            token = cleaned.casefold()
+            if cleaned and token not in seen:
+                merged.append(cleaned)
+                seen.add(token)
+    return ";".join(merged)
+
+
+def _watchlist_source_kind(provenance: list[object]) -> SourceKind:
+    source_types = {
+        str(item.get("source_type") or "").strip().casefold()
+        for item in provenance
+        if isinstance(item, dict)
+    }
+    if any("linkedin" in value for value in source_types):
+        return SourceKind.LINKEDIN
+    if any(value.startswith("yc") or "y_combinator" in value for value in source_types):
+        return SourceKind.YC_DIRECTORY
+    if any(
+        token in value
+        for value in source_types
+        for token in ("startup_directory", "built_in", "accelerator_directory")
+    ):
+        return SourceKind.STARTUP_DIRECTORY
+    if any("university" in value for value in source_types):
+        return SourceKind.UNIVERSITY_DIRECTORY
+    return SourceKind.OTHER
 
 
 def _email_is_approved(draft: dict[str, object]) -> bool:

@@ -256,13 +256,15 @@ def test_daily_report_renders_run_scoped_linkedin_feed_and_viewer_rows(tmp_path:
     html_text = html_artifact.read_text(encoding="utf-8")
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     by_source = {row["source"]: row for row in payload["source_breakdown"]}
-    assert "LinkedIn home feed: status=`completed`; kept=`0`; raw=`0`" in report_text
-    assert "LinkedIn profile viewers: status=`skipped`; kept=`0`; raw=`0`" in report_text
+    assert "LinkedIn home feed: `completed` · kept `0` / raw `0`" in report_text
+    assert "LinkedIn profile viewers: `skipped` · kept `0` / raw `0`" in report_text
     assert "LinkedIn home feed" in html_text
     assert "LinkedIn profile viewers" in html_text
     assert by_source["LinkedIn home feed"]["raw"] == 0
     assert by_source["LinkedIn profile viewers"]["status"] == "skipped"
-    assert "77" not in str(by_source)
+    # The stale artifact is not consulted; the temporary pytest path itself may
+    # happen to contain the digits "77", so assert against its filename instead.
+    assert "old-linkedin-intelligence-capture.json" not in str(by_source)
 
 
 def test_daily_report_workspace_snapshot_never_claims_current_run_sources(
@@ -288,6 +290,65 @@ def test_daily_report_workspace_snapshot_never_claims_current_run_sources(
     assert {row["status"] for row in payload["source_breakdown"]} == {"not_scoped"}
     assert "Workspace Snapshot" in report_path.read_text(encoding="utf-8")
     assert "not scoped" in html_path.read_text(encoding="utf-8")
+
+
+def test_daily_report_surfaces_open_inbound_resume_request(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-lemon", name="LemonLime")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-jordan",
+            organization_id="org-lemon",
+            full_name="Jordan Zietz",
+            status="Replied",
+            linkedin_url="https://linkedin.com/in/jordan-zietz/",
+        )
+    )
+    (workspace / "linkedin_message_state.json").write_text(
+        json.dumps(
+            {
+                "thread_states": {
+                    "synthetic:jordan": {
+                        "name": "Jordan Zietz",
+                        "last_sender": "Jordan",
+                        "last_seen_at": "2026-07-08T02:08:00+00:00",
+                        "latest_message": "Feel free to send over your resume + any info to careers@lemonlime.ai!",
+                        "signature": "jordan|resume-request",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    nightly_summary = tmp_path / "nightly-summary.json"
+    nightly_summary.write_text(
+        json.dumps({"created_at": "2026-07-10T01:00:00-07:00", "outreach_maintenance": {"ran": True}}),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    summary_path, report_path, html_path, _ = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=nightly_summary,
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["open_inbox_actions"][0]["company"] == "LemonLime"
+    assert payload["open_inbox_actions"][0]["action_type"] == "email_resume_requested"
+    assert payload["open_inbox_actions"][0]["email"] == "careers@lemonlime.ai"
+    assert "Email your resume" in report_path.read_text(encoding="utf-8")
+    assert "Jordan Zietz" in html_path.read_text(encoding="utf-8")
+    assert (workspace / "linkedin_inbox_actions.csv").exists()
 
 
 def test_daily_report_cli_rejects_half_scoped_mode(tmp_path: Path) -> None:

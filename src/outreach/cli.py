@@ -5851,6 +5851,209 @@ def _unscoped_source_breakdown() -> list[dict[str, object]]:
     ]
 
 
+INBOX_ACTION_FIELDS = [
+    "action_id",
+    "status",
+    "priority",
+    "action_type",
+    "company",
+    "person",
+    "contact_id",
+    "linkedin_url",
+    "last_seen_at",
+    "message",
+    "recommended_action",
+    "email",
+    "thread_url",
+    "source",
+    "notes",
+]
+
+
+def _inbox_action_path(workspace: Path) -> Path:
+    return workspace / "linkedin_inbox_actions.csv"
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _write_csv_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _inbound_action_details(message: str) -> tuple[str, str, str, str]:
+    """Return action type, priority, recommended action, and email for an inbound reply."""
+    lower = message.casefold()
+    emails = extract_email_addresses(message)
+    email = emails[0] if emails else ""
+    if email and any(token in lower for token in ("resume", "cv", "profile", "send over", "send your")):
+        return (
+            "email_resume_requested",
+            "high",
+            f"Email your resume plus a concise role-fit note to {email}.",
+            email,
+        )
+    if any(token in lower for token in ("referral", "send your resume", "share your resume", "share your profile")):
+        return (
+            "resume_or_referral_requested",
+            "high",
+            "Send the requested resume/profile and a concise role-fit blurb.",
+            email,
+        )
+    if any(token in lower for token in ("reach out to", "talk to", "contact ", "@")):
+        return (
+            "routing_signal",
+            "medium",
+            "Follow the routing suggestion; identify the named person and make the next outreach deliberate.",
+            email,
+        )
+    return (
+        "inbound_reply",
+        "medium",
+        "Read and reply manually; this is an inbound response that has not been resolved in the action ledger.",
+        email,
+    )
+
+
+def _sync_open_inbox_actions(workspace: Path, workbook: OutreachWorkbook) -> tuple[Path, list[dict[str, str]]]:
+    """Materialize actionable inbound LinkedIn replies without claiming they happened this run.
+
+    The CSV is deliberately persistent: a user can set status to done, snoozed,
+    or not_actionable and later daily reports will stop presenting that item as
+    an open task.
+    """
+    state_path = workspace / "linkedin_message_state.json"
+    state = _load_json_file(state_path)
+    thread_states = state.get("thread_states") if isinstance(state.get("thread_states"), dict) else {}
+    contact_by_name = {
+        normalize_dedupe_text(contact.full_name): contact
+        for contact in workbook.list_contacts()
+        if contact.full_name.strip()
+    }
+    organizations = {item.organization_id: item for item in workbook.list_organizations()}
+    path = _inbox_action_path(workspace)
+    existing = {row.get("action_id", ""): row for row in _read_csv_rows(path)}
+    merged: dict[str, dict[str, str]] = dict(existing)
+
+    for raw_state in thread_states.values():
+        if not isinstance(raw_state, dict):
+            continue
+        sender = str(raw_state.get("last_sender") or "").strip().casefold()
+        if not sender or sender in {"you", "akshat", "akshat pathak"}:
+            continue
+        name = str(raw_state.get("name") or "").strip()
+        contact = contact_by_name.get(normalize_dedupe_text(name))
+        if contact is None or str(contact.status or "").casefold() != "replied":
+            continue
+        message = str(raw_state.get("latest_message") or "").strip()
+        if not message:
+            continue
+        signature = str(raw_state.get("signature") or normalize_dedupe_text(message))
+        action_id = hashlib.sha1(f"{contact.contact_id}|{signature}".encode("utf-8")).hexdigest()[:16]
+        action_type, priority, recommended_action, email = _inbound_action_details(message)
+        organization = organizations.get(contact.organization_id)
+        prior = dict(existing.get(action_id) or {})
+        merged[action_id] = {
+            "action_id": action_id,
+            "status": prior.get("status") or "open",
+            "priority": priority,
+            "action_type": action_type,
+            "company": organization.name if organization else "",
+            "person": contact.full_name,
+            "contact_id": contact.contact_id,
+            "linkedin_url": contact.linkedin_url,
+            "last_seen_at": str(raw_state.get("last_seen_at") or ""),
+            "message": message,
+            "recommended_action": recommended_action,
+            "email": email,
+            "thread_url": str(raw_state.get("thread_url") or ""),
+            "source": "linkedin_message_state",
+            "notes": prior.get("notes") or "",
+        }
+
+    rows = sorted(
+        merged.values(),
+        key=lambda row: (row.get("status") != "open", row.get("priority") != "high", row.get("last_seen_at", "")),
+        reverse=False,
+    )
+    _write_csv_rows(path, rows, INBOX_ACTION_FIELDS)
+    return path, [row for row in rows if row.get("status") == "open"]
+
+
+def _source_summary(row: dict[str, object]) -> str:
+    source = str(row.get("source") or "")
+    details = row.get("details") if isinstance(row.get("details"), dict) else {}
+    if source == "Startup sources":
+        relationship = details.get("relationship_sources") if isinstance(details.get("relationship_sources"), dict) else {}
+        apply_discovered = details.get("apply_discovered") if isinstance(details.get("apply_discovered"), dict) else {}
+        relationship_total = sum(int(value or 0) for value in relationship.values())
+        apply_total = sum(int(value or 0) for value in apply_discovered.values())
+        return f"{relationship_total} company targets reviewed; {apply_total} startup job leads discovered."
+    if source == "LinkedIn home feed":
+        return (
+            f"{int(details.get('captured') or 0)} posts captured; "
+            f"{int(details.get('added') or 0)} new signals; "
+            f"{int(details.get('workspace_pending_review') or 0)} pending review."
+        )
+    if source == "LinkedIn profile viewers":
+        return str(details.get("reason") or "Passive context only.")
+    if source == "ResumeGenerator / app queue":
+        counts = details.get("action_queue_counts") if isinstance(details.get("action_queue_counts"), dict) else {}
+        return (
+            f"{int(counts.get('application_plus_outreach') or 0)} application+outreach; "
+            f"{int(counts.get('follow_up') or 0)} follow-up candidates."
+        )
+    if source == "Track 2 imports / maintenance" and row.get("status") != "ran":
+        return "Track 2 did not complete; planned work is not presented as executed."
+    return ""
+
+
+def _company_execution_rows(
+    invite_runs: list[dict[str, object]],
+    followup_payloads: list[dict[str, object]],
+    track_payload: dict[str, object],
+) -> list[dict[str, object]]:
+    by_company: dict[str, dict[str, int]] = {}
+
+    def add(company: str, key: str, amount: int) -> None:
+        if not company or amount <= 0:
+            return
+        bucket = by_company.setdefault(company, {})
+        bucket[key] = bucket.get(key, 0) + amount
+
+    for run in invite_runs:
+        add(str(run.get("company") or ""), "linkedin_invites_sent", int((run.get("status_counts") or {}).get("sent") or 0))
+    for payload in followup_payloads:
+        for item in list(payload.get("results") or []):
+            if isinstance(item, dict) and str(item.get("status") or "") == "sent":
+                add(str(item.get("company") or ""), "linkedin_followups_sent", 1)
+    for phase in list(track_payload.get("phase_results") or []):
+        if not isinstance(phase, dict):
+            continue
+        for run in list(phase.get("runs") or []):
+            if not isinstance(run, dict):
+                continue
+            company = str(run.get("company") or "")
+            add(company, "contacts_mapped", int(run.get("contacts_added") or 0))
+            add(company, "emails_researched", int(run.get("emails_found") or 0))
+    rows = []
+    for company, counts in by_company.items():
+        summary = "; ".join(
+            label.replace("_", " ") + f" {count}"
+            for label, count in sorted(counts.items())
+        )
+        rows.append({"company": company, "counts": counts, "summary": summary})
+    return sorted(rows, key=lambda row: row["company"].casefold())
+
+
 def _write_comms_learning_artifact(
     *,
     workspace: Path,
@@ -6090,6 +6293,16 @@ def write_artifact_daily_report(
     source_breakdown = (
         _source_breakdown(nightly_summary) if run_scoped else _unscoped_source_breakdown()
     )
+    track_artifact = Path(str((maintenance or {}).get("track_2_daily_run_artifact") or ""))
+    track_payload = _load_json_file(track_artifact)
+    company_execution = _company_execution_rows(
+        invite_runs,
+        followup_payloads,
+        track_payload,
+    )
+    inbox_action_path, open_inbox_actions = _sync_open_inbox_actions(workspace, workbook)
+    track_2_returncode = (maintenance or {}).get("track_2_daily_run_returncode")
+    track_2_failed = track_2_returncode not in (None, 0)
     comms_artifact, comms_summary = _write_comms_learning_artifact(
         workspace=workspace,
         reports_dir=reports_dir,
@@ -6126,11 +6339,16 @@ def write_artifact_daily_report(
         "invite_totals": invite_totals,
         "followup_runs": followup_runs,
         "pending_review_count": len(deduped_review_items),
+        "open_inbox_actions": open_inbox_actions,
+        "inbox_action_queue": str(inbox_action_path),
         "manually_cleared_review_count": len(manually_cleared_items),
         "manually_cleared_review_items": manually_cleared_items,
         "campaign_summary": campaign_summary,
         "campaign_artifact": str(campaign_artifact or ""),
         "campaign_rows": campaign_rows,
+        "company_execution": company_execution,
+        "track_2_failed": track_2_failed,
+        "track_2_returncode": track_2_returncode,
         "enrichment_summary": enrichment_summary,
         "enrichment_artifact": str(enrichment_artifact or ""),
         "website_summary": website_summary,
@@ -6167,70 +6385,90 @@ def write_artifact_daily_report(
         f"- Nightly summary: `{nightly_summary_path or ''}`",
         f"- Report artifact: `{summary_artifact}`",
         "",
-        "## Nightly Engine",
+        "## Run outcome",
         "",
-        f"- Daily engine return code: `{nightly_summary.get('daily_engine_returncode', '')}`",
-        f"- Generation ran: `{nightly_summary.get('generation_ran', '')}`",
-        f"- Selected for generation: `{nightly_summary.get('generation_selected_count', '')}`",
-        f"- Failures: `{nightly_summary.get('failures', [])}`",
-        "",
-        (
-            "## Source Breakdown (this run)"
-            if run_scoped
-            else "## Source Breakdown (not scoped — no nightly run selected)"
-        ),
-        "",
+        f"- LinkedIn invites sent: `{int(invite_totals.get('sent') or 0)}`",
+        f"- LinkedIn follow-ups sent: `{sum(int((run.get('status_counts') or {}).get('sent') or 0) for run in followup_runs)}`",
+        f"- App generation selected: `{nightly_summary.get('generation_selected_count', '')}`",
     ]
-    for row in source_breakdown:
-        lines.append(f"- {row['source']}: status=`{row['status']}`; kept=`{row['kept']}`; raw=`{row['raw']}`; details=`{row['details']}`")
-    if jobspy_metrics:
-        lines.extend(["", "## JobSpy", ""])
-        for key, value in jobspy_metrics.items():
-            lines.append(f"- {key}: `{value}`")
-    lines.extend(["", "## Recruiting Intelligence", ""])
-    company_scope = "this run" if run_scoped else "latest available artifact; not one run"
-    role_scope = "this run" if run_scoped else "latest available artifact; not one run"
-    lines.append(f"- Company discovery ({company_scope}): `{company_discovery.get('summary', {})}`")
-    lines.append(f"- Company review queue (workspace): `{company_discovery.get('workspace_summary', {})}`")
-    lines.append(f"- Role surfaces ({role_scope}): `{role_surface.get('summary', {})}`")
-    lines.append(f"- Cadence (workspace snapshot): `{cadence_report.get('summary', {})}`")
-    lines.append(f"- Outcome learning (workspace snapshot): `{outcome_learning.get('summary', {})}`")
-    lines.extend([
-        "",
-        "## Outreach Actions" + (" (run window)" if run_scoped else " (workspace artifact history)"),
-        "",
-    ])
-    lines.append(f"- LinkedIn invite totals: `{invite_totals}`")
-    for run in invite_runs:
-        lines.append(f"- {run['company']}: `{run['status_counts']}`")
-    for run in followup_runs:
-        lines.append(f"- Follow-ups: `{run['status_counts']}`; touchpoints added `{run['touchpoints_added']}`")
-    lines.append(f"- Website resolution: `{website_summary}`")
-    lines.append(f"- Company context enrichment: `{enrichment_summary}`")
-    lines.append(f"- Campaign plan: `{campaign_summary}`")
-    lines.extend(["", "## Company-Level Actions", ""])
-    if campaign_rows:
-        grouped: dict[tuple[str, str], list[str]] = {}
-        for row in campaign_rows:
-            key = (str(row.get("tier") or "Unscored"), str(row.get("campaign_action") or "Other"))
-            grouped.setdefault(key, []).append(str(row.get("company") or ""))
-        for (tier, action), companies in sorted(grouped.items()):
-            lines.append(f"- Tier {tier} / {action}: {', '.join(companies[:12])}")
+    if track_2_failed:
+        lines.append(
+            f"- Track 2 execution: `failed` (return code `{track_2_returncode}`); no planned Track 2 work is presented as completed."
+        )
     else:
-        lines.append("- No campaign rows found.")
-    lines.extend(["", "## Messages To Review", ""])
+        lines.append("- Track 2 execution: `completed`.")
+
+    lines.extend(["", "## What needs you", ""])
+    if open_inbox_actions:
+        for action in open_inbox_actions:
+            lines.append(
+                f"- **{action['priority'].upper()} · {action['company']} · {action['person']}** — {action['recommended_action']}"
+            )
+            lines.append(f"  - Inbound: {action['message']}")
     if deduped_review_items:
         for item in deduped_review_items:
-            last_message = str(item.get("latest_message") or item.get("last_message") or "").strip()
             lines.append(
-                f"- {item.get('company', '')} / {item.get('name', '')} "
-                f"(`{item.get('send_recommendation', '')}`): {item.get('draft_message', '')}"
+                f"- **Review draft · {item.get('company', '')} · {item.get('name', '')}** — {item.get('draft_message', '')}"
             )
-            if last_message:
-                lines.append(f"  - Last msg: {last_message}")
+    pending_company_reviews = int((company_discovery.get("workspace_summary") or {}).get("pending_review") or 0)
+    if pending_company_reviews:
+        lines.append(
+            f"- **Company review** — {pending_company_reviews} discovery candidates are pending disposition before promotion."
+        )
+    if not open_inbox_actions and not deduped_review_items and not pending_company_reviews:
+        lines.append("- No open human action was detected.")
+    lines.append(
+        f"- Resolve or snooze inbox items in `{inbox_action_path}`; non-open rows stop appearing here."
+    )
+
+    lines.extend(["", "## LinkedIn actions (this run)", ""])
+    if invite_runs:
+        for run in invite_runs:
+            lines.append(f"- {run['company']}: `{_render_status_counts(run['status_counts'])}`")
     else:
-        lines.append("- No messages currently require review.")
-    lines.extend(["", "## Manually Cleared Messages", ""])
+        lines.append("- No LinkedIn invites were sent in this run.")
+    if followup_runs:
+        for run in followup_runs:
+            lines.append(
+                f"- Follow-ups: `{_render_status_counts(run['status_counts'])}`; touchpoints added `{run['touchpoints_added']}`"
+            )
+    if track_2_failed:
+        lines.append("- Inbox refresh/follow-up phase did not complete; open inbox actions above come from the persistent LinkedIn message state.")
+
+    lines.extend(["", "## Execution by company (this run)", ""])
+    if company_execution:
+        for row in company_execution:
+            lines.append(f"- **{row['company']}** — {row['summary']}")
+    else:
+        lines.append("- No per-company execution was recorded.")
+
+    lines.extend(["", "## Planned next (not executed)", ""])
+    if campaign_rows:
+        grouped: dict[str, list[str]] = {}
+        for row in campaign_rows:
+            grouped.setdefault(str(row.get("campaign_action") or "Other"), []).append(str(row.get("company") or ""))
+        for action, companies in sorted(grouped.items()):
+            lines.append(f"- {action}: {', '.join(companies[:12])}")
+    else:
+        lines.append("- No campaign plan was generated.")
+
+    lines.extend(["", "## Discovery and source health", ""])
+    for row in source_breakdown:
+        lines.append(
+            f"- {row['source']}: `{row['status']}` · kept `{row['kept']}` / raw `{row['raw']}`"
+            + (f" — {_source_summary(row)}" if _source_summary(row) else "")
+        )
+    if jobspy_metrics:
+        lines.append(
+            f"- JobSpy detail: `{jobspy_metrics.get('raw_jobs', 0)}` scanned; "
+            f"`{jobspy_metrics.get('jobspy_app_score_now', 0)}` score-now; "
+            f"`{jobspy_metrics.get('jobspy_app_review', 0)}` review."
+        )
+    lines.extend(["", "## Maintenance completed", ""])
+    lines.append(f"- Website resolution: `{website_summary}`")
+    lines.append(f"- Company context enrichment: `{enrichment_summary}`")
+    lines.append(f"- Campaign plan created: `{campaign_summary}`")
+    lines.extend(["", "## Manually cleared messages", ""])
     if manually_cleared_items:
         for item in manually_cleared_items:
             lines.append(
@@ -6265,12 +6503,8 @@ def write_artifact_daily_report(
         for name, metric in stage_metrics.items()
         if isinstance(metric, dict)
     )
-    discovery_table = "".join(
-        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['count'])}</td><td>{esc(row['raw_count'])}</td></tr>"
-        for row in discovery_rows
-    )
     source_breakdown_table = "".join(
-        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['status'])}</td><td>{esc(row['kept'])}</td><td>{esc(row['raw'])}</td><td><code>{esc(row['details'])}</code></td></tr>"
+        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['status'])}</td><td>{esc(row['kept'])}</td><td>{esc(row['raw'])}</td><td>{esc(_source_summary(row))}</td></tr>"
         for row in source_breakdown
     )
     invite_cards = "".join(
@@ -6291,20 +6525,21 @@ def write_artifact_daily_report(
         )
         for run in followup_runs
     )
-    campaign_cards = ""
-    if campaign_rows:
-        grouped: dict[tuple[str, str], list[str]] = {}
-        for row in campaign_rows:
-            key = (str(row.get("tier") or "Unscored"), str(row.get("campaign_action") or "Other"))
-            grouped.setdefault(key, []).append(str(row.get("company") or ""))
-        for (tier, action), companies in sorted(grouped.items()):
-            company_items = "".join(f"<li>{esc(company)}</li>" for company in companies[:16])
-            campaign_cards += (
-                "<section class='card'>"
-                f"<h3>Tier {esc(tier)} · {esc(action)}</h3>"
-                f"<ul>{company_items}</ul>"
-                "</section>"
-            )
+    execution_cards = "".join(
+        "<section class='card'>"
+        f"<h3>{esc(row['company'])}</h3>"
+        f"<p>{esc(row['summary'])}</p>"
+        "</section>"
+        for row in company_execution
+    )
+    inbox_action_cards = "".join(
+        "<section class='review-card'>"
+        f"<div class='review-meta'>{esc(action['priority'].upper())} · {esc(action['company'])} · {esc(action['person'])}</div>"
+        f"<p><strong>Do:</strong> {esc(action['recommended_action'])}</p>"
+        f"<div class='last-message'><strong>Inbound</strong><span>{esc(action['message'])}</span></div>"
+        "</section>"
+        for action in open_inbox_actions
+    )
     review_rows = "".join(
         (
             "<tr>"
@@ -6317,40 +6552,10 @@ def write_artifact_daily_report(
         )
         for item in deduped_review_items
     )
-    cleared_rows = "".join(
-        (
-            "<tr>"
-            f"<td>{esc(item.get('company', ''))}</td>"
-            f"<td>{esc(item.get('name', ''))}</td>"
-            f"<td>{esc(item.get('manual_latest_message', ''))}</td>"
-            f"<td>{esc(item.get('latest_message') or item.get('last_message') or '')}</td>"
-            "</tr>"
-        )
-        for item in manually_cleared_items
-    )
-    jobspy_items = "".join(
-        f"<li><span>{esc(key)}</span><strong>{esc(value)}</strong></li>"
-        for key, value in jobspy_metrics.items()
-    )
-    intelligence_cards = "".join(
-        f"<div class='card'><h3>{esc(label)}</h3><p><code>{esc(payload)}</code></p></div>"
-        for label, payload in [
-            (f"Company discovery · {company_scope}", company_discovery.get("summary", {})),
-            ("Company review queue · workspace", company_discovery.get("workspace_summary", {})),
-            (f"Role surfaces · {role_scope}", role_surface.get("summary", {})),
-            ("Cadence · workspace snapshot", cadence_report.get("summary", {})),
-            ("Outcome learning · workspace snapshot", outcome_learning.get("summary", {})),
-        ]
-    )
     html_source_heading = (
         "Source Breakdown (this run)"
         if run_scoped
         else "Source Breakdown (not scoped — no nightly run selected)"
-    )
-    html_discovery_heading = (
-        "Discovery Artifacts (run window)"
-        if run_scoped
-        else "Discovery Artifacts (workspace history)"
     )
     html_comms_heading = (
         "Comms Learning (run window)"
@@ -6396,24 +6601,21 @@ def write_artifact_daily_report(
   </header>
   <main>
     <section class="grid">
-      <div class="card"><h2>Workspace</h2><p><code>{esc(counts)}</code></p></div>
-      <div class="card"><h2>Generation</h2><p>ran=<code>{esc(nightly_summary.get('generation_ran', ''))}</code> selected=<code>{esc(nightly_summary.get('generation_selected_count', ''))}</code></p></div>
-      <div class="card"><h2>Outreach</h2><p>invites=<code>{esc(invite_totals)}</code></p><p>review=<code>{esc(len(deduped_review_items))}</code> cleared=<code>{esc(len(manually_cleared_items))}</code></p></div>
+      <div class="card"><h2>LinkedIn sent</h2><p><strong>{esc(invite_totals.get('sent', 0))}</strong> invites · <strong>{esc(sum(int((run.get('status_counts') or {}).get('sent') or 0) for run in followup_runs))}</strong> follow-ups</p></div>
+      <div class="card"><h2>Open actions for you</h2><p><strong>{esc(len(open_inbox_actions) + len(deduped_review_items))}</strong> inbox/review actions</p><p><small>Persistent inbox queue: {esc(inbox_action_path)}</small></p></div>
+      <div class="card"><h2>Track 2</h2><p><strong>{esc('FAILED' if track_2_failed else 'completed')}</strong></p><p>{esc('No planned Track 2 work is counted as executed.' if track_2_failed else 'Executed work is listed by company below.')}</p></div>
     </section>
     <section class="grid">
-      <div class="card"><h2>JobSpy</h2><ul class="metric-list">{jobspy_items or '<li><span>No metrics</span><strong>-</strong></li>'}</ul></div>
       <div class="card"><h2>LinkedIn Actions</h2><ul class="action-list">{invite_cards}{followup_cards or ''}</ul></div>
-      <div class="card"><h2>Maintenance</h2><p>websites <code>{esc(website_summary)}</code></p><p>context <code>{esc(enrichment_summary)}</code></p><p>campaign <code>{esc(campaign_summary)}</code></p></div>
+      <div class="card"><h2>Company review</h2><p><strong>{esc((company_discovery.get('workspace_summary') or {}).get('pending_review', 0))}</strong> candidates await a disposition before promotion.</p></div>
+      <div class="card"><h2>Run health</h2><p>Daily engine <code>{esc(nightly_summary.get('daily_engine_returncode', ''))}</code> · JobSpy score-now <code>{esc(jobspy_metrics.get('jobspy_app_score_now', 0))}</code></p></div>
     </section>
-    <section><h2>{esc(html_source_heading)}</h2><table><thead><tr><th>Source</th><th>Status</th><th>Kept</th><th>Raw</th><th>Run details</th></tr></thead><tbody>{source_breakdown_table}</tbody></table></section>
-    <section><h2>{esc(html_discovery_heading)}</h2><table><thead><tr><th>Source</th><th>Kept</th><th>Raw</th></tr></thead><tbody>{discovery_table or '<tr><td colspan="3">No discovery artifacts found.</td></tr>'}</tbody></table></section>
-    <section><h2>Nightly Stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
-    <section><h2>Recruiting Intelligence</h2><div class="grid">{intelligence_cards}</div></section>
-    <section><h2>Company-Level Actions</h2><div class="grid">{campaign_cards or '<div class="card">No campaign rows found.</div>'}</div></section>
-    <section><h2>Messages To Review</h2><table class="review-table"><thead><tr><th>Company</th><th>Person</th><th>Rec</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>{review_rows or '<tr><td colspan="5">No messages currently require review.</td></tr>'}</tbody></table></section>
-    <section><h2>Manually Cleared Messages</h2><table><thead><tr><th>Company</th><th>Person</th><th>Sent msg</th><th>Previous last msg</th></tr></thead><tbody>{cleared_rows or '<tr><td colspan="4">No manually cleared review items.</td></tr>'}</tbody></table></section>
-    <section class="card"><h2>{esc(html_comms_heading)}</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Style-profile sync: <code>{esc(style_sync_summary)}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
-    <section class="card"><h2>Artifacts</h2><p>Nightly summary: <code>{esc(nightly_summary_path or '')}</code></p><p>Report: <code>{esc(summary_artifact)}</code></p><p>Campaign: <code>{esc(campaign_artifact or '')}</code></p></section>
+    <section><h2>What needs you</h2>{inbox_action_cards or '<div class="card">No open inbound LinkedIn action.</div>'}{review_rows and '<table class="review-table"><thead><tr><th>Company</th><th>Person</th><th>Rec</th><th>Last msg</th><th>Draft</th></tr></thead><tbody>' + review_rows + '</tbody></table>' or ''}</section>
+    <section><h2>Execution by company (this run)</h2><div class="grid">{execution_cards or '<div class="card">No per-company execution was recorded.</div>'}</div></section>
+    <section><h2>{esc(html_source_heading)}</h2><table><thead><tr><th>Source</th><th>Status</th><th>Kept</th><th>Raw</th><th>Human summary</th></tr></thead><tbody>{source_breakdown_table}</tbody></table></section>
+    <section><h2>Maintenance completed</h2><div class="grid"><div class="card"><h3>Website resolution</h3><p>{esc(website_summary)}</p></div><div class="card"><h3>Company context enrichment</h3><p>{esc(enrichment_summary)}</p></div><div class="card"><h3>Campaign plan created</h3><p>{esc(campaign_summary)}</p></div></div></section>
+    <section><h2>Nightly stages</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr></thead><tbody>{stage_rows or '<tr><td colspan="3">No stage metrics found.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>{esc(html_comms_heading)}</h2><p>gold/manual sends <code>{esc(comms_summary['gold'])}</code> · negative/replaced drafts <code>{esc(comms_summary['negative'])}</code> · silver/sent approved drafts <code>{esc(comms_summary['silver'])}</code></p><p>Reusable corpus: <code>{esc(comms_artifact)}</code></p></section>
   </main>
 </body>
 </html>

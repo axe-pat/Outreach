@@ -502,7 +502,12 @@ class LinkedInScraper:
             browser = self._connect_over_cdp(playwright)
             try:
                 context = browser.contexts[0]
-                preflight = self._session_preflight(context, target_url="https://www.linkedin.com/messaging/")
+                # The feed is the stable signed-in surface used for the CDP
+                # preflight. LinkedIn's inbox can omit the global-nav selectors
+                # used by _looks_logged_in(), even for an authenticated session.
+                # Validate the inbox itself after navigation below instead of
+                # treating that layout difference as a failed login.
+                preflight = self._session_preflight(context)
                 if not preflight["ok"]:
                     raise RuntimeError(
                         "LinkedIn preflight failed before message snapshot: "
@@ -514,6 +519,8 @@ class LinkedInScraper:
                     if not self._safe_goto(page, "https://www.linkedin.com/messaging/"):
                         raise RuntimeError("Could not load LinkedIn messaging.")
                     page.wait_for_timeout(2500)
+                    if self._is_authwall_or_login(page):
+                        raise RuntimeError("LinkedIn messaging redirected to an auth wall or login page.")
                     if deep:
                         return self._extract_message_threads_deep(page, limit=limit, max_scrolls=max_scrolls)
                     return self._extract_message_threads(page, limit=limit)

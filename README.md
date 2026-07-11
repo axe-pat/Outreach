@@ -532,6 +532,14 @@ ResumeGenerator/app queue, and Track 2 imports/maintenance. Sources that did
 not run are shown as `skipped` with zeroes rather than being inferred from old
 artifacts.
 
+The report is action-first: it separates outcomes actually executed in that
+run (including per-company counts, such as invites sent or contacts mapped)
+from the next campaign plan. Its `What needs you` queue includes inbound
+LinkedIn replies that need a human action, such as a resume request; those open
+items persist in `workspace/linkedin_inbox_actions.csv` until marked done,
+snoozed, or not actionable. It never sends that email or other reply
+automatically.
+
 Each run also writes a small reusable LinkedIn comms-learning corpus under
 `workspace/comms_learning/`: manual messages are `gold`, generated drafts
 replaced by those messages are `negative`, and sent approved/automatic drafts

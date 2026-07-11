@@ -18,6 +18,7 @@ workspace/daily_run_report.html
 workspace/daily_run_report.md
 workspace/linkedin_followup_pending_review.json
 workspace/linkedin_message_state.json
+workspace/linkedin_inbox_actions.csv
 workspace/linkedin_feed_signals.csv
 workspace/linkedin_profile_viewers.csv
 workspace/outreach_cadence_plan.json

@@ -172,6 +172,7 @@ paths visible instead of accidentally filtering them out.
   - `scripts/run_manual_supervised_e2e_debug.sh` is the attended/manual Outreach debug runner; `scripts/run_daily_supervised_e2e.sh` is only a warning shim for backwards compatibility.
   - latest daily HTML lives in `workspace/reports/daily_html/`, with compatibility mirrors in `workspace/reports/` and `workspace/`.
   - scheduled reports are run-scoped: Source Breakdown is anchored to the nightly summary and explicitly marks LinkedIn, Handshake, JobSpy, startup sources, ResumeGenerator/app queue, and Track 2 as ran/skipped. Do not present a workspace snapshot or a newest artifact as evidence for a prior run.
+  - keep the report action-first: show actual per-company execution separately from planned campaigns, and surface open inbound LinkedIn actions (for example, resume requests) in `What needs you`. The persistent action queue is `workspace/linkedin_inbox_actions.csv`; it requires a human status update and never auto-sends an email.
   - comms-learning artifacts are persisted under `workspace/comms_learning/`: manual sends are gold, replaced/cleared generated drafts are negative, and approved/automatic drafts actually sent are silver. Use the corpus to improve future messaging rather than merely deleting stale review rows.
   - role-surface counts are run-scoped only when built from that run's source
     metrics. Company review/watchlist, cadence, profile-viewer, and outcome-

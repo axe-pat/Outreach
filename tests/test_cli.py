@@ -171,6 +171,75 @@ def test_source_breakdown_marks_missing_sources_skipped_and_uses_run_metrics(tmp
     assert {row["status"] for row in startup_adapters} == {"skipped"}
 
 
+def test_source_breakdown_uses_exact_manifest_family_counts_as_canonical(
+    tmp_path: Path,
+) -> None:
+    run_id = "20260713-010001"
+    metrics_path = tmp_path / "source-run-metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "sources": {
+                    "linkedin": {
+                        "status": "ran",
+                        "raw_count": 28,
+                        "accepted_for_write": 0,
+                    }
+                },
+                "action_queue": {"counts": {"application_only": 112}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "daily-engine-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "source_families": {
+                    "linkedin": {
+                        "status": "failed_scoring",
+                        "raw_count": 28,
+                        "kept_count": 0,
+                    },
+                    "resume_generator_app_queue": {
+                        "status": "ran",
+                        "raw_count": 112,
+                        "kept_count": 5,
+                    },
+                    "track_2": {
+                        "status": "partial_failed",
+                        "raw_count": 55,
+                        "kept_count": 53,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = _source_breakdown(
+        {
+            "run_id": run_id,
+            "source_metrics": str(metrics_path),
+            "daily_engine_manifest": str(manifest_path),
+            "generation_selected_count": 0,
+        },
+        exact_track_payload={"phase_results": []},
+    )
+    by_source = {row["source"]: row for row in rows}
+
+    assert by_source["LinkedIn"]["status"] == "failed_scoring"
+    assert by_source["LinkedIn"]["raw"] == 28
+    assert by_source["LinkedIn"]["kept"] == 0
+    assert (
+        by_source["LinkedIn"]["details"]["canonical_manifest_family"]
+        == "linkedin"
+    )
+    assert by_source["ResumeGenerator / app queue"]["kept"] == 5
+    assert by_source["Track 2 imports / maintenance"]["kept"] == 53
+
+
 def test_required_source_failures_allows_explicit_skips_and_successful_zeroes() -> None:
     rows = [
         {"source": "LinkedIn", "status": "skipped", "raw": 0, "kept": 0},

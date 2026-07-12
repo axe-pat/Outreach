@@ -7151,6 +7151,15 @@ def _source_breakdown(
     source_metrics = _load_json_file(Path(str(nightly_summary.get("source_metrics") or "")))
     sources = source_metrics.get("sources") if isinstance(source_metrics.get("sources"), dict) else {}
     stages = source_metrics.get("stage_metrics") if isinstance(source_metrics.get("stage_metrics"), dict) else {}
+    daily_manifest = _load_json_file(
+        Path(str(nightly_summary.get("daily_engine_manifest") or ""))
+    )
+    manifest_source_families = (
+        daily_manifest.get("source_families")
+        if daily_manifest.get("run_id") == nightly_summary.get("run_id")
+        and isinstance(daily_manifest.get("source_families"), dict)
+        else {}
+    )
 
     def row(label: str, key: str, *, details: dict[str, object] | None = None) -> dict[str, object]:
         metric = sources.get(key) if isinstance(sources, dict) else {}
@@ -7520,7 +7529,7 @@ def _source_breakdown(
         "kept": int(company_news_payload.get("added") or 0),
         "details": company_news_details,
     }
-    return [
+    rows = [
         row("LinkedIn", "linkedin"),
         feed_row,
         viewer_row,
@@ -7531,6 +7540,47 @@ def _source_breakdown(
         app_queue,
         track,
     ]
+    canonical_family_by_label = {
+        "LinkedIn": "linkedin",
+        "Handshake": "handshake",
+        "JobSpy": "jobspy",
+        "Startup sources": "startup_sources",
+        "ResumeGenerator / app queue": "resume_generator_app_queue",
+        "Track 2 imports / maintenance": "track_2",
+    }
+    for source_row in rows:
+        family_name = canonical_family_by_label.get(
+            str(source_row.get("source") or "")
+        )
+        family = (
+            manifest_source_families.get(family_name)
+            if family_name and isinstance(manifest_source_families, dict)
+            else None
+        )
+        if not isinstance(family, dict):
+            continue
+        raw_count = family.get("raw_count")
+        kept_count = family.get("kept_count")
+        if (
+            not isinstance(raw_count, int)
+            or isinstance(raw_count, bool)
+            or raw_count < 0
+            or not isinstance(kept_count, int)
+            or isinstance(kept_count, bool)
+            or kept_count < 0
+        ):
+            continue
+        source_row["status"] = str(
+            family.get("status") or source_row.get("status") or "incomplete"
+        )
+        source_row["raw"] = raw_count
+        source_row["kept"] = kept_count
+        details = source_row.get("details")
+        source_row["details"] = {
+            **(details if isinstance(details, dict) else {}),
+            "canonical_manifest_family": family_name,
+        }
+    return rows
 
 
 def _combined_source_status(*statuses: str) -> str:

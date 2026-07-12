@@ -74,6 +74,7 @@ from outreach.cli import (
     _run_invite_candidate_worker,
     _app_invite_report_status,
     _apply_linkedin_cadence_guards,
+    _gate_high_value_followup_draft,
     _required_source_failures,
     _source_summary,
     _track_2_actual_actions,
@@ -743,7 +744,6 @@ def test_run_cli_forwards_exact_target_role_title(
         "outreach.cli.LinkedInScraper.require_live_cdp_session",
         lambda self: None,
     )
-
     def fake_execute(**kwargs: object) -> Path:
         captured.update(kwargs)
         return artifact
@@ -1094,6 +1094,333 @@ def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
     )
 
 
+def test_daily_report_reconciles_manual_reply_before_showing_carryover(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-snyk", name="Snyk")
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-fresh", name="FreshCo")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-emiliano",
+            organization_id="org-snyk",
+            full_name="Emiliano Castro",
+            status="Connected",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-fresh",
+            organization_id="org-fresh",
+            full_name="Fresh Inbound",
+            status="Connected",
+        )
+    )
+    (workspace / "linkedin_followup_pending_review.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-emiliano",
+                        "organization_id": "org-snyk",
+                        "company": "Snyk",
+                        "name": "Emiliano Castro",
+                        "send_recommendation": "review",
+                        "timestamp_text": "Jul 11",
+                        "latest_message": "Original invite note",
+                        "draft_message": "Generated follow-up that is now stale.",
+                    },
+                    {
+                        "contact_id": "ct-fresh",
+                        "organization_id": "org-fresh",
+                        "company": "FreshCo",
+                        "name": "Fresh Inbound",
+                        "send_recommendation": "review",
+                        "timestamp_text": "Jul 12",
+                        "latest_message": "Newer exact inbound.",
+                        "draft_message": "Reply to the newer inbound.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "linkedin_message_state.json").write_text(
+        json.dumps(
+            {
+                "thread_states": {
+                    "synthetic:emiliano": {
+                        "name": "Emiliano Castro",
+                        "last_sender": "You",
+                        "latest_message": "Manual follow-up already sent.",
+                        "last_seen_at": "2026-07-12T01:00:00+00:00",
+                        "timestamp_text": "Jul 12",
+                    },
+                    "synthetic:fresh": {
+                        "name": "Fresh Inbound",
+                        "last_sender": "You",
+                        "latest_message": "Older manual outbound.",
+                        "last_seen_at": "2026-07-10T01:00:00+00:00",
+                        "timestamp_text": "Jul 10",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with (workspace / "linkedin_inbox_actions.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "action_id",
+                "status",
+                "priority",
+                "action_type",
+                "company",
+                "person",
+                "contact_id",
+                "linkedin_url",
+                "last_seen_at",
+                "message",
+                "recommended_action",
+                "email",
+                "thread_url",
+                "source",
+                "notes",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "action_id": "old-inbound",
+                "status": "open",
+                "priority": "medium",
+                "action_type": "inbound_reply",
+                "company": "Snyk",
+                "person": "Emiliano Castro",
+                "contact_id": "ct-emiliano",
+                "last_seen_at": "2026-07-11T01:00:00+00:00",
+                "message": "Old inbound message.",
+            }
+        )
+        writer.writerow(
+            {
+                "action_id": "newer-inbound",
+                "status": "open",
+                "priority": "medium",
+                "action_type": "inbound_reply",
+                "company": "FreshCo",
+                "person": "Fresh Inbound",
+                "contact_id": "ct-fresh",
+                "last_seen_at": "2026-07-12T01:00:00+00:00",
+                "message": "Newer exact inbound.",
+            }
+        )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "run_id": REPORT_RUN_ID,
+                "outreach_maintenance": {"ran": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_json, _markdown, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+
+    assert [
+        item["name"] for item in payload["carryover_messages_to_review"]
+    ] == ["Fresh Inbound"]
+    assert payload["manually_cleared_review_count"] == 1
+    assert payload["manually_cleared_review_items"][0][
+        "manual_latest_message"
+    ] == "Manual follow-up already sent."
+    with (workspace / "linkedin_inbox_actions.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        actions = {row["action_id"]: row for row in csv.DictReader(handle)}
+    assert actions["old-inbound"]["status"] == "manual_handled"
+    assert actions["newer-inbound"]["status"] == "open"
+
+
+def test_daily_report_protects_executive_priority_reviews_and_collapses_browser_failures(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-monte-carlo",
+            name="Monte Carlo",
+            target_lists="story-fit;priority",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-jordan",
+            organization_id="org-monte-carlo",
+            full_name="Jordan Van Horn",
+            title="Co-founder at Monte Carlo",
+            contact_type="Founder",
+            status="Connected",
+        )
+    )
+    (workspace / "linkedin_followup_pending_review.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-jordan",
+                        "organization_id": "org-monte-carlo",
+                        "company": "Monte Carlo",
+                        "name": "Jordan Van Horn",
+                        "title": "Co-founder at Monte Carlo",
+                        "send_recommendation": "review",
+                        "draft_message": "Protected follow-up.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    track = artifacts / "exact-track-2-daily-run.json"
+    protected_invite_artifact = artifacts / "protected-invite-send-batch.json"
+    protected_invite_artifact.write_text(
+        json.dumps(
+            {
+                "company": "PriorityCo",
+                "results": [],
+                "protected_review_count": 1,
+                "protected_review_candidates": [
+                    {
+                        "name": "Priority Founder",
+                        "title": "Founder & CEO at PriorityCo",
+                        "linkedin_url": "https://www.linkedin.com/in/priority-founder/",
+                        "note": "Protected initial invite note.",
+                        "high_value_review_required": True,
+                        "high_value_review_reasons": ["executive recipient"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    browser_error = (
+        "RuntimeError: Nothing is listening on 127.0.0.1:9222. "
+        "Launch your signed-in Chrome with the configured remote debugging port first."
+    )
+    track.write_text(
+        json.dumps(
+            {
+                "execute": True,
+                "phase_results": [
+                    {
+                        "phase": "5_send_linkedin_invites",
+                        "status": "partial_failed",
+                        "runs": [
+                            {
+                                "company": company,
+                                "status": "discovery_failed",
+                                "candidate_count": 0,
+                                "error": browser_error,
+                            }
+                            for company in ["Cisco", "Commure", "Vercel"]
+                        ]
+                        + [
+                            {
+                                "company": "PriorityCo",
+                                "status": "protected_review_required",
+                                "candidate_count": 0,
+                                "protected_review_count": 1,
+                                "send_artifact": str(protected_invite_artifact),
+                                "status_counts": {"protected_review": 1},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "run_id": REPORT_RUN_ID,
+                "outreach_maintenance": {
+                    "ran": True,
+                    "track_2_daily_run_returncode": 1,
+                    "track_2_daily_run_artifact": str(track),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_json, report_md, report_html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+
+    assert payload["high_value_review_count"] == 2
+    assert payload["protected_initial_invite_review_count"] == 1
+    invite_review = payload["protected_initial_invites_to_review"][0]
+    assert invite_review["name"] == "Priority Founder"
+    assert invite_review["review_kind"] == "initial_invite"
+    assert payload["run_outcome"]["linkedin_invites_sent"] == 0
+    protected = next(
+        item
+        for item in payload["high_value_messages_to_review"]
+        if item.get("name") == "Jordan Van Horn"
+    )
+    assert protected["name"] == "Jordan Van Horn"
+    assert protected["review_scope"] == "workspace_snapshot"
+    assert "executive recipient" in protected["high_value_review_reasons"]
+    assert payload["standard_carryover_messages_to_review"] == []
+    assert [issue["issue_type"] for issue in payload["system_issues"]] == [
+        "linkedin_browser_unavailable"
+    ]
+    assert payload["system_issues"][0]["count"] == 3
+    assert not any(
+        item["action_type"] == "linkedin_company_identity_review"
+        for item in payload["what_needs_you"]
+    )
+    assert "Executive & high-value review" in report_md.read_text(encoding="utf-8")
+    html_text = report_html.read_text(encoding="utf-8")
+    assert "Executive &amp; high-value review" in html_text
+    assert "initial invite" in html_text
+    assert html_text.count("Nothing is listening on 127.0.0.1:9222") == 0
+
+
 def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     artifacts = tmp_path / "artifacts"
@@ -1154,7 +1481,10 @@ def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Pat
     assert payload["messages_to_review"][0]["channel"] == "email"
     assert payload["messages_to_review"][0]["subject"] == "Specific EmailCo role fit"
     action_types = {row["action_type"] for row in payload["what_needs_you"]}
-    assert {"message_review_this_run", "email_channel_blocker"} <= action_types
+    assert action_types == {"message_review_this_run"}
+    assert [row["issue_type"] for row in payload["system_issues"]] == [
+        "cold_email_configuration"
+    ]
     email_source = next(row for row in payload["source_breakdown"] if row["source"] == "Cold email channel")
     assert email_source["status"] == "skipped_missing_credentials"
     assert email_source["raw"] == 1
@@ -2288,6 +2618,10 @@ def test_track_2_unknown_invite_slot_is_not_reused_and_summary_is_truthful(
         "outreach.cli.LinkedInScraper.require_live_cdp_session",
         lambda self: None,
     )
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.snapshot_message_threads",
+        lambda self, **_kwargs: [],
+    )
     fake_plan = {
         "selected_count": 2,
         "budget": {"max_linkedin_invites": 2},
@@ -3183,6 +3517,117 @@ def test_execute_invite_batch_persists_progress_per_result(monkeypatch, tmp_path
     assert status_counts == {"sent": 2}
     assert contacts_added == 2
     assert touchpoints_added == 2
+
+
+def test_execute_invite_batch_holds_protected_initial_invites_at_send_boundary(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-routine", name="RoutineCo")
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-priority",
+            name="PriorityCo",
+            target_lists="strategic;priority",
+        )
+    )
+    settings = OutreachSettings(tracking_workspace_dir=workspace)
+    artifact_dir = tmp_path / "artifacts"
+    monkeypatch.setattr(
+        OutreachSettings,
+        "artifacts_dir",
+        property(lambda self: artifact_dir),
+    )
+    worker_names: list[str] = []
+
+    def _fake_worker(*, candidate, **_kwargs):
+        worker_names.append(candidate["name"])
+        return InviteSendResult(
+            name=candidate["name"],
+            linkedin_url=candidate["linkedin_url"],
+            status="sent",
+            detail="ok",
+            note=candidate.get("note", ""),
+        )
+
+    monkeypatch.setattr("outreach.cli._run_invite_candidate_worker", _fake_worker)
+    monkeypatch.setattr(
+        "outreach.cli.persist_invite_send_results",
+        lambda **_kwargs: (1, 1),
+    )
+
+    source = tmp_path / "routine.json"
+    source.write_text(
+        json.dumps({"company": "RoutineCo", "company_mode": "default"}),
+        encoding="utf-8",
+    )
+    final_artifact, _progress, counts, _contacts, _touchpoints = execute_invite_batch(
+        settings=settings,
+        company="RoutineCo",
+        source_artifact_path=source,
+        batch=[
+            {
+                "name": "Routine Person",
+                "title": "Product Manager",
+                "linkedin_url": "https://www.linkedin.com/in/routine/",
+                "note": "Routine note",
+            },
+            {
+                "name": "Founder Person",
+                "title": "Founder & CEO at RoutineCo",
+                "linkedin_url": "https://www.linkedin.com/in/founder/",
+                "note": "Protected founder note",
+            },
+        ],
+        execute=True,
+        limit=2,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+    payload = json.loads(final_artifact.read_text(encoding="utf-8"))
+
+    assert worker_names == ["Routine Person"]
+    assert counts == {"protected_review": 1, "sent": 1}
+    assert payload["protected_review_count"] == 1
+    assert payload["protected_review_candidates"][0]["name"] == "Founder Person"
+    assert payload["protected_review_candidates"][0]["send_recommendation"] == "review"
+
+    priority_source = tmp_path / "priority.json"
+    priority_source.write_text(
+        json.dumps({"company": "PriorityCo", "company_mode": "default"}),
+        encoding="utf-8",
+    )
+    priority_artifact, _progress, priority_counts, *_ = execute_invite_batch(
+        settings=settings,
+        company="PriorityCo",
+        source_artifact_path=priority_source,
+        batch=[
+            {
+                "name": "Priority Engineer",
+                "title": "Software Engineer",
+                "linkedin_url": "https://www.linkedin.com/in/priority/",
+                "note": "Protected priority-account note",
+            }
+        ],
+        execute=True,
+        limit=1,
+        start_at=0,
+        verdict="send",
+        min_score=35,
+    )
+    priority_payload = json.loads(priority_artifact.read_text(encoding="utf-8"))
+
+    assert worker_names == ["Routine Person"]
+    assert priority_counts == {"protected_review": 1}
+    assert priority_payload["results"] == []
+    assert "priority account" in priority_payload["protected_review_candidates"][0][
+        "high_value_review_reasons"
+    ][0]
 
 
 def test_execute_invite_batch_dry_run_does_not_persist(monkeypatch, tmp_path: Path) -> None:
@@ -4210,6 +4655,78 @@ def test_followup_draft_auto_sends_promised_concrete_fit() -> None:
     assert drafts[0]["reply_intent"] == "permission_to_send_fit"
     assert drafts[0]["send_recommendation"] == "auto_send"
     assert "MBA Internship - AI Strategy & Operations" in str(drafts[0]["draft_message"])
+
+
+def test_followup_draft_never_auto_sends_executive_or_priority_account() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-monte-carlo",
+            name="Monte Carlo",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="story-fit;priority",
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-jordan",
+            organization_id="org-monte-carlo",
+            full_name="Jordan Van Horn",
+            title="Co-founder at Monte Carlo",
+            contact_type="Founder",
+        )
+    ]
+    opportunities = [
+        OpportunityRecord(
+            opportunity_id="opp-monte-carlo-product",
+            organization_id="org-monte-carlo",
+            title="Product Manager, Data Observability",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-jordan",
+                "organization_id": "org-monte-carlo",
+                "normalized_status": "replied",
+                "last_sender": "Jordan",
+                "latest_message": "Absolutely",
+                "message_window": [
+                    {
+                        "sender": "You",
+                        "message": "I'll only send you a fit if there is a real match.",
+                    },
+                    {"sender": "Jordan", "message": "Absolutely"},
+                ],
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+        opportunities=opportunities,
+    )
+
+    assert drafts[0]["reply_intent"] == "permission_to_send_fit"
+    assert drafts[0]["send_recommendation"] == "review"
+    assert drafts[0]["high_value_review_required"] is True
+    assert set(drafts[0]["high_value_review_reasons"]) == {
+        "executive recipient",
+        "priority account (priority, story-fit)",
+    }
+
+    legacy_safe_draft = {
+        "organization_id": "org-monte-carlo",
+        "title": "Co-founder at Monte Carlo",
+        "contact_type": "Founder",
+        "send_recommendation": "safe_to_review",
+    }
+    gated_at_send_time = _gate_high_value_followup_draft(
+        legacy_safe_draft,
+        organizations_by_id={
+            organizations[0].organization_id: organizations[0]
+        },
+    )
+    assert gated_at_send_time["send_recommendation"] == "review"
+    assert gated_at_send_time["high_value_review_required"] is True
 
 
 def test_persisted_inbound_replies_survive_bounded_live_snapshot() -> None:

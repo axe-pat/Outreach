@@ -270,7 +270,18 @@ paths visible instead of accidentally filtering them out.
   - `Messages to review (this run)` and `Carryover review backlog (workspace
     snapshot)` are separate report contracts. Only the first can count toward
     exact-run outcome/review totals; final cadence holds suppress stale review
-    copies for the same contact.
+    copies for the same contact. The refreshed durable inbox state must also
+    suppress carryover rows after a manual outbound reply and mark the matching
+    persistent inbox action `manual_handled`.
+  - keep `What needs you` human-only. Aggregate browser/CDP and channel
+    configuration failures under `System issues`; do not turn one shared runtime
+    failure into a separate company-identity task for every skipped company.
+  - founder/C-suite and priority/strategic/story-fit initial invites and message
+    drafts belong in the separate executive/high-value review queue. Recheck
+    both fail-closed gates at the actual send boundary, including for older
+    drafts labelled `safe_to_review` and already-selected invite batches.
+  - keep sent, prepared, and draft counts explicit: invite candidates and
+    persisted mapping touchpoints are prepared work, never outbound sends.
   - role-surface counts are run-scoped only when built from that run's source
     metrics. Company review/watchlist, cadence, profile-viewer, and outcome-
     learning counts are cumulative workspace-state snapshots even when they

@@ -712,20 +712,33 @@ run (including per-company counts, such as invites sent or contacts mapped)
 from the next campaign plan. It has distinct contracts:
 
 - `What needs you` contains only concrete human actions, such as a resume/email
-  request, routing decision, message-review batch, or explicit SMTP/configuration
-  blocker.
+  request, routing decision, or message-review batch. Browser/runtime failures
+  and SMTP configuration failures live in a separate `System issues` section;
+  one closed CDP session is collapsed into one issue with its affected companies,
+  never seven fake company-review tasks.
 - `Messages to review (this run)` contains only exact artifacts owned by the
   selected nightly run. `Carryover review backlog (workspace snapshot)` is a
-  separate persistent section for older unresolved rows. A final cadence/system
-  hold wins over an earlier review copy for the same contact, so one person
-  cannot appear as both reviewable and held. Track 2 email drafts stay in the
-  exact-run section until approved; a draft is never counted as sent.
+  separate persistent section for older unresolved rows. Before carryover is
+  rendered, the refreshed durable LinkedIn message state removes drafts whose
+  latest message is already from the user and resolves matching persistent inbox
+  actions as `manual_handled`. A final cadence/system hold wins over an earlier
+  review copy for the same contact, so one person cannot appear as both reviewable
+  and held. Track 2 email drafts stay in the exact-run section until approved; a
+  draft is never counted as sent.
+- `Executive & high-value review` is first-class and scope-labelled. Initial
+  invites and message drafts for founder/C-suite recipients or priority,
+  strategic, and story-fit accounts are removed from routine automatic delivery.
+  Both gates are re-applied immediately before send, so an older
+  `safe_to_review` message or previously selected invite cannot bypass review.
 - `Auto-handled messages` contains only exact send results with `status=sent`.
 - `LinkedIn actions` puts invite sends, inbox refresh/triage, follow-ups,
   replies, mapping, Contact Info research, feed capture, viewer capture,
   review holds, skips, and failures in one place.
 - `Execution by company` is derived from actual result artifacts; plan budgets
   and campaign recommendations never count as completed work.
+- The outcome cards distinguish actual sends, unsent invite candidates,
+  persisted `Prepared` mapping touchpoints, review drafts, and system-held drafts.
+  Prepared work is never presented as a send.
 - `Cold email actions` records reviewed delivery results separately. Email totals
   increase only from an exact send artifact whose delivery status is `sent`;
   manifest-reported SMTP blockers and sent/draft-count mismatches stay visible.

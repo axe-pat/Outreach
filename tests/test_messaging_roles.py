@@ -453,7 +453,7 @@ def test_role_aware_reply_does_not_repeat_an_already_acknowledged_ask() -> None:
     )
 
     assert drafts[0]["draft_kind"] == "already_asked_wait"
-    assert drafts[0]["send_recommendation"] == "hold"
+    assert drafts[0]["send_recommendation"] == "wait_for_trigger"
 
 
 def test_role_aware_let_me_know_reply_does_not_add_another_routing_ask() -> None:

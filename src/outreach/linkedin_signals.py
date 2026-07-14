@@ -844,7 +844,7 @@ def classify_feed_post(
 
     if not kinds:
         kinds.append(FeedSignalKind.OTHER)
-        reasons.append("needs human relevance review")
+        reasons.append("no actionable feed signal")
 
     kinds = list(dict.fromkeys(kinds))
     if FeedSignalKind.COMPANY_DISCOVERY in kinds or FeedSignalKind.JOB in kinds:
@@ -852,8 +852,59 @@ def classify_feed_post(
     elif kinds != [FeedSignalKind.OTHER]:
         relevance = "medium"
     else:
-        relevance = "review"
+        relevance = "low"
     return FeedClassification(tuple(kinds), relevance, "; ".join(dict.fromkeys(reasons)))
+
+
+def route_feed_review_disposition(
+    signal_kinds: Iterable[FeedSignalKind | str] | str,
+    *,
+    relevance: str = "",
+) -> FeedReviewDisposition:
+    """Deterministically route a machine-classified feed signal.
+
+    The order is intentional: a newly discovered company remains a company
+    candidate even when its post also mentions a job, while an explicit job at
+    a known company remains an opportunity. Ambiguous/other posts are dismissed
+    instead of creating a blanket human-review queue.
+    """
+
+    raw_kinds: Iterable[FeedSignalKind | str]
+    if isinstance(signal_kinds, str):
+        raw_kinds = signal_kinds.split(";")
+    else:
+        raw_kinds = signal_kinds
+    kinds = {
+        clean_text(kind.value if isinstance(kind, FeedSignalKind) else kind).casefold()
+        for kind in raw_kinds
+        if clean_text(kind.value if isinstance(kind, FeedSignalKind) else kind)
+    }
+
+    if kinds.intersection(
+        {
+            FeedSignalKind.COMPANY_DISCOVERY.value,
+            FeedSignalKind.STARTUP_DISCOVERY.value,
+        }
+    ):
+        return FeedReviewDisposition.COMPANY_CANDIDATE
+    if FeedSignalKind.JOB.value in kinds:
+        return FeedReviewDisposition.OPPORTUNITY
+    if kinds.intersection(
+        {
+            FeedSignalKind.HIRING.value,
+            FeedSignalKind.FUNDING.value,
+            FeedSignalKind.LAUNCH.value,
+        }
+    ):
+        return FeedReviewDisposition.ACCOUNT_SIGNAL
+    if FeedSignalKind.WARM_NETWORK.value in kinds:
+        return FeedReviewDisposition.CONTACT_RESEARCH
+    if (
+        FeedSignalKind.RELEVANT_UPDATE.value in kinds
+        and clean_text(relevance).casefold() in {"medium", "high"}
+    ):
+        return FeedReviewDisposition.KEEP
+    return FeedReviewDisposition.DISMISSED
 
 
 def classify_viewer_relevance(
@@ -1033,6 +1084,9 @@ class FeedSignalStore:
 
         added = 0
         updated = 0
+        auto_routed_new = 0
+        auto_routed_existing_pending = 0
+        auto_routed_disposition_counts: Counter[str] = Counter()
         captured_signal_ids: list[str] = []
         run_kind_counts: Counter[str] = Counter()
         run_relevance_counts: Counter[str] = Counter()
@@ -1064,16 +1118,22 @@ class FeedSignalStore:
             }
             existing = rows_by_id.get(signal_id)
             if existing is None:
+                disposition = route_feed_review_disposition(
+                    classification.signal_kinds,
+                    relevance=classification.relevance,
+                )
                 rows_by_id[signal_id] = {
                     **incoming,
                     "first_seen_at": observed_at,
                     "last_seen_at": observed_at,
                     "observed_snapshots": "1",
                     "observation_history_json": json.dumps([observed_at]),
-                    "review_disposition": FeedReviewDisposition.PENDING.value,
+                    "review_disposition": disposition.value,
                     "review_note": "",
                     "reviewed_at": "",
                 }
+                auto_routed_new += 1
+                auto_routed_disposition_counts[disposition.value] += 1
                 added += 1
                 continue
             for key, value in incoming.items():
@@ -1100,15 +1160,31 @@ class FeedSignalStore:
             existing["last_seen_at"] = max(history)
             updated += 1
 
+        # Migrate the whole ledger, not just rows observed in this capture. This
+        # clears the legacy blanket-pending queue while preserving every explicit
+        # non-pending disposition, including prior human review decisions.
+        for row in rows_by_id.values():
+            current_disposition = clean_text(row.get("review_disposition")).casefold()
+            if current_disposition not in {"", FeedReviewDisposition.PENDING.value}:
+                continue
+            routed = route_feed_review_disposition(
+                row.get("signal_kinds", ""),
+                relevance=row.get("relevance", ""),
+            )
+            row["review_disposition"] = routed.value
+            auto_routed_existing_pending += 1
+            auto_routed_disposition_counts[routed.value] += 1
+
         ordered_rows = sorted(
             rows_by_id.values(),
             key=lambda row: (row.get("first_seen_at", ""), row.get("signal_id", "")),
         )
         _write_csv_rows(self.path, FEED_FIELDS, ordered_rows)
-        pending = sum(
-            row.get("review_disposition") == FeedReviewDisposition.PENDING.value
+        workspace_disposition_counts = Counter(
+            clean_text(row.get("review_disposition")) or FeedReviewDisposition.PENDING.value
             for row in ordered_rows
         )
+        pending = workspace_disposition_counts[FeedReviewDisposition.PENDING.value]
         return {
             "path": str(self.path),
             "observed_at": observed_at,
@@ -1122,6 +1198,15 @@ class FeedSignalStore:
             "post_url_missing": sum(not post.post_url for post in unique_posts.values()),
             "run_signal_kind_counts": dict(sorted(run_kind_counts.items())),
             "run_relevance_counts": dict(sorted(run_relevance_counts.items())),
+            "auto_routed": auto_routed_new + auto_routed_existing_pending,
+            "auto_routed_new": auto_routed_new,
+            "auto_routed_existing_pending": auto_routed_existing_pending,
+            "auto_routed_disposition_counts": dict(
+                sorted(auto_routed_disposition_counts.items())
+            ),
+            "workspace_review_disposition_counts": dict(
+                sorted(workspace_disposition_counts.items())
+            ),
             "workspace_pending_review": pending,
         }
 

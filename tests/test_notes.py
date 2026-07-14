@@ -286,6 +286,56 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
 
 
 @pytest.mark.parametrize(
+    "story_context",
+    [
+        {
+            "story_fit_reason": (
+                "Hevo experience gives a direct story around connectors, ETL, integrations, "
+                "and how data teams adopt infrastructure tooling."
+            )
+        },
+        {"profile_evidence": "Hevo Data engineering; connector and ETL product familiarity."},
+        {"why_this_company": "My Hevo connector and ETL experience is directly relevant."},
+        {
+            "private_outreach_context": {
+                "earned_anchor": "Hevo Data engineering",
+                "scenario": "connectors, ETL, and data movement",
+            }
+        },
+    ],
+)
+def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
+    story_context: dict,
+) -> None:
+    note = NoteGenerator().generate(
+        {
+            "name": "Francis Genet",
+            "linkedin_url": "https://www.linkedin.com/in/francisgenet",
+            "title": "Engineering Manager",
+            "role_bucket": "Engineering",
+            "usc": False,
+            "usc_marshall": False,
+            "existing_connection": False,
+            "shared_history": False,
+        },
+        company="Airbyte",
+        company_mode="startup",
+        note_context={
+            "tags": ["data-infrastructure", "data-platform", "developer-tools"],
+            "description": "Open data movement and connector platform.",
+            **story_context,
+        },
+    )
+
+    assert note.family == "engineering_product_bridge"
+    assert note.within_limit is True
+    assert note.length <= 270
+    assert "Airbyte's work on connectors and ETL" in note.text
+    assert "engineering work at Hevo" in note.text
+    assert "platform work connects with systems I've built before" not in note.text
+
+
+@pytest.mark.parametrize(
     ("case_name", "company", "company_mode", "candidate", "note_context", "expected_family", "expected_phrases"),
     [
         (

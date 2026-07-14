@@ -673,6 +673,12 @@ def import_relationship_leads(
     else:
         leads = [lead for lead in all_leads if lead.source_row_number not in issue_rows]
 
+    # Public corroboration sometimes uses the person's exact LinkedIn profile
+    # as its evidence URL.  That is an explicit actionable locator, not a
+    # guessed profile, so make it available to contact matching and outreach
+    # after the immutable stage/review fingerprints have been verified.
+    leads = [_with_actionable_source_locator(lead) for lead in leads]
+
     workbook = OutreachWorkbook(workbook_dir)
     organizations = workbook.list_organizations()
     contacts = workbook.list_contacts()
@@ -1102,6 +1108,12 @@ def _normalize_relationship_lead(lead: RelationshipLead) -> RelationshipLead:
         company_linkedin_url=company_linkedin_url,
         priority=lead.priority.lower(),
     )
+
+
+def _with_actionable_source_locator(lead: RelationshipLead) -> RelationshipLead:
+    if lead.linkedin_url or not _is_linkedin_person_url(lead.source_url):
+        return lead
+    return replace(lead, linkedin_url=_canonical_linkedin_url(lead.source_url))
 
 
 def _relationship_lead_csv_payload(lead: RelationshipLead) -> dict[str, str]:
@@ -1537,7 +1549,14 @@ def _matching_contacts(
                 "relationship_source_record_id",
                 "",
             ),
-            source_url=contact_metadata.get("relationship_evidence_url", ""),
+            # Current imports preserve the evidence URL in notes, while the
+            # original PeopleGrove seed stored it only in the canonical
+            # ContactRecord.source_url field.  Both are durable provenance and
+            # must participate in identity matching.
+            source_url=(
+                contact_metadata.get("relationship_evidence_url", "")
+                or contact.source_url
+            ),
         )
         if (
             (
@@ -1734,7 +1753,12 @@ def _source_kind_for_lead(source_type: str) -> SourceKind:
         "usc-alumni",
     }:
         return SourceKind.UNIVERSITY_DIRECTORY
-    if normalized in {"linkedin", "recent-mba-pm", "linkedin-recent-mba-pm"}:
+    if normalized in {
+        "linkedin",
+        "linkedin-institution-first",
+        "recent-mba-pm",
+        "linkedin-recent-mba-pm",
+    }:
         return SourceKind.LINKEDIN
     if normalized in {"email", "warm-email"}:
         return SourceKind.EMAIL
@@ -1794,7 +1818,11 @@ def _merge_csv(*values: str) -> str:
     for value in values:
         for item in (value or "").split(","):
             clean = item.strip()
-            normalized = clean.lower()
+            # Tags are slugs throughout the tracker, but older curation and
+            # later enrichment used underscores/hyphens interchangeably.
+            # Treat separator-only spelling variants as the same tag so an
+            # idempotent import does not keep reintroducing a legacy alias.
+            normalized = re.sub(r"[-_\s]+", "-", clean.casefold()).strip("-")
             if not clean or normalized in seen:
                 continue
             seen.add(normalized)

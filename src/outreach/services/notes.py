@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 import hashlib
 from pathlib import Path
 import re
 
-import anthropic
-
+from outreach.ai_messaging import (
+    AIMessagingService,
+    AIMessageRequest,
+    institution_signals_from_candidate,
+    story_evidence_from_context,
+)
 from outreach.messaging_roles import infer_target_role_context, rewrite_message_for_target_role
 from outreach.style_profile import CommunicationStyleProfile, load_style_profile_if_exists, normalize_recipient_type
 
@@ -39,14 +42,18 @@ class NoteQualityCheck:
 
 
 class NoteGenerator:
-    """Deterministic LinkedIn invite note generator tuned to the 300-char limit."""
+    """Build bounded invite notes, optionally composing copy through the AI layer."""
 
     def __init__(
         self,
         style_profile: CommunicationStyleProfile | None = None,
         style_profile_path: Path | None = None,
+        ai_messaging: AIMessagingService | None = None,
+        ai_message_limit: int = 0,
     ) -> None:
         self.style_profile = style_profile or load_style_profile_if_exists(style_profile_path)
+        self.ai_messaging = ai_messaging
+        self.ai_message_limit = max(0, ai_message_limit)
 
     def generate(
         self,
@@ -167,13 +174,28 @@ class NoteGenerator:
     ) -> list[dict]:
         annotated: list[dict] = []
         recent_notes: list[str] = []
-        for candidate in candidates:
+        for index, candidate in enumerate(candidates):
             generated = self.generate(
                 candidate,
                 company=company,
                 company_mode=company_mode,
                 note_context=note_context,
             )
+            base_quality = self.quality_check(candidate, generated, recent_notes)
+            ai_result = None
+            if self.ai_messaging is not None and (
+                self.ai_message_limit <= 0 or index < self.ai_message_limit
+            ):
+                ai_result = self.ai_messaging.compose(
+                    self._ai_request(
+                        candidate=candidate,
+                        company=company,
+                        company_mode=company_mode,
+                        generated=generated,
+                        critique_flags=base_quality.flags,
+                    )
+                )
+                generated = self._generated_from_ai(generated, candidate, ai_result.message)
             quality = self.quality_check(candidate, generated, recent_notes)
             recipient_type = self._style_recipient_type(candidate, generated.family, candidate.get("role_bucket") or "Other")
             style_review = self.style_profile.review_message(generated.text, recipient_type)
@@ -194,6 +216,11 @@ class NoteGenerator:
                 "style_recipient_type": recipient_type,
                 "style_review": style_review.model_dump(mode="json"),
             }
+            if ai_result is not None:
+                enriched["ai_messaging"] = {
+                    **ai_result.as_dict(),
+                    "applied_message": generated.text,
+                }
             annotated.append(enriched)
             recent_notes.append(generated.text)
         return annotated
@@ -207,25 +234,53 @@ class NoteGenerator:
         model: str = "claude-haiku-4-5-20251001",
         company_mode: str = "default",
     ) -> list[dict]:
-        client = anthropic.Anthropic(api_key=api_key)
+        service = AIMessagingService.from_api_key(
+            api_key,
+            model=model,
+            style_profile=self.style_profile,
+        )
         polished: list[dict] = []
         recent_polished: list[str] = []
         for index, candidate in enumerate(candidates):
             enriched = dict(candidate)
             if index < top_n:
-                polished_note = self._polish_one(
-                    client=client,
+                base_note = GeneratedNote(
+                    text=str(candidate["note"]),
+                    family=str(candidate.get("note_family") or "general"),
+                    ask_style=str(candidate.get("note_ask_style") or "conversation"),
+                    length=len(str(candidate["note"])),
+                    within_limit=len(str(candidate["note"])) <= NOTE_CHAR_LIMIT,
+                    target_role_family=str(candidate.get("target_role_family") or "product_pm"),
+                    target_role_label=str(candidate.get("target_role_label") or "Product / PM"),
+                    target_role_source=str(candidate.get("target_role_source") or "product_primary_default"),
+                    target_role_matched_text=str(candidate.get("target_role_matched_text") or ""),
+                    target_role_matched_rule=str(candidate.get("target_role_matched_rule") or ""),
+                    target_role_is_concrete=bool(candidate.get("target_role_is_concrete")),
+                )
+                base_quality = self.quality_check(candidate, base_note, recent_polished)
+                result = service.compose(
+                    self._ai_request(
+                        candidate=candidate,
+                        company=company,
+                        company_mode=company_mode,
+                        generated=base_note,
+                        critique_flags=base_quality.flags,
+                    )
+                )
+                polished_note = self._generated_from_ai(
+                    base_note,
                     candidate=candidate,
-                    company=company,
-                    base_note=str(candidate["note"]),
-                    model=model,
-                    company_mode=company_mode,
+                    message=result.message,
                 )
                 qc = self.quality_check(candidate, polished_note, recent_polished)
                 enriched["polished_note"] = polished_note.text
                 enriched["polished_note_length"] = polished_note.length
                 enriched["polished_note_within_limit"] = polished_note.within_limit
                 enriched["polished_note_qc"] = asdict(qc)
+                enriched["polished_note_ai_messaging"] = {
+                    **result.as_dict(),
+                    "applied_message": polished_note.text,
+                }
                 recent_polished.append(polished_note.text)
             polished.append(enriched)
         return polished
@@ -359,85 +414,27 @@ class NoteGenerator:
         verdict = "blocked" if hard_fail else "send"
         return NoteQualityCheck(score=score, verdict=verdict, flags=flags, strengths=strengths)
 
-    def _polish_one(
+    def _generated_from_ai(
         self,
-        client: anthropic.Anthropic,
+        generated: GeneratedNote,
         candidate: dict,
-        company: str,
-        base_note: str,
-        model: str,
-        company_mode: str,
+        message: str,
     ) -> GeneratedNote:
-        payload = {
-            "company": company,
-            "company_mode": company_mode,
-            "name": candidate.get("name"),
-            "title": candidate.get("title"),
-            "role_bucket": candidate.get("role_bucket"),
-            "ask_style": candidate.get("note_ask_style"),
-            "signals": {
-                "existing_connection": candidate.get("existing_connection", False),
-                "usc_marshall": candidate.get("usc_marshall", False),
-                "usc": candidate.get("usc", False),
-                "shared_history": candidate.get("shared_history", False),
-            },
-            "note_context": candidate.get("note_context") or {},
-            "target_role_family": candidate.get("target_role_family", "product_pm"),
-            "target_role_label": candidate.get("target_role_label", "Product / PM"),
-            "base_note": base_note,
-            "style_guidance": self.style_profile.prompt_guidance(
-                self._style_recipient_type(
-                    candidate,
-                    str(candidate.get("note_family", "general")),
-                    str(candidate.get("role_bucket") or "Other"),
-                )
-            ),
-        }
-        prompt = (
-            "Rewrite this LinkedIn invite note to sound sharper and more natural while preserving the same facts and warmth.\n"
-            "Rules:\n"
-            "- Maximum 300 characters\n"
-            "- Keep it as a connection-request note, not an email\n"
-            "- Preserve the strongest signal already present\n"
-            "- Preserve the target_role_family; never pivot the candidate into Product/PM when it is non-Product\n"
-            "- Respect the ask_style: conversation, guidance, or direct_help\n"
-            "- Only direct_help may ask for more explicit support, and even then keep it light\n"
-            "- Keep 'Fight On!' if the candidate has USC or USC Marshall signal\n"
-            "- Follow the style_guidance and avoid all banned phrases\n"
-            "- Output JSON only: {\"note\": \"...\"}\n\n"
-            f"{json.dumps(payload, ensure_ascii=True)}"
-        )
-        message = client.messages.create(
-            model=model,
-            max_tokens=220,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = message.content[0].text.strip()
-        match = re.search(r"\{.*\}", text, re.S)
-        note = base_note
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-                candidate_note = str(parsed.get("note", "")).strip()
-                if candidate_note:
-                    note = candidate_note
-            except json.JSONDecodeError:
-                note = base_note
         target_role = infer_target_role_context(
             note_context={
-                "target_role_family": candidate.get("target_role_family") or "product_pm",
-                "target_role_source": candidate.get("target_role_source") or "product_primary_default",
-                "target_role_matched_text": candidate.get("target_role_matched_text") or "",
-                "target_role_matched_rule": candidate.get("target_role_matched_rule") or "",
-                "target_role_is_concrete": candidate.get("target_role_is_concrete", False),
+                "target_role_family": generated.target_role_family,
+                "target_role_source": generated.target_role_source,
+                "target_role_matched_text": generated.target_role_matched_text,
+                "target_role_matched_rule": generated.target_role_matched_rule,
+                "target_role_is_concrete": generated.target_role_is_concrete,
             }
         )
-        note = rewrite_message_for_target_role(note, target_role)
+        note = rewrite_message_for_target_role(message, target_role)
         note = self._tighten_to_limit(note)
         return GeneratedNote(
             text=note,
-            family=str(candidate.get("note_family", "polished")),
-            ask_style=str(candidate.get("note_ask_style", "conversation")),
+            family=generated.family,
+            ask_style=generated.ask_style,
             length=len(note),
             within_limit=len(note) <= NOTE_CHAR_LIMIT,
             target_role_family=target_role.family.value,
@@ -446,6 +443,60 @@ class NoteGenerator:
             target_role_matched_text=target_role.matched_text,
             target_role_matched_rule=target_role.matched_rule,
             target_role_is_concrete=target_role.is_concrete,
+        )
+
+    def _ai_request(
+        self,
+        *,
+        candidate: dict,
+        company: str,
+        company_mode: str,
+        generated: GeneratedNote,
+        critique_flags: list[str],
+    ) -> AIMessageRequest:
+        recipient_type = self._style_recipient_type(
+            candidate,
+            generated.family,
+            str(candidate.get("role_bucket") or "Other"),
+        )
+        context = candidate.get("note_context")
+        note_context = context if isinstance(context, dict) else {}
+        person_evidence = tuple(
+            value
+            for value in (
+                str(candidate.get("title") or "").strip(),
+                str(candidate.get("subtitle") or "").strip(),
+                str(candidate.get("snippet") or "").strip(),
+                str(candidate.get("relationship_signal") or "").strip(),
+            )
+            if value
+        )
+        return AIMessageRequest(
+            channel="linkedin_invite",
+            base_message=generated.text,
+            company=company,
+            recipient_name=str(candidate.get("name") or ""),
+            recipient_title=str(candidate.get("title") or ""),
+            recipient_type=recipient_type,
+            target_role_family=generated.target_role_family,
+            target_role_label=generated.target_role_label,
+            person_evidence=person_evidence,
+            story_evidence=story_evidence_from_context(note_context),
+            institution_signals=institution_signals_from_candidate(candidate),
+            style_guidance=self.style_profile.prompt_guidance(
+                recipient_type,
+                max_strong_examples=3,
+                max_weak_examples=3,
+            ),
+            critique_flags=tuple(critique_flags),
+            deterministic_context={
+                "company_mode": company_mode,
+                "note_family": generated.family,
+                "ask_style": generated.ask_style,
+                "target_role_source": generated.target_role_source,
+                "target_role_is_concrete": generated.target_role_is_concrete,
+            },
+            max_chars=NOTE_CHAR_LIMIT,
         )
 
     def _style_recipient_type(self, candidate: dict, family: str, role_bucket: str) -> str:
@@ -558,10 +609,22 @@ class NoteGenerator:
         context: dict,
     ) -> tuple[str, str, list[str]] | None:
         role = self._role_reference(context)
-        company_fit = self._company_fit_clause(company, context, company_mode)
+        story_fit = self._story_fit_clause(company, context)
+        company_fit = story_fit or self._company_fit_clause(company, context, company_mode)
         person_hook = self._specific_person_hook(candidate)
+        story_sentence = f" {story_fit}" if story_fit else ""
 
         if self._is_india_based(candidate) and role_bucket == "Engineering":
+            if story_fit:
+                return (
+                    "engineering_referral",
+                    "referral",
+                    [
+                        f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring {role} at {company}. {story_fit} Would value a referral or hiring-team pointer if the fit looks reasonable.",
+                        f"Hi {first_name}, I'm a former backend/data engineer at USC Marshall exploring {role} at {company}. {story_fit} If a role fits, I'd value a referral or pointer to the right hiring path.",
+                        f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at {role} at {company}. {story_fit} I'd value a referral or quick pointer on the best hiring path.",
+                    ],
+                )
             return (
                 "engineering_referral",
                 "referral",
@@ -585,7 +648,7 @@ class NoteGenerator:
             )
 
         if role_bucket == "Product":
-            fit_clause = person_hook or company_fit or "The role looks close to my engineering-to-PM path."
+            fit_clause = story_fit or person_hook or company_fit or "The role looks close to my engineering-to-PM path."
             if self._is_senior_product_title(candidate):
                 return (
                     "senior_product_contribution",
@@ -602,30 +665,40 @@ class NoteGenerator:
                 [
                     f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring {role} at {company}. {fit_clause} Open to connecting? I'd value a pointer on the product path.",
                     f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring {role} at {company}. {fit_clause} Open to connecting?",
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}. I'd value a connect and a quick pointer on what helps candidates stand out.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product roles at {company}.{story_sentence} I'd value a connect and a quick pointer on what helps candidates stand out.",
                 ],
             )
 
         if role_bucket == "Engineering":
-            fit_clause = person_hook or company_fit or "Since you're on the engineering side there, I'd value your take."
+            fit_clause = story_fit or person_hook or company_fit or "Since you're on the engineering side there, I'd value your take."
+            first_close = (
+                " I'd value your take on how technical PMs can stand out."
+                if story_fit
+                else " Since you're on the engineering side there, I'd value a pointer on how technical PM candidates can stand out."
+            )
+            third_close = (
+                " I'd value your take on how builders influence product there."
+                if story_fit
+                else " Since you've seen the engineering side, I'd value your take on how to get on the team's radar."
+            )
             return (
                 "engineering_product_bridge",
                 "technical_overlap",
                 [
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring {role} at {company}. Since you're on the engineering side there, I'd value a pointer on how technical PM candidates can stand out.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer exploring {role} at {company}.{story_sentence}{first_close}",
                     f"Hi {first_name}, I'm a former backend/data engineer now at USC Marshall exploring PM/product roles at {company}. {fit_clause} I'd value a quick pointer on how builders work with product there.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at product roles at {company}. Since you've seen the engineering side, I'd value your take on how to get on the team's radar.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at product roles at {company}.{story_sentence}{third_close}",
                 ],
             )
 
         if role_bucket == "Adjacent":
-            fit_clause = person_hook or company_fit or "The role direction feels close to systems and product work I've done."
+            fit_clause = story_fit or person_hook or company_fit or "The role direction feels close to systems and product work I've done."
             return (
                 "operator_contribution",
                 "contribution_fit",
                 [
                     f"Hi {first_name}, I'm a Marshall MBA + former engineer exploring product/strategy roles at {company}. {fit_clause} Open to connecting? I'd value a quick read on fit.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product-adjacent paths at {company}. Open to connecting?",
+                    f"Hi {first_name}, I'm a Marshall MBA + former data/platform engineer looking at product-adjacent paths at {company}.{story_sentence} Open to connecting?",
                 ],
             )
 
@@ -636,7 +709,7 @@ class NoteGenerator:
                 "contribution_fit",
                 [
                     f"Hi {first_name}, I'm a Marshall MBA + former backend/data engineer exploring {role} at {company}. {fit_clause} Open to connecting? I'd value a quick read on fit.",
-                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at PM/product roles at {company}. I'd value a connect and a quick pointer on what matters to the team.",
+                    f"Hi {first_name}, I'm a Marshall MBA + former engineer looking at PM/product roles at {company}.{story_sentence} I'd value a connect and a quick pointer on what matters to the team.",
                 ],
             )
 
@@ -693,9 +766,14 @@ class NoteGenerator:
         return any(signal in lower for signal in relevant)
 
     def _company_fit_clause(self, company: str, context: dict, company_mode: str) -> str:
+        story_fit = self._story_fit_clause(company, context)
+        if story_fit:
+            return story_fit
+        story_context = self._story_fit_context_text(context)
         text = " ".join(
             str(item)
             for item in [
+                story_context,
                 context.get("description", ""),
                 context.get("fit_rationale", ""),
                 " ".join(str(tag) for tag in context.get("tags", []) or []),
@@ -718,6 +796,62 @@ class NoteGenerator:
             return f"{company}'s platform work connects with systems I've built before."
         if any(signal in text for signal in ["agent", "artificial intelligence", "machine learning", "llm", "generative-ai"]):
             return f"{company}'s applied AI work connects with my data/platform background."
+        return ""
+
+    def _story_fit_clause(self, company: str, context: dict) -> str:
+        """Turn explicit story-fit evidence into a short, externally safe note sentence."""
+        lower = self._story_fit_context_text(context).lower()
+        if not lower:
+            return ""
+
+        if "hevo" in lower:
+            if any(
+                signal in lower
+                for signal in ["connector", "etl", "integration", "data movement", "data pipeline"]
+            ):
+                return (
+                    f"{company}'s work on connectors and ETL maps directly to my "
+                    "engineering work at Hevo."
+                )
+            if any(
+                signal in lower
+                for signal in ["observability", "monitoring", "data reliability", "incident"]
+            ):
+                return (
+                    f"{company}'s data reliability and monitoring work maps directly to my "
+                    "engineering work at Hevo."
+                )
+            return f"{company}'s data-infrastructure work maps to my engineering work at Hevo."
+
+        if "flairx" in lower and any(
+            signal in lower
+            for signal in ["interview", "recruiting", "candidate", "hiring workflow"]
+        ):
+            return (
+                f"{company}'s recruiting workflow maps directly to my AI interview work at "
+                "FlairX."
+            )
+
+        return ""
+
+    def _story_fit_context_text(self, context: dict) -> str:
+        return " ".join(
+            self._context_text(context.get(field))
+            for field in (
+                "story_fit_reason",
+                "profile_evidence",
+                "why_this_company",
+                "private_outreach_context",
+            )
+        ).strip()
+
+    def _context_text(self, value: object) -> str:
+        if isinstance(value, str):
+            return " ".join(value.split())
+        if isinstance(value, dict):
+            return " ".join(self._context_text(item) for item in value.values())
+        if isinstance(value, (list, tuple, set)):
+            return " ".join(self._context_text(item) for item in value)
         return ""
 
     def _specific_person_hook(self, candidate: dict) -> str:

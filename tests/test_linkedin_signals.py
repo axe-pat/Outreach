@@ -29,6 +29,7 @@ from outreach.linkedin_signals import (
     parse_feed_rows,
     parse_profile_viewer_rows,
     normalize_extracted_company,
+    route_feed_review_disposition,
 )
 
 
@@ -218,7 +219,7 @@ def test_known_company_is_signal_but_not_mislabeled_as_company_discovery() -> No
     assert FeedSignalKind.FUNDING in result.signal_kinds
 
 
-def test_unclassified_algorithmic_feed_post_stays_available_for_human_review() -> None:
+def test_unclassified_algorithmic_feed_post_is_marked_low_signal() -> None:
     post = FeedPost(
         post_url="https://www.linkedin.com/feed/update/urn:li:activity:999/",
         author_name="Avery",
@@ -233,8 +234,49 @@ def test_unclassified_algorithmic_feed_post_stays_available_for_human_review() -
     )
 
     assert result.signal_kinds == (FeedSignalKind.OTHER,)
-    assert result.relevance == "review"
-    assert "human" in result.reason
+    assert result.relevance == "low"
+    assert result.reason == "no actionable feed signal"
+
+
+@pytest.mark.parametrize(
+    ("signal_kinds", "relevance", "expected"),
+    [
+        (
+            [FeedSignalKind.COMPANY_DISCOVERY, FeedSignalKind.JOB],
+            "high",
+            FeedReviewDisposition.COMPANY_CANDIDATE,
+        ),
+        (
+            [FeedSignalKind.STARTUP_DISCOVERY],
+            "medium",
+            FeedReviewDisposition.COMPANY_CANDIDATE,
+        ),
+        ([FeedSignalKind.JOB], "high", FeedReviewDisposition.OPPORTUNITY),
+        ([FeedSignalKind.HIRING], "medium", FeedReviewDisposition.ACCOUNT_SIGNAL),
+        (
+            [FeedSignalKind.FUNDING, FeedSignalKind.WARM_NETWORK],
+            "medium",
+            FeedReviewDisposition.ACCOUNT_SIGNAL,
+        ),
+        (
+            [FeedSignalKind.WARM_NETWORK],
+            "medium",
+            FeedReviewDisposition.CONTACT_RESEARCH,
+        ),
+        ([FeedSignalKind.RELEVANT_UPDATE], "medium", FeedReviewDisposition.KEEP),
+        ([FeedSignalKind.RELEVANT_UPDATE], "low", FeedReviewDisposition.DISMISSED),
+        ([FeedSignalKind.OTHER], "low", FeedReviewDisposition.DISMISSED),
+        ("", "high", FeedReviewDisposition.DISMISSED),
+    ],
+)
+def test_feed_review_routing_is_deterministic_and_conservative(
+    signal_kinds: list[FeedSignalKind] | str,
+    relevance: str,
+    expected: FeedReviewDisposition,
+) -> None:
+    assert (
+        route_feed_review_disposition(signal_kinds, relevance=relevance) is expected
+    )
 
 
 def test_capture_feed_scrolls_with_configurable_limits_and_dedupes() -> None:
@@ -579,7 +621,16 @@ def test_feed_store_dedupes_capture_tracks_history_and_supports_review(tmp_path:
         "hiring": 1,
         "warm_network": 1,
     }
+    assert first["auto_routed"] == 1
+    assert first["auto_routed_new"] == 1
+    assert first["auto_routed_existing_pending"] == 0
+    assert first["auto_routed_disposition_counts"] == {"company_candidate": 1}
+    assert first["workspace_review_disposition_counts"] == {
+        "company_candidate": 1
+    }
+    assert first["workspace_pending_review"] == 0
     assert repeated_same_snapshot["updated"] == 1
+    assert repeated_same_snapshot["auto_routed"] == 0
     assert next_day["updated"] == 1
     row = _read_rows(path)[0]
     assert row["observed_snapshots"] == "2"
@@ -587,21 +638,61 @@ def test_feed_store_dedupes_capture_tracks_history_and_supports_review(tmp_path:
         "2026-07-10T08:00:00+00:00",
         "2026-07-11T08:00:00+00:00",
     ]
-    assert row["review_disposition"] == "pending"
+    assert row["review_disposition"] == "company_candidate"
     assert row["post_text"] == post.text
     assert row["context"] == post.context
 
     reviewed = store.review(
         row["signal_id"],
-        FeedReviewDisposition.COMPANY_CANDIDATE,
-        note="Research this startup before promotion.",
+        FeedReviewDisposition.KEEP,
+        note="Already researched; retain as context.",
         reviewed_at="2026-07-11T09:00:00+00:00",
     )
-    assert reviewed["review_disposition"] == "company_candidate"
+    assert reviewed["review_disposition"] == "keep"
     assert store.pending_review() == []
 
     store.upsert_posts([post], observed_at="2026-07-12T08:00:00+00:00")
-    assert _read_rows(path)[0]["review_disposition"] == "company_candidate"
+    assert _read_rows(path)[0]["review_disposition"] == "keep"
+
+
+def test_feed_store_migrates_all_legacy_pending_rows_on_upsert(tmp_path: Path) -> None:
+    path = tmp_path / "signals.csv"
+    store = FeedSignalStore(path)
+    company_post = _post()
+    other_post = FeedPost(
+        post_url="https://www.linkedin.com/feed/update/urn:li:activity:456/",
+        author_name="Reflective Author",
+        author_url="https://www.linkedin.com/in/reflective-author/",
+        company="",
+        company_url="",
+        text="A thoughtful reflection without an actionable signal.",
+    )
+    store.upsert_posts(
+        [company_post, other_post],
+        observed_at="2026-07-10T08:00:00+00:00",
+        relevance_keywords=(),
+    )
+    for row in _read_rows(path):
+        store.review(row["signal_id"], FeedReviewDisposition.PENDING)
+
+    summary = store.upsert_posts([], observed_at="2026-07-11T08:00:00+00:00")
+
+    assert summary["captured"] == 0
+    assert summary["added"] == 0
+    assert summary["updated"] == 0
+    assert summary["auto_routed"] == 2
+    assert summary["auto_routed_new"] == 0
+    assert summary["auto_routed_existing_pending"] == 2
+    assert summary["auto_routed_disposition_counts"] == {
+        "company_candidate": 1,
+        "dismissed": 1,
+    }
+    assert summary["workspace_review_disposition_counts"] == {
+        "company_candidate": 1,
+        "dismissed": 1,
+    }
+    assert summary["workspace_pending_review"] == 0
+    assert store.pending_review() == []
 
 
 def test_feed_review_rejects_unknown_disposition_and_signal(tmp_path: Path) -> None:

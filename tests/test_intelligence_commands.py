@@ -930,7 +930,8 @@ def test_linkedin_cadence_guard_holds_a_learned_negative_pattern(tmp_path: Path)
     )
 
     assert allowed == []
-    assert held[0]["send_recommendation"] == "cadence_hold"
+    assert held[0]["send_recommendation"] == "rewrite_hold"
+    assert held[0]["hold_category"] == "rewrite_required"
     assert "learned negative" in held[0]["cadence_reasons"][0]
 
 
@@ -993,5 +994,6 @@ def test_linkedin_send_guard_rechecks_new_negative_against_stale_draft(tmp_path:
     )
 
     assert allowed == []
-    assert held[0]["send_recommendation"] == "cadence_hold"
+    assert held[0]["send_recommendation"] == "rewrite_hold"
+    assert held[0]["hold_category"] == "rewrite_required"
     assert "learned_negative_stale" in held[0]["cadence_reasons"][0]

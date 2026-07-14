@@ -29,6 +29,7 @@ class StyleProfileSyncSummary:
     examples_seen: int = 0
     strong_added: int = 0
     weak_added: int = 0
+    conflicts_pruned: int = 0
     duplicates_skipped: int = 0
     invalid_skipped: int = 0
     profile_updated: bool = False
@@ -299,6 +300,54 @@ def merge_comms_learning_examples(
 
     example_list = list(examples)
     merged = profile.model_copy(deep=True)
+
+    # Repair historical label conflicts before considering new rows. A manual
+    # gold/silver message is authoritative even when an earlier reconciliation
+    # artifact incorrectly recorded the same copy as a learned negative. Keep
+    # hand-curated weak examples intact; only corpus-derived negatives can be
+    # displaced by positive evidence.
+    promotable_messages = [
+        str(raw.get("message") or raw.get("message_text") or "").strip()
+        for raw in example_list
+        if _normalize_label(raw.get("label")) in {"gold", "silver"}
+        and _is_strong_message_candidate(
+            str(raw.get("message") or raw.get("message_text") or "").strip()
+        )
+    ]
+    positive_examples = [
+        *merged.strong_messages,
+        *(
+            StyleMessageExample(label="incoming_positive", message=message)
+            for message in promotable_messages
+        ),
+    ]
+    positive_keys = {
+        _message_key(item.message)
+        for item in positive_examples
+        if _message_key(item.message)
+    }
+    retained_weak: list[StyleMessageExample] = []
+    conflicts_pruned = 0
+    for item in merged.weak_messages:
+        learned_negative = item.label.startswith("learned_negative")
+        conflicts_with_positive = (
+            _message_key(item.message) in positive_keys
+            or _semantic_duplicate(
+                item.message,
+                positive_examples,
+                # This is intentionally lower than ordinary corpus dedupe.
+                # Keeping a near-identical message in both prompt sections
+                # makes the approved copy critique itself. In a direct
+                # positive/learned-negative conflict, positive evidence wins.
+                similarity_threshold=0.80,
+            )
+        )
+        if learned_negative and conflicts_with_positive:
+            conflicts_pruned += 1
+            continue
+        retained_weak.append(item)
+    merged.weak_messages = retained_weak
+
     known_messages = {
         _message_key(item.message)
         for item in [*merged.strong_messages, *merged.weak_messages]
@@ -310,14 +359,40 @@ def merge_comms_learning_examples(
     duplicates = 0
     invalid = invalid_rows
 
-    for raw in example_list:
+    # When the same copy appears under multiple labels, first-hand user copy
+    # wins over an automated/silver observation and both win over a generated
+    # negative.  This prevents input ordering across report artifacts from
+    # turning a manual send into a weak example.
+    label_priority = {"gold": 0, "silver": 1, "negative": 2}
+    ordered_examples = sorted(
+        enumerate(example_list),
+        key=lambda item: (
+            label_priority.get(_normalize_label(item[1].get("label")), 3),
+            item[0],
+        ),
+    )
+
+    for _, raw in ordered_examples:
         label = _normalize_label(raw.get("label"))
         message = str(raw.get("message") or raw.get("message_text") or "").strip()
         if label not in {"gold", "silver", "negative"} or not message:
             invalid += 1
             continue
+        if label in {"gold", "silver"} and not _is_strong_message_candidate(message):
+            invalid += 1
+            continue
         key = _message_key(message)
-        if not key or key in known_messages:
+        if label == "negative" and _semantic_duplicate(
+            message,
+            merged.strong_messages,
+            similarity_threshold=0.80,
+        ):
+            duplicates += 1
+            continue
+        if not key or key in known_messages or _semantic_duplicate(
+            message,
+            [*merged.strong_messages, *merged.weak_messages],
+        ):
             duplicates += 1
             continue
         known_messages.add(key)
@@ -340,9 +415,10 @@ def merge_comms_learning_examples(
         examples_seen=len(example_list) + invalid_rows,
         strong_added=strong_added,
         weak_added=weak_added,
+        conflicts_pruned=conflicts_pruned,
         duplicates_skipped=duplicates,
         invalid_skipped=invalid,
-        profile_updated=bool(strong_added or weak_added),
+        profile_updated=bool(strong_added or weak_added or conflicts_pruned),
     )
     return merged, summary
 
@@ -438,6 +514,110 @@ def _bounded_message(message: str, max_chars: int) -> str:
 
 def _message_key(message: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", message.lower()).strip()
+
+
+def _semantic_duplicate(
+    message: str,
+    examples: Iterable[StyleMessageExample],
+    *,
+    similarity_threshold: float = 0.94,
+) -> bool:
+    """Catch cosmetic/near-exact repeats without collapsing useful contrasts.
+
+    The threshold is intentionally high.  A manual edit from ``recs`` to
+    ``recommendations`` can carry real style signal and should survive, while
+    punctuation, emoji, or a single filler-word difference should not create
+    another reusable example.
+    """
+
+    tokens = set(_message_key(message).split())
+    if len(tokens) < 5:
+        return False
+    for item in examples:
+        other = set(_message_key(item.message).split())
+        if len(other) < 5:
+            continue
+        similarity = len(tokens & other) / len(tokens | other)
+        if similarity >= similarity_threshold:
+            return True
+    return False
+
+
+def _is_strong_message_candidate(message: str) -> bool:
+    """Reject UI artifacts and tiny conversational closers as positive exemplars."""
+
+    key = _message_key(message)
+    if not key:
+        return False
+    if re.fullmatch(
+        r"(?:you )?(?:sent|shared) (?:an? )?"
+        r"(?:attachment|audio|document|file|gif|image|message|photo|post|sticker|video|"
+        r"voice message)",
+        key,
+    ):
+        return False
+
+    words = key.split()
+    if len(words) > 8:
+        return True
+
+    # A short question or request can still be a complete, useful message.
+    if (
+        "?" in message
+        or re.search(r"\b(?:can|could|would) (?:i|we|you)\b", key)
+        or re.match(
+            r"(?:are|can|could|did|do|does|how|is|what|when|where|who|why|would)\b",
+            key,
+        )
+        or re.search(r"\b(?:any (?:recs|recommendations)|please)\b", key)
+    ):
+        return True
+
+    if {"appreciate", "appreciated", "thank", "thanks", "thx"}.intersection(words):
+        return False
+
+    short_acknowledgements = {
+        "all good",
+        "alright",
+        "awesome",
+        "cool",
+        "got it",
+        "great",
+        "helpful",
+        "makes sense",
+        "no problem",
+        "no worries",
+        "noted",
+        "ok",
+        "okay",
+        "perfect",
+        "right",
+        "sounds good",
+        "sounds great",
+        "sure",
+        "that helps",
+        "thank you",
+        "thanks",
+        "understood",
+        "will do",
+        "yep",
+        "yes",
+    }
+    short_closures = {
+        "all the best",
+        "best",
+        "best regards",
+        "bye",
+        "cheers",
+        "have a good one",
+        "kind regards",
+        "regards",
+        "see you",
+        "speak soon",
+        "take care",
+        "talk soon",
+    }
+    return key not in short_acknowledgements | short_closures
 
 
 def _normalize_label(value: object) -> str:

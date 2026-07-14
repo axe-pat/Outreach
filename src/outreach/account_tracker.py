@@ -326,7 +326,20 @@ def _company_relevant_contacts(org: OrganizationRecord, contacts: list[ContactRe
     relevant = [
         contact
         for contact in contacts
-        if _text_mentions_company(" ".join([contact.title, contact.notes, contact.source_url]), org.name)
+        if (
+            _text_mentions_company(
+                " ".join([contact.title, contact.notes, contact.source_url]),
+                org.name,
+            )
+            # A reviewed relationship-lead import has already made an explicit
+            # organization assignment.  Trust that assignment even when the
+            # captured employer uses a known alias (for example AWS -> Amazon,
+            # YouTube -> Google, or Facebook -> Meta).  Without this, one other
+            # contact mentioning the canonical company name causes the alias
+            # contact to disappear from people/reachability counts.
+            or _parse_notes(contact.notes).get("seed_source")
+            == "relationship_leads"
+        )
     ]
     # If no contact carries enough text to prove company fit, fall back to the
     # org assignment so manually curated company contacts still count.
@@ -738,14 +751,27 @@ def _score_reachability(
     notes_lower = org.notes.lower()
     city_lower = org.city.lower()
 
-    # USC / Marshall path
-    has_usc = any(
-        "usc" in c.notes.lower() or "marshall" in c.notes.lower()
+    # Shared-school paths. Relationship imports preserve these signals in both
+    # notes and target lists, so score the durable tracker metadata instead of
+    # relying on one source's prose format. Thapar is a first-class shared
+    # institution for Akshat; previously those reviewed leads received no warm
+    # path credit at all. A dual Thapar + USC path is stronger than either one
+    # alone without simply double-counting two full alumni bonuses.
+    contact_affinity_text = [
+        " ".join([c.target_lists, c.notes]).lower()
         for c in contacts
-    )
-    if has_usc:
+    ]
+    has_usc = any("usc" in text or "marshall" in text for text in contact_affinity_text)
+    has_thapar = any("thapar" in text or "thaparian" in text for text in contact_affinity_text)
+    if has_usc and has_thapar:
+        score += 8
+        signals.append("USC + Thapar path")
+    elif has_usc:
         score += 5
         signals.append("USC path")
+    elif has_thapar:
+        score += 5
+        signals.append("Thapar path")
 
     # Indian / Delhi background in contacts
     has_india = any(

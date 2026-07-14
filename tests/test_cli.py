@@ -70,16 +70,20 @@ from outreach.cli import (
     effective_send_min_score,
     text_contains_signal,
     touchpoint_status_from_invite_result,
+    update_linkedin_followup_pending_review,
     _source_breakdown,
     _run_invite_candidate_worker,
     _app_invite_report_status,
     _apply_linkedin_cadence_guards,
     _gate_high_value_followup_draft,
+    _high_value_review_reasons,
+    _manual_outbound_is_newer_than_evidence,
     _required_source_failures,
     _source_summary,
     _track_2_actual_actions,
     _track_2_execution_status,
     _write_comms_learning_artifact,
+    message_thread_has_reply,
     TRACK_2_MAPPING_PASSES,
     write_artifact_daily_report,
     write_communication_review_csv,
@@ -790,7 +794,10 @@ def test_daily_report_rejects_run_id_mismatch(tmp_path: Path) -> None:
     artifacts.mkdir()
     nightly_summary = tmp_path / "nightly-summary.json"
     nightly_summary.write_text(json.dumps({"run_id": REPORT_RUN_ID}), encoding="utf-8")
-    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
 
     with pytest.raises(ValueError, match="does not match nightly summary run_id"):
         write_artifact_daily_report(
@@ -1041,7 +1048,8 @@ def test_daily_report_separates_human_review_auto_handled_and_system_holds(tmp_p
     assert [row["person"] for row in payload["auto_handled"]] == ["Auto Person"]
     assert [row["name"] for row in payload["messages_to_review"]] == ["Review Person"]
     assert [row["name"] for row in payload["system_held_messages"]] == ["Hold Person"]
-    assert [row["action_type"] for row in payload["what_needs_you"]] == [
+    assert payload["what_needs_you"] == []
+    assert [row["action_type"] for row in payload["review_summaries"]] == [
         "message_review_this_run"
     ]
     assert payload["track_2_execution"]["status"] == "not_run"
@@ -1079,6 +1087,13 @@ def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
                         "name": "Older Person",
                         "send_recommendation": "review",
                         "draft_message": "Older pending draft.",
+                    },
+                    {
+                        "contact_id": "ct-now",
+                        "company": "NowCo",
+                        "name": "Current Person",
+                        "send_recommendation": "cadence_hold",
+                        "draft_message": "Stale carryover hold.",
                     }
                 ]
             }
@@ -1153,7 +1168,9 @@ def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
     ]
     assert payload["pending_review_count"] == 1
     assert payload["carryover_review_count"] == 1
-    assert [row["action_type"] for row in payload["what_needs_you"]] == [
+    assert payload["carryover_system_held_messages"] == []
+    assert payload["what_needs_you"] == []
+    assert [row["action_type"] for row in payload["review_summaries"]] == [
         "message_review_this_run",
         "message_review_carryover",
     ]
@@ -1161,6 +1178,227 @@ def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
     assert "Carryover review backlog (workspace snapshot)" in report_html.read_text(
         encoding="utf-8"
     )
+
+
+def test_pending_followup_clear_removes_stale_versions_of_the_same_thread(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    pending_path = workspace / "linkedin_followup_pending_review.json"
+    pending_path.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-replied",
+                        "thread_id": "thread-1",
+                        "draft_kind": "conversation_reply",
+                        "latest_message": "Old inbound message.",
+                        "send_recommendation": "review",
+                    },
+                    {
+                        "contact_id": "ct-open",
+                        "thread_id": "thread-2",
+                        "draft_kind": "conversation_reply",
+                        "latest_message": "Still unanswered.",
+                        "send_recommendation": "review",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(resolved_tracking_workspace_dir=workspace)
+
+    update_linkedin_followup_pending_review(
+        settings=settings,
+        pending_drafts=[],
+        cleared_drafts=[
+            {
+                "contact_id": "ct-replied",
+                "thread_id": "thread-1",
+                "latest_message": "New outbound message.",
+            }
+        ],
+        source_artifact=tmp_path / "current-drafts.json",
+    )
+
+    payload = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert [row["contact_id"] for row in payload["results"]] == ["ct-open"]
+    assert payload["count"] == 1
+    assert payload["summary"] == {"review": 1}
+
+
+def test_daily_report_preserves_run_breakdown_while_clearing_resolved_actions(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    OutreachWorkbook(workspace).initialize()
+
+    def draft(
+        contact_id: str,
+        recommendation: str,
+        *,
+        hold_category: str = "",
+    ) -> dict[str, object]:
+        return {
+            "contact_id": contact_id,
+            "company": f"Company {contact_id}",
+            "name": f"Person {contact_id}",
+            "source_status": "replied",
+            "last_sender": f"Person {contact_id}",
+            "latest_message": f"Inbound {contact_id}",
+            "draft_kind": "conversation_reply",
+            "send_recommendation": recommendation,
+            "hold_category": hold_category,
+            "draft_message": f"Draft {contact_id}",
+        }
+
+    review_rows = [draft(f"review-{index}", "review") for index in range(5)]
+    trigger_rows = [
+        draft(
+            f"trigger-{index}",
+            "wait_for_trigger",
+            hold_category="waiting_for_specific_trigger",
+        )
+        for index in range(2)
+    ]
+    rewrite_rows = [
+        draft(
+            f"rewrite-{index}",
+            "rewrite_hold",
+            hold_category="rewrite_required",
+        )
+        for index in range(5)
+    ]
+    cadence_rows = [
+        draft(
+            f"cadence-{index}",
+            "cadence_hold",
+            hold_category="cadence_not_due",
+        )
+        for index in range(3)
+    ]
+    terminal_original = draft("already-answered", "review")
+    terminal_resolution = {
+        **terminal_original,
+        "send_recommendation": "resolved",
+        "hold_category": "already_answered",
+    }
+
+    draft_artifact = artifacts / "exact-linkedin-followup-drafts.json"
+    draft_artifact.write_text(
+        json.dumps(
+            {
+                "results": [
+                    *review_rows,
+                    *trigger_rows,
+                    *rewrite_rows,
+                    *cadence_rows,
+                    terminal_original,
+                ],
+                "cadence_held": [terminal_resolution],
+            }
+        ),
+        encoding="utf-8",
+    )
+    handled_contact_ids = {
+        "review-0",
+        "review-1",
+        "trigger-0",
+        "trigger-1",
+        "rewrite-0",
+        "cadence-0",
+        "cadence-1",
+        "cadence-2",
+    }
+    with (workspace / "linkedin_inbox_actions.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["action_id", "status", "contact_id"],
+        )
+        writer.writeheader()
+        for contact_id in sorted(handled_contact_ids):
+            writer.writerow(
+                {
+                    "action_id": f"handled-{contact_id}",
+                    "status": "manual_handled",
+                    "contact_id": contact_id,
+                }
+            )
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"linkedin_followup_draft_artifacts": [str(draft_artifact)]}),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "run_id": REPORT_RUN_ID,
+                "daily_engine_manifest": str(manifest),
+                "outreach_maintenance": {"ran": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_json, report_md, _report_html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 7, 13, 1, 0, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+    outcome = payload["run_outcome"]
+
+    assert outcome["unsent_drafts_created"] == 15
+    assert outcome["drafts_created_for_review"] == 5
+    assert outcome["drafts_created_policy_held"] == 10
+    assert outcome["system_hold_breakdown"] == {
+        "cadence_not_due": 3,
+        "rewrite_required": 5,
+        "waiting_for_specific_trigger": 2,
+    }
+    assert outcome["current_unresolved_drafts_from_run"] == 7
+    assert outcome["current_review_drafts_from_run"] == 3
+    assert outcome["current_policy_held_drafts_from_run"] == 4
+    assert outcome["current_system_hold_breakdown"] == {"rewrite_required": 4}
+    assert {row["contact_id"] for row in payload["messages_to_review"]} == {
+        "review-2",
+        "review-3",
+        "review-4",
+    }
+    assert {row["contact_id"] for row in payload["system_held_messages"]} == {
+        "rewrite-1",
+        "rewrite-2",
+        "rewrite-3",
+        "rewrite-4",
+    }
+    assert payload["what_needs_you"] == []
+    assert [row["action_type"] for row in payload["review_summaries"]] == [
+        "message_review_this_run"
+    ]
+    assert all(
+        row.get("contact_id") != "already-answered"
+        for row in [
+            *payload["messages_to_review"],
+            *payload["system_held_messages"],
+        ]
+    )
+    report_text = report_md.read_text(encoding="utf-8")
+    assert "Drafts created by this run but not sent: `15` (`5` review; `10` policy-held)" in report_text
+    assert "Still unresolved now: `7` (`3` review; `4` policy-held" in report_text
 
 
 def test_daily_report_reconciles_manual_reply_before_showing_carryover(
@@ -1483,9 +1721,9 @@ def test_daily_report_protects_executive_priority_reviews_and_collapses_browser_
         item["action_type"] == "linkedin_company_identity_review"
         for item in payload["what_needs_you"]
     )
-    assert "Executive & high-value review" in report_md.read_text(encoding="utf-8")
+    assert "Executive review" in report_md.read_text(encoding="utf-8")
     html_text = report_html.read_text(encoding="utf-8")
-    assert "Executive &amp; high-value review" in html_text
+    assert "Executive review" in html_text
     assert "initial invite" in html_text
     assert html_text.count("Nothing is listening on 127.0.0.1:9222") == 0
 
@@ -1536,7 +1774,13 @@ def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Pat
         json.dumps({"run_id": REPORT_RUN_ID, "daily_engine_manifest": str(manifest), "outreach_maintenance": {"ran": True}}),
         encoding="utf-8",
     )
-    settings = SimpleNamespace(artifacts_dir=artifacts, resolved_tracking_workspace_dir=workspace)
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+        ai_messaging_enabled=True,
+        anthropic_api_key=None,
+        ai_messaging_model="claude-haiku-4-5-20251001",
+    )
 
     summary_path, report_path, html_path, _latest = write_artifact_daily_report(
         settings=settings,
@@ -1549,11 +1793,16 @@ def test_daily_report_surfaces_email_draft_review_and_smtp_blocker(tmp_path: Pat
     assert payload["run_outcome"]["emails_sent"] == 0
     assert payload["messages_to_review"][0]["channel"] == "email"
     assert payload["messages_to_review"][0]["subject"] == "Specific EmailCo role fit"
-    action_types = {row["action_type"] for row in payload["what_needs_you"]}
+    assert payload["what_needs_you"] == []
+    action_types = {row["action_type"] for row in payload["review_summaries"]}
     assert action_types == {"message_review_this_run"}
     assert [row["issue_type"] for row in payload["system_issues"]] == [
-        "cold_email_configuration"
+        "cold_email_configuration",
+        "ai_messaging_configuration",
     ]
+    ai_issue = payload["system_issues"][1]
+    assert ai_issue["model"] == "claude-haiku-4-5-20251001"
+    assert "fallback_reason=missing_anthropic_api_key" in ai_issue["detail"]
     email_source = next(row for row in payload["source_breakdown"] if row["source"] == "Cold email channel")
     assert email_source["status"] == "skipped_missing_credentials"
     assert email_source["raw"] == 1
@@ -1874,6 +2123,107 @@ def test_comms_learning_writes_gold_negative_and_silver_examples(tmp_path: Path)
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     assert {item["label"] for item in payload["examples"]} == {"gold", "negative", "silver"}
     assert (tmp_path / "comms_learning" / "linkedin_examples.jsonl").exists()
+
+
+def test_comms_learning_captures_all_tracker_manual_sends_and_skips_ui_placeholders(
+    tmp_path: Path,
+) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-ottimate", name="Ottimate")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-harshil",
+            organization_id="org-ottimate",
+            full_name="Harshil Khant",
+        )
+    )
+    for touchpoint_id, message in (
+        ("tp-manual", "Thanks Harshil. Is there a relevant opening?"),
+        ("tp-placeholder", "You sent an attachment"),
+    ):
+        workbook.append_touchpoint(
+            TouchpointRecord(
+                touchpoint_id=touchpoint_id,
+                organization_id="org-ottimate",
+                contact_id="ct-harshil",
+                channel="linkedin",
+                status="Sent",
+                message_kind="linkedin_manual_message",
+                message_text=message,
+                recorded_at="2026-07-13T11:24:07+00:00",
+            )
+        )
+
+    artifact, summary = _write_comms_learning_artifact(
+        workspace=tmp_path,
+        reports_dir=reports,
+        report_stem="run",
+        manually_cleared_items=[],
+        followup_payloads=[],
+        run_summary=None,
+        since=datetime(2026, 7, 13, 1, 0, tzinfo=UTC),
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert summary == {"gold": 1, "negative": 0, "silver": 0}
+    assert payload["examples"][0]["name"] == "Harshil Khant"
+    assert payload["examples"][0]["message"] == "Thanks Harshil. Is there a relevant opening?"
+
+
+def test_run_scoped_comms_learning_excludes_old_carryover_manual_send(
+    tmp_path: Path,
+) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-snyk", name="Snyk")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-emiliano",
+            organization_id="org-snyk",
+            full_name="Emiliano Castro",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-old-manual",
+            organization_id="org-snyk",
+            contact_id="ct-emiliano",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_manual_message",
+            message_text="An older manually sent message.",
+            recorded_at="2026-07-09T07:19:26+00:00",
+        )
+    )
+
+    artifact, summary = _write_comms_learning_artifact(
+        workspace=tmp_path,
+        reports_dir=reports,
+        report_stem="run",
+        manually_cleared_items=[
+            {
+                "company": "Snyk",
+                "name": "Emiliano Castro",
+                "scope": "carried_over",
+                "manual_latest_message": "An older manually sent message.",
+                "draft_message": "An older generated draft.",
+            }
+        ],
+        followup_payloads=[],
+        run_summary=None,
+        since=datetime(2026, 7, 13, 1, 0, tzinfo=UTC),
+    )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert summary == {"gold": 0, "negative": 0, "silver": 0}
+    assert payload["examples"] == []
 
 
 def test_tpm_titles_bucket_as_product() -> None:
@@ -3691,12 +4041,10 @@ def test_execute_invite_batch_holds_protected_initial_invites_at_send_boundary(
     )
     priority_payload = json.loads(priority_artifact.read_text(encoding="utf-8"))
 
-    assert worker_names == ["Routine Person"]
-    assert priority_counts == {"protected_review": 1}
-    assert priority_payload["results"] == []
-    assert "priority account" in priority_payload["protected_review_candidates"][0][
-        "high_value_review_reasons"
-    ][0]
+    assert worker_names == ["Routine Person", "Priority Engineer"]
+    assert priority_counts == {"sent": 1}
+    assert priority_payload["results"][0]["name"] == "Priority Engineer"
+    assert priority_payload["protected_review_candidates"] == []
 
 
 def test_execute_invite_batch_dry_run_does_not_persist(monkeypatch, tmp_path: Path) -> None:
@@ -4191,7 +4539,7 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
                 "name": "Owen Crook",
                 "linkedin_url": "https://www.linkedin.com/in/owen/",
                 "status": "replied",
-                "message_text": "Happy to help. What role are you looking at?",
+                "latest_message": "Happy to help. What role are you looking at?",
             },
             {
                 "contact_id": "ct-deepanshu",
@@ -4219,6 +4567,64 @@ def test_apply_linkedin_reconcile_results_updates_contacts_and_touchpoints(tmp_p
     touchpoints = workbook.list_touchpoints()
     assert {item.status for item in touchpoints} == {"Accepted", "Replied"}
     assert any(item.message_kind == "linkedin_reply" for item in touchpoints)
+    assert any(
+        item.message_kind == "linkedin_reply"
+        and item.message_text == "Happy to help. What role are you looking at?"
+        for item in touchpoints
+    )
+
+
+def test_own_latest_message_is_never_misclassified_as_unread_reply() -> None:
+    assert message_thread_has_reply(
+        {
+            "latest_message": "Thanks, I will take a look.",
+            "last_sender": "You",
+            "unread": True,
+        }
+    ) is False
+
+
+def test_reconcile_write_boundary_reclassifies_own_sender_as_outbound(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-ottimate", name="Ottimate")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-karn",
+            organization_id="org-ottimate",
+            full_name="Karn",
+            status="Connected",
+        )
+    )
+
+    result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "contact_id": "ct-karn",
+                "status": "replied",
+                "last_sender": "Akshat Pathak",
+                "latest_message": "Thanks, I will take a look.",
+            }
+        ],
+        source_artifact="signed-in-reconcile.json",
+        apply_changes=True,
+    )
+
+    assert result["summary"]["connected"] == 1
+    assert result["summary"]["replied"] == 0
+    assert result["results"][0]["normalized_status"] == "connected"
+    assert result["results"][0]["needs_follow_up"] is False
+    touchpoints = workbook.list_touchpoints()
+    assert not any(item.message_kind == "linkedin_reply" for item in touchpoints)
+    assert any(
+        item.message_kind == "linkedin_manual_message"
+        and item.message_text == "Thanks, I will take a look."
+        for item in touchpoints
+    )
 
 
 def test_reconcile_records_missing_acceptance_for_existing_connected_contact(tmp_path: Path) -> None:
@@ -4669,8 +5075,8 @@ def test_followup_draft_holds_positive_ack_without_concrete_fit() -> None:
     )
 
     assert drafts[0]["draft_kind"] == "already_asked_wait"
-    assert drafts[0]["send_recommendation"] == "hold"
-    assert drafts[0]["communication_recommendation"] == "hold"
+    assert drafts[0]["send_recommendation"] == "wait_for_trigger"
+    assert drafts[0]["communication_recommendation"] == "wait_for_trigger"
     assert drafts[0]["reply_intent"] == "already_asked_wait"
 
 
@@ -4777,10 +5183,7 @@ def test_followup_draft_never_auto_sends_executive_or_priority_account() -> None
     assert drafts[0]["reply_intent"] == "permission_to_send_fit"
     assert drafts[0]["send_recommendation"] == "review"
     assert drafts[0]["high_value_review_required"] is True
-    assert set(drafts[0]["high_value_review_reasons"]) == {
-        "executive recipient",
-        "priority account (priority, story-fit)",
-    }
+    assert drafts[0]["high_value_review_reasons"] == ["executive recipient"]
 
     legacy_safe_draft = {
         "organization_id": "org-monte-carlo",
@@ -4796,6 +5199,36 @@ def test_followup_draft_never_auto_sends_executive_or_priority_account() -> None
     )
     assert gated_at_send_time["send_recommendation"] == "review"
     assert gated_at_send_time["high_value_review_required"] is True
+
+
+def test_priority_company_does_not_make_regular_employee_executive() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-abridge",
+        name="Abridge",
+        organization_type=OrganizationType.COMPANY,
+        target_lists="story-fit;priority",
+    )
+
+    assert _high_value_review_reasons(
+        title="Software Engineer || MS CS from USC || CSA President",
+        contact_type="Engineering",
+        organization=organization,
+    ) == []
+    assert _high_value_review_reasons(
+        title="Chief of Staff to the CEO at Abridge",
+        contact_type="Founder",
+        organization=organization,
+    ) == []
+    assert _high_value_review_reasons(
+        title="Staff Product Lead @ Abridge | Ex-CPO and former co-founder",
+        contact_type="Founder",
+        organization=organization,
+    ) == []
+    assert _high_value_review_reasons(
+        title="Co-Founder & CEO at Abridge",
+        contact_type="Founder",
+        organization=organization,
+    ) == ["executive recipient"]
 
 
 def test_persisted_inbound_replies_survive_bounded_live_snapshot() -> None:
@@ -4838,6 +5271,121 @@ def test_persisted_inbound_replies_survive_bounded_live_snapshot() -> None:
     assert results[0]["contact_id"] == "ct-jordan"
     assert results[0]["status"] == "replied"
     assert results[0]["state_reason"] == "persistent_unanswered_inbound"
+
+
+def test_persisted_inbound_is_suppressed_after_later_tracker_response() -> None:
+    contact = ContactRecord(
+        contact_id="ct-harsh",
+        organization_id="org-sortly",
+        full_name="Harsh Ranjan",
+    )
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-harsh-inbound",
+            organization_id="org-sortly",
+            contact_id="ct-harsh",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text="Yes that will be great",
+            recorded_at="2026-06-25T20:39:17+00:00",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-harsh-outbound",
+            organization_id="org-sortly",
+            contact_id="ct-harsh",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_followup",
+            message_text="Thanks Harsh, I will keep an eye on roles.",
+            recorded_at="2026-06-27T12:09:50+00:00",
+        ),
+    ]
+    state = {
+        "thread_states": {
+            "synthetic:harsh-ranjan": {
+                "name": "Harsh Ranjan",
+                "last_sender": "Harsh",
+                "latest_message": "Yes that will be great",
+            }
+        }
+    }
+
+    assert build_persisted_inbound_reconcile_results(
+        state=state,
+        contacts=[contact],
+        touchpoints=touchpoints,
+    ) == []
+
+
+def test_new_persisted_inbound_is_not_cleared_by_older_answered_message() -> None:
+    contact = ContactRecord(
+        contact_id="ct-harsh",
+        organization_id="org-sortly",
+        full_name="Harsh Ranjan",
+    )
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-old-inbound",
+            organization_id="org-sortly",
+            contact_id="ct-harsh",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text="Old inbound question",
+            recorded_at="2026-06-25T20:39:17+00:00",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-old-answer",
+            organization_id="org-sortly",
+            contact_id="ct-harsh",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_manual_message",
+            message_text="Old question answered",
+            recorded_at="2026-06-27T12:09:50+00:00",
+        ),
+    ]
+    state = {
+        "thread_states": {
+            "synthetic:harsh-ranjan": {
+                "name": "Harsh Ranjan",
+                "last_sender": "Harsh",
+                "latest_message": "A brand-new inbound question",
+            }
+        }
+    }
+
+    results = build_persisted_inbound_reconcile_results(
+        state=state,
+        contacts=[contact],
+        touchpoints=touchpoints,
+    )
+
+    assert len(results) == 1
+    assert results[0]["latest_message"] == "A brand-new inbound question"
+    assert results[0]["state_reason"] == "persistent_unanswered_inbound"
+
+
+def test_ordered_window_beats_same_day_timestamp_collapse() -> None:
+    inbound = "Send your Rust and Tauri based projects."
+    outbound = "I'm mainly looking for PM or TPM work. Is the team hiring for that?"
+
+    assert _manual_outbound_is_newer_than_evidence(
+        {
+            "latest_message": outbound,
+            "timestamp_text": "Jul 12",
+            "last_seen_at": "2026-07-12T20:18:13+00:00",
+            "message_window": [
+                {"sender": "Divanshu", "message": inbound},
+                {"sender": "You", "message": outbound},
+            ],
+        },
+        evidence={
+            "message": inbound,
+            "last_seen_at": "2026-07-12T05:59:32+00:00",
+        },
+    ) is True
 
 
 def test_unanswered_inbound_reply_bypasses_campaign_cadence_hold(tmp_path: Path) -> None:
@@ -4886,6 +5434,54 @@ def test_unanswered_inbound_reply_bypasses_campaign_cadence_hold(tmp_path: Path)
     assert len(allowed) == 1
     assert allowed[0]["cadence_action"] == "linkedin_reply"
     assert allowed[0]["cadence_state"] == "due"
+
+
+def test_specific_trigger_wait_is_a_policy_hold_even_when_reply_is_unanswered(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-wait", name="WaitCo")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-wait",
+            organization_id="org-wait",
+            full_name="Waiting Person",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-wait-inbound",
+            organization_id="org-wait",
+            contact_id="ct-wait",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text="Send me the role when you find one.",
+            recorded_at="2026-07-09T07:19:26+00:00",
+        )
+    )
+
+    allowed, held = _apply_linkedin_cadence_guards(
+        workbook=workbook,
+        drafts=[
+            {
+                "contact_id": "ct-wait",
+                "organization_id": "org-wait",
+                "source_status": "replied",
+                "send_recommendation": "wait_for_trigger",
+                "latest_message": "Send me the role when you find one.",
+                "draft_message": "I will send it when I have a concrete fit.",
+            }
+        ],
+    )
+
+    assert allowed == []
+    assert len(held) == 1
+    assert held[0]["send_recommendation"] == "wait_for_trigger"
+    assert held[0]["cadence_state"] == "waiting_for_trigger"
+    assert held[0]["hold_category"] == "waiting_for_specific_trigger"
 
 
 def test_inbound_reply_is_held_after_later_outbound_response(tmp_path: Path) -> None:
@@ -4943,8 +5539,73 @@ def test_inbound_reply_is_held_after_later_outbound_response(tmp_path: Path) -> 
 
     assert allowed == []
     assert len(held) == 1
-    assert held[0]["send_recommendation"] == "cadence_hold"
+    assert held[0]["send_recommendation"] == "resolved"
+    assert held[0]["cadence_state"] == "resolved"
     assert "later outbound" in str(held[0]["cadence_reasons"][0])
+
+
+def test_reply_resolution_uses_sent_time_and_precedes_rewrite_classification(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-chrono", name="ChronoCo")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-chrono",
+            organization_id="org-chrono",
+            full_name="Chronology Person",
+        )
+    )
+    inbound = "Can you send that over?"
+    for touchpoint in [
+        TouchpointRecord(
+            touchpoint_id="tp-chrono-inbound",
+            organization_id="org-chrono",
+            contact_id="ct-chrono",
+            channel="linkedin",
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text=inbound,
+            recorded_at="2026-07-10T08:00:00+00:00",
+        ),
+        TouchpointRecord(
+            touchpoint_id="tp-chrono-outbound",
+            organization_id="org-chrono",
+            contact_id="ct-chrono",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_manual_message",
+            message_text="Done, thanks!",
+            recorded_at="2026-07-08T08:00:00+00:00",
+            sent_at="2026-07-11T08:00:00+00:00",
+        ),
+    ]:
+        workbook.append_touchpoint(touchpoint)
+
+    allowed, held = _apply_linkedin_cadence_guards(
+        workbook=workbook,
+        drafts=[
+            {
+                "contact_id": "ct-chrono",
+                "organization_id": "org-chrono",
+                "source_status": "replied",
+                "send_recommendation": "review",
+                "latest_message": inbound,
+                "draft_message": "Generic learned-negative draft",
+                "communication_review": {
+                    "flags": ["Matches learned negative pattern"]
+                },
+            }
+        ],
+    )
+
+    assert allowed == []
+    assert len(held) == 1
+    assert held[0]["send_recommendation"] == "resolved"
+    assert held[0]["hold_category"] == "already_answered"
+    assert "later outbound" in held[0]["cadence_reasons"][0]
 
 
 def test_track_2_mapping_uses_bounded_cross_functional_passes() -> None:

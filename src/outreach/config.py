@@ -135,6 +135,12 @@ class SearchStrategy(BaseModel):
 
 class OutreachSettings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    ai_messaging_enabled: bool = Field(default=True, alias="AI_MESSAGING_ENABLED")
+    ai_messaging_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        alias="AI_MESSAGING_MODEL",
+    )
+    ai_messaging_max_batch: int = Field(default=10, alias="AI_MESSAGING_MAX_BATCH")
     notion_api_token: str | None = Field(default=None, alias="NOTION_API_TOKEN")
     notion_database_id: str | None = Field(default=None, alias="NOTION_DATABASE_ID")
     linkedin_chrome_user_data_dir: Path = Field(

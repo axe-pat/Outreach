@@ -9,6 +9,7 @@ from outreach.relationship_leads import (
     RELATIONSHIP_LEAD_FIELDS,
     RelationshipLeadConflictError,
     RelationshipLeadReviewError,
+    _merge_csv,
     _program_tag,
     _school_tag,
     _source_kind_for_lead,
@@ -104,10 +105,47 @@ def test_school_and_program_tags_are_safe_single_tokens() -> None:
     assert _program_tag("MBA / Product Strategy") == "program-mba-product-strategy"
 
 
+def test_tag_merge_dedupes_separator_only_slug_variants() -> None:
+    assert _merge_csv("bizops-strategy,data", "bizops_strategy,Data") == (
+        "bizops-strategy,data"
+    )
+
+
 def test_peoplegrove_public_corroboration_retains_directory_provenance() -> None:
     assert _source_kind_for_lead("peoplegrove_public_web") == (
         SourceKind.UNIVERSITY_DIRECTORY
     )
+
+
+def test_peoplegrove_public_corroboration_promotes_explicit_linkedin_evidence_url(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "relationship_leads_peoplegrove_public.csv"
+    with source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RELATIONSHIP_LEAD_FIELDS)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "source_type": "peoplegrove_public_web",
+                "full_name": "Alicia Wong",
+                "company": "Ordergroove",
+                "title": "Product Manager",
+                "source_url": "https://www.linkedin.com/in/aliciawwong?trk=public",
+                "source_record_id": "aliciawong",
+            }
+        )
+
+    staged = _stage_and_approve(source)
+    workspace = tmp_path / "workspace"
+    first = import_relationship_leads(workspace, source_path=staged, execute=True)
+    second = import_relationship_leads(workspace, source_path=staged, execute=True)
+    contact = OutreachWorkbook(workspace).list_contacts()[0]
+
+    assert first["contacts_added"] == 1
+    assert contact.linkedin_url == "https://www.linkedin.com/in/aliciawwong"
+    assert contact.source_kind == SourceKind.UNIVERSITY_DIRECTORY
+    assert contact.source_url == "https://www.linkedin.com/in/aliciawwong?trk=public"
+    assert second["contacts_unchanged"] == 1
 
 
 def test_import_relationship_leads_applies_recent_mba_pm_preset_defaults(tmp_path: Path) -> None:
@@ -637,6 +675,66 @@ def test_execute_blocks_stable_source_identity_at_a_different_company(
                     "?userProfile=stable-person-123"
                 ),
                 "source_record_id": "stable-person-123",
+            }
+        )
+    staged = _stage_and_approve(source, source_key="peoplegrove_usc")
+    contacts_before = (workspace / "contacts.csv").read_text(encoding="utf-8")
+
+    with pytest.raises(RelationshipLeadConflictError, match="already belongs"):
+        import_relationship_leads(
+            workspace,
+            source_path=staged,
+            source_key="peoplegrove_usc",
+            execute=True,
+        )
+
+    assert (workspace / "contacts.csv").read_text(encoding="utf-8") == contacts_before
+
+
+def test_execute_matches_legacy_peoplegrove_identity_from_contact_source_url(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.initialize()
+    old_org_id = workbook.make_organization_id("Old Company")
+    profile_url = (
+        "https://usc.peoplegrove.com/hub/usc-career-network/person"
+        "?modal=profile&userProfile=legacy-person&showBack=true"
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id=old_org_id,
+            name="Old Company",
+            organization_type=OrganizationType.COMPANY,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id=workbook.make_contact_id(old_org_id, "Legacy Trojan"),
+            organization_id=old_org_id,
+            full_name="Legacy Trojan",
+            source_url=profile_url,
+            notes=(
+                "Relationship lead contact | seed_source=relationship_leads"
+                " | relationship_source_type=peoplegrove"
+            ),
+        )
+    )
+    source = tmp_path / "relationship_leads.csv"
+    with source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=RELATIONSHIP_LEAD_FIELDS)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "source_type": "peoplegrove",
+                "full_name": "Legacy Trojan",
+                "company": "New Company",
+                "title": "Product Manager",
+                "source_url": (
+                    "https://usc.peoplegrove.com/hub/usc-career-network/person"
+                    "?userProfile=legacy-person"
+                ),
             }
         )
     staged = _stage_and_approve(source, source_key="peoplegrove_usc")

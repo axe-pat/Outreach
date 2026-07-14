@@ -97,6 +97,104 @@ def test_account_tracker_counts_company_relevant_warm_contact_as_accepted(tmp_pa
     assert row.account_stage == "connected_no_conversation"
 
 
+def test_account_tracker_keeps_reviewed_relationship_contact_mapped_through_company_alias(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-amazon",
+            name="Amazon",
+            organization_type=OrganizationType.COMPANY,
+            notes="tags=marketplace,data-platform | description=Commerce and cloud platform.",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-canonical",
+            organization_id="org-amazon",
+            full_name="Canonical Contact",
+            title="Product Manager at Amazon",
+            status="Discovered",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-peoplegrove-alias",
+            organization_id="org-amazon",
+            full_name="Trojan Contact",
+            title="Product at AWS",
+            status="Discovered",
+            source_url="https://usc.peoplegrove.com/hub/usc/person?userProfile=trojan",
+            notes=(
+                "Relationship lead contact | seed_source=relationship_leads | "
+                "relationship_source_type=peoplegrove | lead_notes=captured_headline=Product @ AWS"
+            ),
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-unrelated",
+            organization_id="org-amazon",
+            full_name="Unrelated Contact",
+            title="Engineer at Optum",
+            status="Warm",
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.people_mapped == 2
+    assert row.accepted == 0
+
+
+def test_account_tracker_scores_thapar_and_dual_alumni_as_warm_paths(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    for organization_id, name in (
+        ("org-thapar", "ThaparCo"),
+        ("org-dual", "DualCo"),
+    ):
+        workbook.upsert_organization(
+            OrganizationRecord(
+                organization_id=organization_id,
+                name=name,
+                organization_type=OrganizationType.COMPANY,
+                notes="tags=data-platform | description=Data platform software.",
+            )
+        )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-thapar",
+            organization_id="org-thapar",
+            full_name="Thapar Alum",
+            title="Product Manager at ThaparCo",
+            target_lists="institution-first;thapar-network",
+            status="Discovered",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-dual",
+            organization_id="org-dual",
+            full_name="Dual Alum",
+            title="Product Manager at DualCo",
+            target_lists="institution-first;thapar-network;usc-network",
+            status="Discovered",
+        )
+    )
+
+    by_company = {row.company: row for row in build_account_rows(tmp_path)}
+
+    assert by_company["ThaparCo"].score_reachability == 5
+    assert "Thapar path" in by_company["ThaparCo"].why_fit
+    assert by_company["DualCo"].score_reachability == 8
+    assert "USC + Thapar path" in by_company["DualCo"].why_fit
+
+
 def test_account_priority_is_not_dominated_by_relationship_momentum(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path)
     workbook.initialize()

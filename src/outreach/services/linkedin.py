@@ -68,6 +68,34 @@ def score_typeahead_option(trigger_text: str, requested_value: str, option_text:
     return score
 
 
+def missing_people_filter_url_params(
+    url: str,
+    *,
+    company: str | None = None,
+    school: str | None = None,
+    connection_degree: str | None = None,
+    use_us_location: bool = False,
+) -> list[str]:
+    """Return requested filters LinkedIn failed to preserve in the result URL.
+
+    The filter dialog can appear to accept a value while returning an unfiltered
+    global result set. URL-bound facet identifiers are the durable evidence that
+    the requested constraint actually reached the results page.
+    """
+
+    query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+    missing: list[str] = []
+    if company and company.strip() and not query.get("currentCompany"):
+        missing.append("company")
+    if school and school.strip() and not query.get("schoolFilter"):
+        missing.append("school")
+    if use_us_location and not query.get("geoUrn"):
+        missing.append("United States location")
+    if connection_degree in {"1st", "2nd", "3rd+"} and not query.get("network"):
+        missing.append(f"{connection_degree} connection degree")
+    return missing
+
+
 @dataclass
 class LinkedInCheckResult:
     ok: bool
@@ -235,6 +263,19 @@ class LinkedInScraper:
                         connection_degree=connection_degree,
                         use_us_location=use_us_location,
                     )
+                    missing_filters = missing_people_filter_url_params(
+                        page.url,
+                        company=company,
+                        school=school,
+                        connection_degree=connection_degree,
+                        use_us_location=use_us_location,
+                    )
+                    if missing_filters:
+                        raise RuntimeError(
+                            "LinkedIn dropped requested people-search filters: "
+                            + ", ".join(missing_filters)
+                            + f". Refusing unfiltered results from {page.url}"
+                        )
                     candidates = self._collect_people_results(page, limit=limit, max_pages=max_pages)
                     filter_text = self._read_visible_filter_text(page)
                     screenshot = self._save_screenshot(page, "filtered-results")
@@ -1779,7 +1820,7 @@ class LinkedInScraper:
     def _apply_people_filters(
         self,
         page: Page,
-        company: str,
+        company: str | None,
         school: str | None,
         connection_degree: str | None,
         use_us_location: bool,
@@ -1794,7 +1835,12 @@ class LinkedInScraper:
         if use_us_location:
             self._fill_filter_typeahead(page, "Add a location", "United States")
 
-        self._fill_filter_typeahead(page, "Add a company", company)
+        # Institution-first discovery deliberately searches across employers.
+        # Keep the company filter optional so that lane can reuse the same
+        # signed-in, rate-bounded people-search implementation without
+        # pretending an empty company is a real LinkedIn filter value.
+        if company and company.strip():
+            self._fill_filter_typeahead(page, "Add a company", company.strip())
 
         if school:
             self._fill_filter_typeahead(page, "Add a school", school)

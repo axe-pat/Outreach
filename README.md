@@ -26,12 +26,21 @@ Python is the cleanest fit for browser automation, API integration, scoring logi
 
 The app is structured so the LinkedIn layer is isolated. If selectors break or we later decide to split scraping and note generation into separate jobs, the rest of the pipeline stays stable.
 
-Note on AI usage: base LinkedIn note generation is deterministic. The optional `--ai-polish` rewrite layer now defaults to `claude-haiku-4-5-20251001`, which keeps the expensive model reserved for places where it matters more.
+Note on AI usage: candidate/reply classification, chronology, cadence, caps,
+deduplication, and send/review gates remain deterministic. When
+`ANTHROPIC_API_KEY` is configured, invite notes, LinkedIn follow-ups/replies,
+and Track 2 email drafts use a bounded AI composition layer for scenario
+understanding, story selection, voice-aware drafting, and generic-language
+critique/rewrite. Missing credentials, model errors, or invalid output fall back
+to the deterministic draft and record the reason in `ai_messaging`; they never
+change a send/hold decision. The default model is
+`claude-haiku-4-5-20251001` and can be changed with `AI_MESSAGING_MODEL`.
 
 ## Project Layout
 
 ```text
 src/outreach/
+  ai_messaging.py
   cadence.py
   cli.py
   company_news.py
@@ -297,6 +306,11 @@ its source/stage binding, so later edits fail import. Bulk flags affect only
 pending rows; changing a finalized decision requires the explicit
 `--override-finalized` flag. Imports never create or rewrite their source and
 stop on missing, empty, raw, unreviewed, tampered, or ambiguous inputs.
+If a reviewed row's `source_url` is itself an exact LinkedIn `/in/` or `/pub/`
+profile and `linkedin_url` is blank, the importer promotes that explicit
+evidence URL to the actionable LinkedIn locator only after the immutable
+stage/review fingerprints pass. Other evidence URLs are never guessed into a
+LinkedIn profile.
 
 The source-key templates create clean one-time capture files and companion guides:
 
@@ -311,10 +325,97 @@ not exhaustive directory coverage. Structural curation retained 154 and rejected
 1,691. Final signed-in review approved 104 and rejected 50; a separate public
 corroboration pass approved 31 additional profiles from 111 researched ambiguous
 cards. All 135 reviewed people are now imported without guessed emails or
-LinkedIn URLs. Exact import reruns made zero organization/contact changes. The
-tracker now contains 174 relationship-source contacts including the prior seeds,
-while 1,710 profiles from the capture remain excluded. This stays a low-frequency
-source pull, not a daily scraper.
+LinkedIn URLs. Exact import reruns made zero organization/contact changes. At that
+checkpoint the tracker contained 174 relationship-source contacts, including 163
+PeopleGrove contacts: the 135 July 11 approvals plus 28 earlier vetted seeds.
+Nineteen of those earlier seeds also appeared in the July 11 capture, so 154 of
+the 1,845 captured identities are present in canonical contacts and 1,691 remain
+excluded; the other nine earlier seeds fell outside that capture sample. This
+stays a low-frequency source pull, not a daily scraper.
+
+PeopleGrove profile URLs are immutable source evidence, not LinkedIn or email
+locators. Resolve missing LinkedIn URLs through a separate, resumable, read-only
+USC-filtered exact-person pass:
+
+```bash
+python main.py research-peoplegrove-linkedin-locators --limit 10
+python main.py apply-peoplegrove-linkedin-locators
+python main.py apply-peoplegrove-linkedin-locators --execute
+```
+
+The research command hard-caps each run at 25 searches, persists JSON state and a
+CSV review view after every profile, strips credentials from search identity,
+supports explicit parenthetical nickname/maiden variants, and stops on auth,
+challenge, rate-limit, or repeated search failures. An exact-name result on the
+bounded USC-filtered page is eligible for automatic application only when the
+verified current-company filter also succeeded or the matched headline independently
+names the tracker company. Other exact-name results stay in the review CSV until
+`review_decision=approved`; any previously applied uncorroborated locator receives a
+`locator-review-hold` and cannot enter mapped or duplicate live-search invite routing.
+Ambiguous, incomplete, no-match, and duplicate-owned profile URLs remain review-only.
+Neither command sends a message.
+
+### Institution-first LinkedIn discovery
+
+The institution-first lane searches for useful people before choosing a target
+company. Its fixed capture set is Product in the United States for Thapar, USC,
+and USC Marshall, up to ten LinkedIn result pages / 100 unique profiles per
+search. It is a bounded one-time discovery pull, not a daily company scraper:
+
+```bash
+python main.py capture-institution-first-linkedin \
+  --max-pages 10 \
+  --limit-per-search 100
+```
+
+Every raw artifact stores the exact school, US-location facet, final URL, page
+coverage, screenshots, and termination state. Curation verifies the exact school
+URN (`485592`, `3084`, or `3083`) and United States geo URN (`103644278`), not
+merely the presence of a similarly named filter. A failed/dropped facet blocks
+the output. A single failed search can be retried with `--search-key` and merged
+with a valid `--base-capture`; the merged artifact must still contain all three
+valid searches.
+
+Re-run local curation without touching LinkedIn:
+
+```bash
+python main.py curate-institution-first-linkedin \
+  --input-path artifacts/20260714-130102-institution-first-linkedin-capture.json
+```
+
+The curator requires a canonical LinkedIn person URL, a recognized US location,
+one unambiguous current company, and a high-signal Product, founder/C-suite, or
+Product Engineering role. Explicit `Current:` evidence wins; a materially
+different headline employer fails closed. Acquired/legacy employers and
+composite employers require enrichment before import. Headline-only rows may be
+retained for research, but receive `current-role-review-required` and
+`outreach-hold`; that import is not message authorization. Company aliases and
+semantic person/company matching enrich existing contacts instead of creating
+near-duplicate people or accounts. Product Engineering is routed to Engineering,
+not Product. Only accepted rows can enter the companion company-candidate queue.
+
+The standard immutable stage/review/import contract still applies. Importing a
+reviewed lead maps the relationship; it sends nothing and does not change the
+account-scoring formula:
+
+```bash
+python main.py stage-relationship-leads \
+  --source-path workspace/relationship_leads_linkedin_institution_first.csv
+python main.py review-relationship-leads \
+  --staged-path workspace/relationship_leads_linkedin_institution_first.staged.csv \
+  --reviewer Akshat \
+  --approve-all-ready --reject-all-blocked
+python main.py import-relationship-leads \
+  --source-path workspace/relationship_leads_linkedin_institution_first.staged.csv \
+  --execute
+```
+
+July 14 baseline: 299 captured rows / 296 unique profiles became 147 reviewed
+leads and 149 rejects. Thirty-nine retained research leads are current-role
+held; 108 do not carry that hold. The import added 65 organizations and 145
+contacts, enriched two existing PeopleGrove contacts, and produced 65 new-company
+candidates representing 70 leads. An exact second import changed zero tracker
+rows.
 
 ## Communication Style
 
@@ -347,6 +448,15 @@ Story-fit metadata is now used directly in communication drafts. If an account h
 `story_fit_reason` or `profile_evidence` in its organization notes, Track 2 email
 and senior/founder/product LinkedIn drafts prefer that angle over generic company
 fit language.
+
+The AI composer receives those fields as named evidence options and must return
+the selected key plus the exact source evidence. It also receives the bounded
+strong/weak examples from `communication_style_profile.yml`. Confirmed USC,
+Marshall, and Thapar overlap is treated as relationship context: dual-school
+connections should sound warm, slightly quirky, and personal rather than like a
+formal alumni template. Every output is revalidated for character limits,
+company/recipient preservation, story anchors, learned negative patterns, and
+banned phrases before it can replace the deterministic fallback.
 
 ## Recruiting Intelligence, Coverage, and Channel Controls
 
@@ -564,7 +674,11 @@ python main.py build-outcome-learning-report
 tracker accepts, replies, rejections, message types, audiences, and accounts.
 Gold/silver examples sync as bounded strong examples and negative rows as weak
 examples in `workspace/communication_style_profile.yml`, so later draft
-polishing actually learns from the corpus. Aggregate outcome recommendations
+composition actually learns from the corpus. Manual gold wins if the same copy
+appears under conflicting labels; near-identical rows are semantically deduped.
+UI placeholders and tiny acknowledgements such as `Done, thanks!` remain useful
+outcome evidence but are excluded from reusable full-message positive style.
+Aggregate outcome recommendations
 remain advisory: they do not rewrite prompt rules, rubrics, selection policy,
 or send messages. Human review remains the gate before those rules change.
 
@@ -712,7 +826,9 @@ run (including per-company counts, such as invites sent or contacts mapped)
 from the next campaign plan. It has distinct contracts:
 
 - `What needs you` contains only concrete human actions, such as a resume/email
-  request, routing decision, or message-review batch. Browser/runtime failures
+  request, routing decision, unmatched-thread mapping, or company-discovery
+  decision. Aggregate executive/message-review totals are summaries beside the
+  dedicated review sections, not duplicate action rows. Browser/runtime failures
   and SMTP configuration failures live in a separate `System issues` section;
   one closed CDP session is collapsed into one issue with its affected companies,
   never seven fake company-review tasks.
@@ -721,14 +837,18 @@ from the next campaign plan. It has distinct contracts:
   separate persistent section for older unresolved rows. Before carryover is
   rendered, the refreshed durable LinkedIn message state removes drafts whose
   latest message is already from the user and resolves matching persistent inbox
-  actions as `manual_handled`. A final cadence/system hold wins over an earlier
-  review copy for the same contact, so one person cannot appear as both reviewable
-  and held. Track 2 email drafts stay in the exact-run section until approved; a
-  draft is never counted as sent.
-- `Executive & high-value review` is first-class and scope-labelled. Initial
-  invites and message drafts for founder/C-suite recipients or priority,
-  strategic, and story-fit accounts are removed from routine automatic delivery.
-  Both gates are re-applied immediately before send, so an older
+  actions as `manual_handled`. Exact-run state outranks a stale carryover copy;
+  within one scope, a terminal resolution outranks a hold and a final
+  cadence/system hold wins over an earlier review copy. One person therefore
+  cannot appear as both reviewable and held. The report preserves the run-time
+  draft breakdown separately from the smaller set that remains unresolved after
+  later manual sends. Track 2 email drafts stay in the exact-run section until
+  approved; a draft is never counted as sent.
+- `Executive review` is first-class and scope-labelled. Initial invites and
+  message drafts are protected when the recipient's current role is founder or
+  C-suite (or an explicit individual gate is recorded). Priority, strategic, or
+  story-fit company membership alone does not relabel a regular employee as an
+  executive. The recipient gate is re-applied immediately before send, so an older
   `safe_to_review` message or previously selected invite cannot bypass review.
 - `Auto-handled messages` contains only exact send results with `status=sent`.
 - `LinkedIn actions` puts invite sends, inbox refresh/triage, follow-ups,

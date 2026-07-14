@@ -84,6 +84,7 @@ def test_merge_maps_labels_preserves_curated_fields_and_dedupes() -> None:
         "examples_seen": 4,
         "strong_added": 1,
         "weak_added": 1,
+        "conflicts_pruned": 0,
         "duplicates_skipped": 1,
         "invalid_skipped": 1,
         "profile_updated": True,
@@ -109,6 +110,144 @@ def test_merge_maps_labels_preserves_curated_fields_and_dedupes() -> None:
     assert second_summary.duplicates_skipped == 3
     assert len(merged_again.strong_messages) == len(merged.strong_messages)
     assert len(merged_again.weak_messages) == len(merged.weak_messages)
+
+
+def test_merge_skips_ui_placeholders_and_tiny_closers_as_strong_examples() -> None:
+    examples = [
+        {"label": "gold", "message": "You sent an attachment"},
+        {"label": "gold", "message": "Sure, thanks a lot!!😃"},
+        {"label": "silver", "message": "Oh okay Thanks a lot anyways!😃"},
+        {"label": "silver", "message": "Sounds good"},
+        {
+            "label": "gold",
+            "message": "But thanks for the info, I'll try reaching out to Irina about this!",
+        },
+        {"label": "silver", "message": "Who owns PM hiring there?"},
+        {"label": "negative", "message": "Thanks!"},
+    ]
+
+    merged, summary = merge_comms_learning_examples(
+        CommunicationStyleProfile(),
+        examples,
+    )
+
+    assert [item.message for item in merged.strong_messages] == [
+        "But thanks for the info, I'll try reaching out to Irina about this!",
+        "Who owns PM hiring there?",
+    ]
+    assert [item.message for item in merged.weak_messages] == ["Thanks!"]
+    assert summary.as_dict() == {
+        "examples_seen": 7,
+        "strong_added": 2,
+        "weak_added": 1,
+        "conflicts_pruned": 0,
+        "duplicates_skipped": 0,
+        "invalid_skipped": 4,
+        "profile_updated": True,
+    }
+
+
+def test_merge_prioritizes_manual_gold_and_semantically_dedupes_reordered_copy() -> None:
+    manual = "Thanks Priya, does that background fit product work at Acme?"
+    reordered = "At Acme, Priya, does that background fit product work? Thanks."
+    examples = [
+        {"label": "negative", "message": manual},
+        {"label": "gold", "message": manual},
+        {"label": "silver", "message": reordered},
+    ]
+
+    merged, summary = merge_comms_learning_examples(
+        CommunicationStyleProfile(),
+        examples,
+    )
+
+    assert [item.message for item in merged.strong_messages] == [manual]
+    assert merged.weak_messages == []
+    assert summary.strong_added == 1
+    assert summary.weak_added == 0
+    assert summary.duplicates_skipped == 2
+
+
+def test_merge_repairs_historical_learned_negative_positive_conflict() -> None:
+    manual = (
+        "Thanks for connecting, Emiliano. I'm exploring technical PM/product paths at Snyk "
+        "from a backend/data engineering background. Does that background fit product work "
+        "there? Any recommendations on people I should talk to about that?"
+    )
+    generated = manual.replace(
+        "recommendations on people I should talk to", "recs on who I should talk to"
+    )
+    profile = CommunicationStyleProfile(
+        strong_messages=[
+            StyleMessageExample(
+                label="learned_gold_existing",
+                message=manual,
+                source="comms_learning/linkedin_examples.jsonl",
+            )
+        ],
+        weak_messages=[
+            StyleMessageExample(
+                label="curated_weak",
+                message="Thanks for connecting. I would love to pick your brain.",
+            ),
+            StyleMessageExample(
+                label="learned_negative_stale",
+                message=generated,
+                source="comms_learning/linkedin_examples.jsonl",
+            ),
+        ],
+    )
+
+    merged, summary = merge_comms_learning_examples(profile, [])
+
+    assert [item.label for item in merged.weak_messages] == ["curated_weak"]
+    assert summary.conflicts_pruned == 1
+    assert summary.profile_updated is True
+
+
+def test_incoming_gold_supersedes_previously_learned_negative() -> None:
+    manual = "The connector work maps directly to my Hevo background. Is the team hiring?"
+    profile = CommunicationStyleProfile(
+        weak_messages=[
+            StyleMessageExample(
+                label="learned_negative_stale",
+                message=manual,
+                source="comms_learning/linkedin_examples.jsonl",
+            )
+        ]
+    )
+
+    merged, summary = merge_comms_learning_examples(
+        profile,
+        [{"label": "gold", "message": manual}],
+    )
+
+    assert [item.message for item in merged.strong_messages] == [manual]
+    assert merged.weak_messages == []
+    assert summary.strong_added == 1
+    assert summary.conflicts_pruned == 1
+
+
+def test_near_identical_incoming_negative_does_not_contradict_gold() -> None:
+    gold = (
+        "Thanks for connecting, Emiliano. Does that background fit product work there? "
+        "Any recommendations on people I should talk to about that?"
+    )
+    negative = gold.replace(
+        "recommendations on people I should talk to", "recs on who I should talk to"
+    )
+
+    merged, summary = merge_comms_learning_examples(
+        CommunicationStyleProfile(),
+        [
+            {"label": "negative", "message": negative},
+            {"label": "gold", "message": gold},
+        ],
+    )
+
+    assert [item.message for item in merged.strong_messages] == [gold]
+    assert merged.weak_messages == []
+    assert summary.duplicates_skipped == 1
 
 
 def test_prompt_guidance_uses_only_bounded_recipient_relevant_examples() -> None:

@@ -1,0 +1,2248 @@
+{
+  "created_at": "2026-07-14T09:36:17.490395+00:00",
+  "results": {
+    "ct-org-coursera-aaron-mccullough": {
+      "applied_at": "2026-07-14T09:41:32+00:00",
+      "applied_linkedin_url": "https://www.linkedin.com/in/aaronmccullough/",
+      "candidate_count": 9,
+      "candidates": [
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaronmccullough/",
+          "location": "United States",
+          "name": "Aaron McCullough",
+          "snippet": "Stephanie Racioppi, Yung-Yu (Nicolas) Lin & 1 other mutual connection",
+          "title": "Exec Product Leader and General Manager; Helping organizations achieve their maximum potential w/ AI & technology"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaronchung2027/",
+          "location": "Los Angeles, California, United States",
+          "name": "Aaron Chung",
+          "snippet": "Carmel Tong is a mutual connection",
+          "title": "B.S. Accounting @ The University of Southern California | Leventhal School of Accounting"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaron-tabak-04263156/",
+          "location": "Los Angeles, California, United States",
+          "name": "Aaron Tabak",
+          "snippet": "Janella Chiang & Gregory H Patton, Ph.D. are mutual connections",
+          "title": "Senior Director of Asset Management at GPI Companies"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaron-ch-sanchez-padilla-545142a0/",
+          "location": "United States",
+          "name": "Aar\u00f3n Ch. S\u00e1nchez Padilla",
+          "snippet": "Akash Mahtani is a mutual connection",
+          "title": "Software Engineer"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/aaron-mccloud/",
+          "location": "Houston, Texas, United States",
+          "name": "Aaron McCloud",
+          "snippet": "",
+          "title": "Founder/ CEO at Intervene K-12"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/chow-aaron/",
+          "location": "San Francisco Bay Area",
+          "name": "Aaron Chow",
+          "snippet": "Tanya Joumblat is a mutual connection",
+          "title": "Product Manager @ ASUS | Go-to-Market Strategy | Product Positioning | Competitive Analysis | Consumer Technology"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaronzhg/",
+          "location": "Los Angeles, California, United States",
+          "name": "Aaron Guan",
+          "snippet": "Scott Abrams, Gregory H Patton, Ph.D. & 1 other mutual connection",
+          "title": "Senior Associate at Standish Management"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaron-glidden/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Aaron Glidden",
+          "snippet": "Lesley G. Adams, Scott Abrams & 7 other mutual connections",
+          "title": "Product Marketing & Growth Leader"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaron-liu-745207105/",
+          "location": "United States",
+          "name": "Aaron Liu",
+          "snippet": "Christopher Hwa is a mutual connection",
+          "title": "ex-Amazon | ex-Google"
+        }
+      ],
+      "company": "Coursera",
+      "connection_degree": "2nd",
+      "contact_id": "ct-org-coursera-aaron-mccullough",
+      "detail": "One exact normalized-name result under LinkedIn's verified USC school filter.",
+      "exact_match_count": 1,
+      "full_name": "Aaron McCullough",
+      "identity_review_status": "review_required",
+      "linkedin_url": "https://www.linkedin.com/in/aaronmccullough/",
+      "matched_name": "Aaron McCullough",
+      "matched_title": "Exec Product Leader and General Manager; Helping organizations achieve their maximum potential w/ AI & technology",
+      "organization_id": "org-coursera",
+      "searched_at": "2026-07-14T09:36:45.164173+00:00",
+      "status": "resolved_exact",
+      "title": "VP Product Management - Growth, Consumer, and Degrees"
+    },
+    "ct-org-hubtas-ashna-paul": {
+      "attempt_history": [
+        {
+          "candidate_count": 10,
+          "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+          "exact_match_count": 0,
+          "search_mode": "usc_school",
+          "search_query": "Ashna Paul",
+          "searched_at": "2026-07-14T09:40:15.258327+00:00",
+          "status": "no_exact_match"
+        }
+      ],
+      "candidate_count": 0,
+      "candidates": [],
+      "company": "Hubtas",
+      "connection_degree": "",
+      "contact_id": "ct-org-hubtas-ashna-paul",
+      "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+      "exact_match_count": 0,
+      "full_name": "Ashna Paul",
+      "linkedin_url": "",
+      "matched_name": "",
+      "matched_title": "",
+      "organization_id": "org-hubtas",
+      "search_mode": "usc_school_and_current_company",
+      "search_query": "ashna paul",
+      "searched_at": "2026-07-14T09:51:05.032621+00:00",
+      "status": "no_exact_match",
+      "target_name_variants": [
+        "ashna paul"
+      ],
+      "title": "CEO & Co-Founder"
+    },
+    "ct-org-netapp-adam-j-gramling": {
+      "applied_at": "2026-07-14T09:41:32+00:00",
+      "applied_linkedin_url": "https://www.linkedin.com/in/ajgramling/",
+      "candidate_count": 10,
+      "candidates": [
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/ajgramling/",
+          "location": "New York, New York, United States",
+          "name": "Adam J. Gramling",
+          "snippet": "Carmel Tong is a mutual connection",
+          "title": "GTM & Program Leadership | Former Scale AI"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-i-young/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Adam Young",
+          "snippet": "Gregory H Patton, Ph.D., Eric Chow & 10 other mutual connections",
+          "title": "Data and Insights @ UTA"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-k-romero/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Romero",
+          "snippet": "Nnaemeka Opara is a mutual connection",
+          "title": "SWE @ Meta"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/lundquistadam/",
+          "location": "Adam J.B. Lundquist, PhD \u2022 3rd+",
+          "name": "Adam J.B. Lundquist, PhD",
+          "snippet": "",
+          "title": "Associate Director at BioAge Labs"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-wang-0ab1881a5/",
+          "location": "Walnut, California, United States",
+          "name": "Adam Wang",
+          "snippet": "Rithvik Karthikeyan is a mutual connection",
+          "title": "Supply Chain & Procurement Leader | MS in Global Supply Chain Management | Driving Cost Optimization, S&OP & End-to-End Supply Chain Strategy"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/adamjsperling/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam J Sperling",
+          "snippet": "",
+          "title": "Manager of Development at Blink49 Global Formats"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-raslan-542b5124a/",
+          "location": "United States",
+          "name": "Adam Raslan",
+          "snippet": "D\u2019Mico Lacy is a mutual connection",
+          "title": "SWE at Google | prev usc, amazon"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-molani/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Molani",
+          "snippet": "Parag Havaldar, Hovig Tchalian & 2 other mutual connections",
+          "title": "Software Engineer"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-alexander-arreola/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Alexander Arreola",
+          "snippet": "Hovig Tchalian is a mutual connection",
+          "title": "Venture Capital \u2013 AI, Cloud & Data Infrastructure, Blockchain | GTM & Product Strategy | Startup Ecosystem Builder"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-olsen-cissp-407711a/",
+          "location": "Adam Olsen, CISSP \u2022 2nd",
+          "name": "Adam Olsen, CISSP",
+          "snippet": "Navin Gupta is a mutual connection",
+          "title": "Chief Information Officer at Excel Office Services"
+        }
+      ],
+      "company": "NetApp",
+      "connection_degree": "2nd",
+      "contact_id": "ct-org-netapp-adam-j-gramling",
+      "detail": "One exact normalized-name result under LinkedIn's verified USC school filter.",
+      "exact_match_count": 1,
+      "full_name": "Adam J. Gramling",
+      "identity_review_status": "review_required",
+      "linkedin_url": "https://www.linkedin.com/in/ajgramling/",
+      "matched_name": "Adam J. Gramling",
+      "matched_title": "GTM & Program Leadership | Former Scale AI",
+      "organization_id": "org-netapp",
+      "searched_at": "2026-07-14T09:37:13.570037+00:00",
+      "status": "resolved_exact",
+      "title": "Corporate Strategy"
+    },
+    "ct-org-netflix-adam-rubin": {
+      "applied_at": "2026-07-14T09:41:32+00:00",
+      "applied_linkedin_url": "https://www.linkedin.com/in/adam-rubin/",
+      "candidate_count": 10,
+      "candidates": [
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/adam-rubin/",
+          "location": "El Granada, California, United States",
+          "name": "Adam Rubin",
+          "snippet": "",
+          "title": "Global Program Manager at Netflix"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aaronrubin33/",
+          "location": "Colorado Springs, Colorado, United States",
+          "name": "Aaron Rubin",
+          "snippet": "Scott Abrams & Emily Mam are mutual connections",
+          "title": "2025 USC Alum | Marshall School of Business"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-i-young/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Adam Young",
+          "snippet": "Gregory H Patton, Ph.D., Eric Chow & 10 other mutual connections",
+          "title": "Data and Insights @ UTA"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adamwiviott/",
+          "location": "Long Beach, California, United States",
+          "name": "Adam Wiviott",
+          "snippet": "Scott Abrams, Gohar Palanjian & 4 other mutual connections",
+          "title": "Portfolio Management Associate at PCCP, LLC | USC Marshall MBA"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/david-rubin-b52916239/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "David Rubin",
+          "snippet": "",
+          "title": "Senior Director | M&A Transaction Advisory | CPA"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/justin-rubin-40288131/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Justin Rubin",
+          "snippet": "Brock Settlemier III is a mutual connection",
+          "title": "Associate at iBorrow, L.P."
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-alexander-arreola/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Alexander Arreola",
+          "snippet": "Hovig Tchalian is a mutual connection",
+          "title": "Venture Capital \u2013 AI, Cloud & Data Infrastructure, Blockchain | GTM & Product Strategy | Startup Ecosystem Builder"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adamyonas/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Yonas",
+          "snippet": "Nnaemeka Opara is a mutual connection",
+          "title": "Incoming Associate @ BCG | Business + AI USC Alum"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adam-molani/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Molani",
+          "snippet": "Parag Havaldar, Hovig Tchalian & 2 other mutual connections",
+          "title": "Software Engineer"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/adamsoni/",
+          "location": "Los Angeles, California, United States",
+          "name": "Adam Soni",
+          "snippet": "Saketh Reddy Satharla & Savannah Yang are mutual connections",
+          "title": "Director at FTI Consulting"
+        }
+      ],
+      "company": "Netflix",
+      "connection_degree": "3rd+",
+      "contact_id": "ct-org-netflix-adam-rubin",
+      "detail": "One exact normalized-name result under LinkedIn's verified USC school filter.",
+      "exact_match_count": 1,
+      "full_name": "Adam Rubin",
+      "identity_review_status": "auto_company_corroborated",
+      "linkedin_url": "https://www.linkedin.com/in/adam-rubin/",
+      "matched_name": "Adam Rubin",
+      "matched_title": "Global Program Manager at Netflix",
+      "organization_id": "org-netflix",
+      "searched_at": "2026-07-14T09:37:42.240130+00:00",
+      "status": "resolved_exact",
+      "title": "Program Manager"
+    },
+    "ct-org-newegg-angel-delgado": {
+      "attempt_history": [
+        {
+          "candidate_count": 10,
+          "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+          "exact_match_count": 0,
+          "search_mode": "usc_school",
+          "search_query": "Angel Delgado",
+          "searched_at": "2026-07-14T09:38:13.370949+00:00",
+          "status": "no_exact_match"
+        }
+      ],
+      "candidate_count": 0,
+      "candidates": [],
+      "company": "Newegg",
+      "connection_degree": "",
+      "contact_id": "ct-org-newegg-angel-delgado",
+      "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+      "exact_match_count": 0,
+      "full_name": "Angel Delgado",
+      "linkedin_url": "",
+      "matched_name": "",
+      "matched_title": "",
+      "organization_id": "org-newegg",
+      "search_mode": "usc_school_and_current_company",
+      "search_query": "angel delgado",
+      "searched_at": "2026-07-14T09:50:29.807782+00:00",
+      "status": "no_exact_match",
+      "target_name_variants": [
+        "angel delgado"
+      ],
+      "title": "Director of Product Management"
+    },
+    "ct-org-realtime-brett-abbey-mba-pmp": {
+      "attempt_history": [
+        {
+          "candidate_count": 10,
+          "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+          "exact_match_count": 0,
+          "search_mode": "usc_school",
+          "search_query": "brett abbey",
+          "searched_at": "2026-07-14T09:46:42.654097+00:00",
+          "status": "no_exact_match"
+        }
+      ],
+      "candidate_count": 0,
+      "candidates": [],
+      "company": "realtime",
+      "connection_degree": "",
+      "contact_id": "ct-org-realtime-brett-abbey-mba-pmp",
+      "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+      "exact_match_count": 0,
+      "full_name": "Brett Abbey, MBA, PMP",
+      "linkedin_url": "",
+      "matched_name": "",
+      "matched_title": "",
+      "organization_id": "org-realtime",
+      "search_mode": "usc_school_and_current_company",
+      "search_query": "brett abbey",
+      "searched_at": "2026-07-14T09:51:40.178085+00:00",
+      "status": "no_exact_match",
+      "target_name_variants": [
+        "brett abbey"
+      ],
+      "title": "CFO"
+    },
+    "ct-org-smart-columbus-arash-ghazvini": {
+      "applied_at": "2026-07-14T09:41:32+00:00",
+      "applied_linkedin_url": "https://www.linkedin.com/in/arashghazvini/",
+      "candidate_count": 10,
+      "candidates": [
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/arashghazvini/",
+          "location": "Columbus, Ohio, United States",
+          "name": "Arash Ghazvini",
+          "snippet": "",
+          "title": "Nonprofit Product Leader solving big problems by advancing new and next technologies for a more equitable, sustainable, and prosperous region."
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/arash-hajisafi/",
+          "location": "Los Angeles, California, United States",
+          "name": "Arash Hajisafi",
+          "snippet": "Naman Kothari is a mutual connection",
+          "title": "Google SWE Intern | CS PhD Candidate @ USC | ML, Time-Series & Graph Neural Networks"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/ourarash/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Arash Saifhashemi",
+          "snippet": "Bharath Raghunath, Urvi Manoj Shah & 2 other mutual connections",
+          "title": "Senior Principal Engineer at Oracle | AI Innovations"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/arash-bina-18818128/",
+          "location": "New York, New York, United States",
+          "name": "Arash Bina",
+          "snippet": "Ian Raeburn-Gibson & Pallavi Babbar are mutual connections",
+          "title": "Senior Software engineer and architect"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/arsh-goyal/",
+          "location": "San Francisco Bay Area",
+          "name": "Arsh Goyal",
+          "snippet": "Adithya Shubha, Bharath Raghunath & 2 other mutual connections",
+          "title": "Software Engineer @ Google"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/arash-maghsoodi-a61450133/",
+          "location": "Culver City, California, United States",
+          "name": "Arash Maghsoodi",
+          "snippet": "",
+          "title": "Co-Founder of [P]rehab & Prehab Physical Therapy"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/arash-vafanejad-phd-12318314/",
+          "location": "Los Angeles, California, United States",
+          "name": "Arash Vafanejad, PhD",
+          "snippet": "Ishani Arya is a mutual connection",
+          "title": "Applied Scientist @ Amazon"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/arashsaidi1/",
+          "location": "Arash Saidi, P.E. \u2022 2nd",
+          "name": "Arash Saidi, P.E.",
+          "snippet": "Josh Khazanov, Mohit Parashar & 1 other mutual connection",
+          "title": "Executive Manager, Power System Planning & Innovation | LADWP | Grid Strategy \u00b7 Emerging Technology \u00b7 Resource Planning \u00b7 Transmission Planning \u00b7 Distribution Planning"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/arashsabertehrani/",
+          "location": "Everett, Washington, United States",
+          "name": "Arash S.",
+          "snippet": "",
+          "title": "Machine Learning Engineering Manager"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/arash-jafarnia-329a5167/",
+          "location": "Pasadena, California, United States",
+          "name": "Arash Jafarnia",
+          "snippet": "",
+          "title": "Vice President at Ares Management Corporation"
+        }
+      ],
+      "company": "Smart Columbus",
+      "connection_degree": "3rd+",
+      "contact_id": "ct-org-smart-columbus-arash-ghazvini",
+      "detail": "One exact normalized-name result under LinkedIn's verified USC school filter.",
+      "exact_match_count": 1,
+      "full_name": "Arash Ghazvini",
+      "identity_review_status": "review_required",
+      "linkedin_url": "https://www.linkedin.com/in/arashghazvini/",
+      "matched_name": "Arash Ghazvini",
+      "matched_title": "Nonprofit Product Leader solving big problems by advancing new and next technologies for a more equitable, sustainable, and prosperous region.",
+      "organization_id": "org-smart-columbus",
+      "searched_at": "2026-07-14T09:39:46.271657+00:00",
+      "status": "resolved_exact",
+      "title": "Principal Product Manager"
+    },
+    "ct-org-stealth-mode-healthtech-startup-anna-t": {
+      "candidate_count": 10,
+      "candidates": [
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-chiang-ed-d-44316822/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anna Chiang, Ed.D.",
+          "snippet": "Christina Markle DeCoudres, MBA, ICF - ACC is a mutual connection",
+          "title": "Director, Organizational Change and Leadership Ed.D. Program at University of Southern California"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-t-050930141/",
+          "location": "United States",
+          "name": "Anna T",
+          "snippet": "Dikshita Desai & Rohit Vuppala CSPO\u00ae are mutual connections",
+          "title": "Senior Procurement Manager | Supply Chain & Global Sourcing | Vendor Management | Cost Optimization"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-berthold-zuk-44054b3/",
+          "location": "Los Angeles Metropolitan Area",
+          "name": "Anna Berthold-Zuk",
+          "snippet": "Ben Kuller is a mutual connection",
+          "title": "EVP, Manager & Producer of Kids & Family Animation. Board Member Hidden Pigeon Co. & Co-Founder of HappyNest Entertainment. Former Stampede Ventures and UTA."
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aannasun/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anna Sun",
+          "snippet": "Hanna Gratch is a mutual connection",
+          "title": "Product @Roblox"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-tung/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anna Nai-Yun Tung",
+          "snippet": "Devesh Khare & SHAN WEI WU are mutual connections",
+          "title": "Medical AI PhD Candidate | Sigma Xi | USC Venture Fund | Global Health Advocate | IEEE NextGen Scholar | UN Women in Tech"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/annagaronski/",
+          "location": "New York, New York, United States",
+          "name": "Anna Garonski",
+          "snippet": "Past: ...\"Justin T Walsh, Anna Garonski, Claire Jackan, Timothy A Linksvayer, The Collective Behavior of Ant...",
+          "title": "CAA Data Strategy, M.S. in Entrepreneurship and Innovation Graduate"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/aluu28/",
+          "location": "South Pasadena, California, United States",
+          "name": "Anna L.",
+          "snippet": "Justin Selb & Min Kyaw are mutual connections",
+          "title": "Sourcing & Program Management @ Snap | USC M.S. GSCM"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-romilly-470533196/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anna Romilly",
+          "snippet": "Gohar Palanjian is a mutual connection",
+          "title": "FIFA Arrivals and Departures Manager - Los Angeles & San Jose. University of Southern California Graduate."
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/annancruz/",
+          "location": "San Jose, California, United States",
+          "name": "Anna Cruz",
+          "snippet": "Sankalp Arora is a mutual connection",
+          "title": "Engineering Manager at Netflix"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anna-karapetyan-670a523b/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anna Karapetyan",
+          "snippet": "Sushant Dua & Lusine Madoyan are mutual connections",
+          "title": "Real Estate Attorney at Reed Smith LLP"
+        }
+      ],
+      "company": "stealth-mode HealthTech Startup",
+      "connection_degree": "",
+      "contact_id": "ct-org-stealth-mode-healthtech-startup-anna-t",
+      "detail": "Multiple exact-name USC-filtered profiles require manual review.",
+      "exact_match_count": 2,
+      "full_name": "anna T.",
+      "linkedin_url": "",
+      "matched_name": "",
+      "matched_title": "",
+      "organization_id": "org-stealth-mode-healthtech-startup",
+      "searched_at": "2026-07-14T09:38:46.483304+00:00",
+      "status": "ambiguous_exact",
+      "title": "Founder at stealth-mode HealthTech Startup"
+    },
+    "ct-org-supernatural-anshul-dhawan": {
+      "applied_at": "2026-07-14T09:41:32+00:00",
+      "applied_linkedin_url": "https://www.linkedin.com/in/anshuldhawan/",
+      "candidate_count": 10,
+      "candidates": [
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshuldhawan/",
+          "location": "San Francisco, California, United States",
+          "name": "Anshul Dhawan",
+          "snippet": "Mike Duchen & Jackie Karira are mutual connections",
+          "title": "Product, Analytics & AI"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshulgupta308/",
+          "location": "Berkeley, California, United States",
+          "name": "Anshul Gupta",
+          "snippet": "Kaushik Singh & Naman Kothari are mutual connections",
+          "title": "SRE @ NERSC, Berkeley Labs | MS CS @ USC | Ex-Yahoo"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshul-vij/",
+          "location": "San Francisco Bay Area",
+          "name": "Anshul Vij",
+          "snippet": "Astha Kinra, Ty Keough & 1 other mutual connection",
+          "title": "Software Engineer @ Oracle"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshul15gupta/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anshul Gupta",
+          "snippet": "Astha Kinra, Mansi Garg & 1 other mutual connection",
+          "title": "Software Engineer at Microsoft | USC Alumnus | Ex ZS | Ex Accenture | GGSIPU Alumnus"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshul-gupta07/",
+          "location": "Seattle, Washington, United States",
+          "name": "Anshul Gupta",
+          "snippet": "Manan Raheja & Shivam Tomar are mutual connections",
+          "title": "Lead Member Of Technical Staff at Salesforce | Masters of Science in Computer Science at USC"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshul-rawat-72017848/",
+          "location": "Seattle, Washington, United States",
+          "name": "Anshul Rawat",
+          "snippet": "Vish Agashe, Satya Mallick & 12 other mutual connections",
+          "title": "Software Engg @ Microsoft | Ex - Amazon | USC Viterbi\u201818 | Ex-Visa | DCE\u201915"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshulra/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anshul Rawat",
+          "snippet": "Vish Agashe & Prakhar Saxena are mutual connections",
+          "title": "Sr. Manager, Operations at Heritage Provider Network"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anishadh/",
+          "location": "San Francisco, California, United States",
+          "name": "Anisha D.",
+          "snippet": "Harnoor Sandhu is a mutual connection",
+          "title": "AI | Tech Strategy at Evercore"
+        },
+        {
+          "connection_degree": "3rd+",
+          "linkedin_url": "https://www.linkedin.com/in/anshu-a-44574b1aa/",
+          "location": "Los Angeles, California, United States",
+          "name": "Anshu A",
+          "snippet": "",
+          "title": "PhD student in physics"
+        },
+        {
+          "connection_degree": "2nd",
+          "linkedin_url": "https://www.linkedin.com/in/anshul-p-245108129/",
+          "location": "Pleasanton, California, United States",
+          "name": "Anshul P.",
+          "snippet": "Shubh Khandhadia & Prem Doshi are mutual connections",
+          "title": "Prev @ Amazon | MSDS @ USC"
+        }
+      ],
+      "company": "Supernatural",
+      "connection_degree": "2nd",
+      "contact_id": "ct-org-supernatural-anshul-dhawan",
+      "detail": "One exact normalized-name result under LinkedIn's verified USC school filter.",
+      "exact_match_count": 1,
+      "full_name": "Anshul Dhawan",
+      "identity_review_status": "review_required",
+      "linkedin_url": "https://www.linkedin.com/in/anshuldhawan/",
+      "matched_name": "Anshul Dhawan",
+      "matched_title": "Product, Analytics & AI",
+      "organization_id": "org-supernatural",
+      "searched_at": "2026-07-14T09:39:15.578457+00:00",
+      "status": "resolved_exact",
+      "title": "VP Product and Growth"
+    },
+    "ct-org-toyota-usa-brian-lieberson": {
+      "attempt_history": [
+        {
+          "candidate_count": 10,
+          "detail": "No exact normalized-name profile appeared in the bounded USC-filtered result page.",
+          "exact_match_count": 0,
+          "search_mode": "usc_school",
+          "search_query": "Brian Lieberson",
+          "searched_at": "2026-07-14T09:42:27.755928+00:00",
+          "status": "no_exact_match"
+        }
+      ],
+      "candidate_count": 0,
+      "candidates": [],
+      "company": "Toyota USA",
+      "connection_degree": "",
+      "contact_id": "ct-org-toyota-usa-brian-lieberson",
+      "detail": "Could not find an exact company suggestion for 'Toyota USA'.",
+      "exact_match_count": 0,
+      "full_name": "Brian Lieberson",
+      "linkedin_url": "",
+      "matched_name": "",
+      "matched_title": "",
+      "organization_id": "org-toyota-usa",
+      "search_mode": "usc_school_and_current_company",
+      "search_query": "brian lieberson",
+      "searched_at": "2026-07-14T09:51:59.898547+00:00",
+      "status": "error",
+      "title": "IT Program Manager"
+    }
+  },
+  "runs": [
+    {
+      "batch_contact_ids": [
+        "ct-org-coursera-aaron-mccullough",
+        "ct-org-netapp-adam-j-gramling",
+        "ct-org-netflix-adam-rubin",
+        "ct-org-newegg-angel-delgado",
+        "ct-org-stealth-mode-healthtech-startup-anna-t",
+        "ct-org-supernatural-anshul-dhawan",
+        "ct-org-smart-columbus-arash-ghazvini",
+        "ct-org-hubtas-ashna-paul",
+        "ct-org-realtime-brett-abbey-mba-pmp",
+        "ct-org-toyota-usa-brian-lieberson"
+      ],
+      "completed_at": "2026-07-14T09:41:07+00:00",
+      "latest_summary": {
+        "ambiguous_exact": 1,
+        "error": 1,
+        "no_exact_match": 3,
+        "pending": 148,
+        "resolved_exact": 5,
+        "searched": 10,
+        "targets": 158
+      },
+      "requested_limit": 10,
+      "searched": 10,
+      "started_at": "2026-07-14T09:36:17+00:00",
+      "stop_reason": ""
+    },
+    {
+      "batch_contact_ids": [
+        "ct-org-toyota-usa-brian-lieberson"
+      ],
+      "completed_at": "2026-07-14T09:42:27+00:00",
+      "latest_summary": {
+        "ambiguous_exact": 1,
+        "error": 0,
+        "no_exact_match": 4,
+        "pending": 148,
+        "resolved_exact": 5,
+        "searched": 10,
+        "targets": 158
+      },
+      "requested_limit": 1,
+      "searched": 1,
+      "started_at": "2026-07-14T09:41:59+00:00",
+      "stop_reason": ""
+    },
+    {
+      "batch_contact_ids": [
+        "ct-org-realtime-brett-abbey-mba-pmp"
+      ],
+      "completed_at": "2026-07-14T09:46:42+00:00",
+      "latest_summary": {
+        "ambiguous_exact": 1,
+        "error": 0,
+        "no_exact_match": 4,
+        "pending": 148,
+        "resolved_exact": 5,
+        "searched": 10,
+        "targets": 158
+      },
+      "requested_limit": 1,
+      "searched": 1,
+      "started_at": "2026-07-14T09:46:15+00:00",
+      "stop_reason": ""
+    },
+    {
+      "batch_contact_ids": [
+        "ct-org-newegg-angel-delgado",
+        "ct-org-hubtas-ashna-paul",
+        "ct-org-realtime-brett-abbey-mba-pmp",
+        "ct-org-toyota-usa-brian-lieberson"
+      ],
+      "completed_at": "2026-07-14T09:51:59+00:00",
+      "latest_summary": {
+        "ambiguous_exact": 1,
+        "error": 1,
+        "no_exact_match": 3,
+        "pending": 148,
+        "resolved_exact": 5,
+        "searched": 10,
+        "targets": 158
+      },
+      "narrow_by_company": true,
+      "requested_limit": 4,
+      "searched": 4,
+      "started_at": "2026-07-14T09:49:55+00:00",
+      "stop_reason": ""
+    }
+  ],
+  "schema_version": 1,
+  "school_filter": "University of Southern California",
+  "targets": {
+    "ct-org-3qi-labs-naman-aggarwal": {
+      "company": "3Qi Labs",
+      "contact_id": "ct-org-3qi-labs-naman-aggarwal",
+      "full_name": "Naman Aggarwal",
+      "organization_id": "org-3qi-labs",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=namanaggarwal2",
+      "title": "Founder"
+    },
+    "ct-org-activision-kristyn-kaz-hinkle": {
+      "company": "Activision",
+      "contact_id": "ct-org-activision-kristyn-kaz-hinkle",
+      "full_name": "Kristyn (Kaz) Hinkle",
+      "organization_id": "org-activision",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/kristyn-kazanjian%27s-email/10322179",
+      "title": "Director of Strategy & Operations"
+    },
+    "ct-org-adstra-james-hsu": {
+      "company": "Adstra",
+      "contact_id": "ct-org-adstra-james-hsu",
+      "full_name": "James Hsu",
+      "organization_id": "org-adstra",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=jameshsu2&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Vice President, Head of Identity Product at Adstra"
+    },
+    "ct-org-aiprentice-yichun-wei": {
+      "company": "Aiprentice",
+      "contact_id": "ct-org-aiprentice-yichun-wei",
+      "full_name": "Yichun Wei",
+      "organization_id": "org-aiprentice",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=yichunwei&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Founder at Aiprentice"
+    },
+    "ct-org-airbnb-mart-n-flores": {
+      "company": "Airbnb",
+      "contact_id": "ct-org-airbnb-mart-n-flores",
+      "full_name": "Mart\u00edn Flores",
+      "organization_id": "org-airbnb",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=martinflores",
+      "title": "Recruiting Manager"
+    },
+    "ct-org-allmade-materials-jeff-anderson": {
+      "company": "AllMade Materials",
+      "contact_id": "ct-org-allmade-materials-jeff-anderson",
+      "full_name": "Jeff Anderson",
+      "organization_id": "org-allmade-materials",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jeffanderson",
+      "title": "CEO"
+    },
+    "ct-org-amazon-alex-lazaris": {
+      "company": "Amazon",
+      "contact_id": "ct-org-amazon-alex-lazaris",
+      "full_name": "Alex Lazaris",
+      "organization_id": "org-amazon",
+      "priority": "medium",
+      "source_url": "https://wiza.co/d/amazon/2d0d/alex-lazaris",
+      "title": "Senior Product Manager - Technical, IMDb apps"
+    },
+    "ct-org-amazon-deborah-abber": {
+      "company": "Amazon",
+      "contact_id": "ct-org-amazon-deborah-abber",
+      "full_name": "Deborah Abber",
+      "organization_id": "org-amazon",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=deborahabber",
+      "title": "Technical Recruiter"
+    },
+    "ct-org-amazon-diana-toma": {
+      "company": "Amazon",
+      "contact_id": "ct-org-amazon-diana-toma",
+      "full_name": "Diana Toma",
+      "organization_id": "org-amazon",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=dianatoma&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Sr. Product Manager, New Business Innovations at Amazon"
+    },
+    "ct-org-amazon-manan-upadhyay": {
+      "company": "Amazon",
+      "contact_id": "ct-org-amazon-manan-upadhyay",
+      "full_name": "Manan Upadhyay",
+      "organization_id": "org-amazon",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=mananupadhyay",
+      "title": "Product"
+    },
+    "ct-org-amazon-manuel-restrepo": {
+      "company": "Amazon",
+      "contact_id": "ct-org-amazon-manuel-restrepo",
+      "full_name": "Manuel Restrepo",
+      "organization_id": "org-amazon",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=manuelrestrepo",
+      "title": "Technical Program Manager"
+    },
+    "ct-org-american-express-sahil-klaeb": {
+      "company": "American Express",
+      "contact_id": "ct-org-american-express-sahil-klaeb",
+      "full_name": "Sahil Klaeb",
+      "organization_id": "org-american-express",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=sahilkohli&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Product Manager, Data Analytics at American Express; Founder/CEO stealth consumer social startup"
+    },
+    "ct-org-apple-inc-dan-gildengorin": {
+      "company": "Apple Inc",
+      "contact_id": "ct-org-apple-inc-dan-gildengorin",
+      "full_name": "Dan Gildengorin",
+      "organization_id": "org-apple-inc",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=danielgildengorin&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Global Head of Apple Advertising Platforms Data, Analytics, Science, Research, and Pricing at Apple Inc."
+    },
+    "ct-org-apple-owen-weissberg": {
+      "company": "Apple",
+      "contact_id": "ct-org-apple-owen-weissberg",
+      "full_name": "Owen Weissberg",
+      "organization_id": "org-apple",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=owenweissberg",
+      "title": "Product Manager"
+    },
+    "ct-org-arena-krisna-bhargava-phd": {
+      "company": "ARENA",
+      "contact_id": "ct-org-arena-krisna-bhargava-phd",
+      "full_name": "Krisna Bhargava, PhD",
+      "organization_id": "org-arena",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=krisnabhargava",
+      "title": "CEO"
+    },
+    "ct-org-aspiration-christina-rouse": {
+      "company": "Aspiration",
+      "contact_id": "ct-org-aspiration-christina-rouse",
+      "full_name": "Christina Rouse",
+      "organization_id": "org-aspiration",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=christinarouse",
+      "title": "Senior Program Manager"
+    },
+    "ct-org-aurea-software-matthew-canzoneri": {
+      "company": "Aurea Software",
+      "contact_id": "ct-org-aurea-software-matthew-canzoneri",
+      "full_name": "Matthew Canzoneri",
+      "organization_id": "org-aurea-software",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=matthewcanzoneri",
+      "title": "Chief of Staff"
+    },
+    "ct-org-autodesk-anthony-renteria": {
+      "company": "Autodesk",
+      "contact_id": "ct-org-autodesk-anthony-renteria",
+      "full_name": "Anthony Renteria",
+      "organization_id": "org-autodesk",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=anthonyrenteria",
+      "title": "Strategy Manager, Digital Project Delivery"
+    },
+    "ct-org-avantstay-edward-barrows": {
+      "company": "AvantStay",
+      "contact_id": "ct-org-avantstay-edward-barrows",
+      "full_name": "Edward Barrows",
+      "organization_id": "org-avantstay",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=edwarsbarrows",
+      "title": "Chief of Staff"
+    },
+    "ct-org-avantstay-francisco-serna": {
+      "company": "AvantStay",
+      "contact_id": "ct-org-avantstay-francisco-serna",
+      "full_name": "Francisco Serna",
+      "organization_id": "org-avantstay",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=franciscosernagalofre",
+      "title": "Product Manager"
+    },
+    "ct-org-barracuda-marco-mastrapasqua": {
+      "company": "Barracuda",
+      "contact_id": "ct-org-barracuda-marco-mastrapasqua",
+      "full_name": "Marco Mastrapasqua",
+      "organization_id": "org-barracuda",
+      "priority": "high",
+      "source_url": "https://theorg.com/org/barracuda-networks/org-chart/marco-mastrapasqua",
+      "title": "VP, Revenue Operations"
+    },
+    "ct-org-better-com-elena-casas": {
+      "company": "Better.com",
+      "contact_id": "ct-org-better-com-elena-casas",
+      "full_name": "Elena Casas",
+      "organization_id": "org-better-com",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=elenacasas",
+      "title": "Recruiter"
+    },
+    "ct-org-betterup-eduardo-medina": {
+      "company": "BetterUp",
+      "contact_id": "ct-org-betterup-eduardo-medina",
+      "full_name": "Eduardo Medina",
+      "organization_id": "org-betterup",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=eduardomedina3",
+      "title": "Co-founder"
+    },
+    "ct-org-bioflare-nam-nguyen": {
+      "company": "BioFlare",
+      "contact_id": "ct-org-bioflare-nam-nguyen",
+      "full_name": "Nam Nguyen",
+      "organization_id": "org-bioflare",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=namnguyen6",
+      "title": "Co-Founder"
+    },
+    "ct-org-blackbaud-john-young": {
+      "company": "Blackbaud",
+      "contact_id": "ct-org-blackbaud-john-young",
+      "full_name": "John Young",
+      "organization_id": "org-blackbaud",
+      "priority": "medium",
+      "source_url": "https://windwoodfarm.org/2025-impact-report/",
+      "title": "Head of Product Enablement"
+    },
+    "ct-org-blue-fever-greta-mcanany": {
+      "company": "Blue Fever",
+      "contact_id": "ct-org-blue-fever-greta-mcanany",
+      "full_name": "Greta McAnany",
+      "organization_id": "org-blue-fever",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=gretagreta",
+      "title": "Founder"
+    },
+    "ct-org-boeing-gina-minniti": {
+      "company": "Boeing",
+      "contact_id": "ct-org-boeing-gina-minniti",
+      "full_name": "Gina Minniti",
+      "organization_id": "org-boeing",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=ginaminniti",
+      "title": "Sr Program Manager"
+    },
+    "ct-org-boeing-jordan-clarke": {
+      "company": "Boeing",
+      "contact_id": "ct-org-boeing-jordan-clarke",
+      "full_name": "Jordan Clarke",
+      "organization_id": "org-boeing",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jordanclarke",
+      "title": "Engineering Operations Manager"
+    },
+    "ct-org-brandvoz-manuel-trigo": {
+      "company": "Brandvoz",
+      "contact_id": "ct-org-brandvoz-manuel-trigo",
+      "full_name": "Manuel Trigo",
+      "organization_id": "org-brandvoz",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=manueltrigo",
+      "title": "CEO"
+    },
+    "ct-org-brex-in-s-guinard-kirby": {
+      "company": "Brex",
+      "contact_id": "ct-org-brex-in-s-guinard-kirby",
+      "full_name": "In\u00e9s (Guinard) Kirby",
+      "organization_id": "org-brex",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=inesguinard",
+      "title": "Product Manager"
+    },
+    "ct-org-buddy-jackson-boyer": {
+      "company": "Buddy",
+      "contact_id": "ct-org-buddy-jackson-boyer",
+      "full_name": "Jackson Boyer",
+      "organization_id": "org-buddy",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jacksonboyer2",
+      "title": "Co-founder"
+    },
+    "ct-org-capital-group-mikael-arutunian": {
+      "company": "Capital Group",
+      "contact_id": "ct-org-capital-group-mikael-arutunian",
+      "full_name": "Mikael Arutunian",
+      "organization_id": "org-capital-group",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=mikaelarutunian",
+      "title": "Product Strategy & Development Manager"
+    },
+    "ct-org-captivateiq-jake-dickson": {
+      "company": "CaptivateIQ",
+      "contact_id": "ct-org-captivateiq-jake-dickson",
+      "full_name": "Jake Dickson",
+      "organization_id": "org-captivateiq",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jakedickson",
+      "title": "Product"
+    },
+    "ct-org-carbevy-joseph-wirija": {
+      "company": "CarBevy",
+      "contact_id": "ct-org-carbevy-joseph-wirija",
+      "full_name": "Joseph Wirija",
+      "organization_id": "org-carbevy",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=josephwirija&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Co-founder and CEO at CarBevy"
+    },
+    "ct-org-cash-app-mckenna-morey": {
+      "company": "Cash App",
+      "contact_id": "ct-org-cash-app-mckenna-morey",
+      "full_name": "McKenna Morey",
+      "organization_id": "org-cash-app",
+      "priority": "medium",
+      "source_url": "https://wiza.co/d/cash-app/c9c8/mckenna-morey",
+      "title": "Product Manager"
+    },
+    "ct-org-cgo-studios-jake-green": {
+      "company": "CGO Studios",
+      "contact_id": "ct-org-cgo-studios-jake-green",
+      "full_name": "Jake Green",
+      "organization_id": "org-cgo-studios",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=jakeproducer&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Co-Founder at CGO Studios"
+    },
+    "ct-org-cipherhealth-selin-eyuboglu": {
+      "company": "CipherHealth",
+      "contact_id": "ct-org-cipherhealth-selin-eyuboglu",
+      "full_name": "Selin Eyuboglu",
+      "organization_id": "org-cipherhealth",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=selineyuboglu&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Product at CipherHealth"
+    },
+    "ct-org-cisco-anthony-deluca": {
+      "company": "Cisco",
+      "contact_id": "ct-org-cisco-anthony-deluca",
+      "full_name": "Anthony DeLuca",
+      "organization_id": "org-cisco",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=anthonydeluca",
+      "title": "Product Manager"
+    },
+    "ct-org-cisco-dan-hosaka": {
+      "company": "Cisco",
+      "contact_id": "ct-org-cisco-dan-hosaka",
+      "full_name": "Dan Hosaka",
+      "organization_id": "org-cisco",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=yutarohosaka",
+      "title": "Product Manager"
+    },
+    "ct-org-city-national-bank-vishal-venkitachalam": {
+      "company": "City National Bank",
+      "contact_id": "ct-org-city-national-bank-vishal-venkitachalam",
+      "full_name": "Vishal Venkitachalam",
+      "organization_id": "org-city-national-bank",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=vishalvenkitachalam",
+      "title": "Product Management"
+    },
+    "ct-org-clash-app-inc-gabrielle-sinacola": {
+      "company": "Clash App, Inc",
+      "contact_id": "ct-org-clash-app-inc-gabrielle-sinacola",
+      "full_name": "Gabrielle Sinacola",
+      "organization_id": "org-clash-app-inc",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=gabriellesinacola2",
+      "title": "Chief of Staff"
+    },
+    "ct-org-cloudflare-jasper-eisenberg": {
+      "company": "Cloudflare",
+      "contact_id": "ct-org-cloudflare-jasper-eisenberg",
+      "full_name": "Jasper Eisenberg",
+      "organization_id": "org-cloudflare",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jaspereisenberg3",
+      "title": "Product Management"
+    },
+    "ct-org-clover-fiserv-divya-agarwal": {
+      "company": "Clover (Fiserv)",
+      "contact_id": "ct-org-clover-fiserv-divya-agarwal",
+      "full_name": "Divya Agarwal",
+      "organization_id": "org-clover-fiserv",
+      "priority": "medium",
+      "source_url": "https://clay.earth/profile/divya-agarwal",
+      "title": "Senior Group Product Manager, Consumer and Merchant Experience"
+    },
+    "ct-org-cohezion-ai-jonathan-lee": {
+      "company": "Cohezion.ai",
+      "contact_id": "ct-org-cohezion-ai-jonathan-lee",
+      "full_name": "Jonathan Lee",
+      "organization_id": "org-cohezion-ai",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jonathanlee7",
+      "title": "CEO & Co-Founder"
+    },
+    "ct-org-connext-david-lichtenstein": {
+      "company": "Connext",
+      "contact_id": "ct-org-connext-david-lichtenstein",
+      "full_name": "David Lichtenstein",
+      "organization_id": "org-connext",
+      "priority": "high",
+      "source_url": "https://www.signalhire.com/profiles/david-lichtenstein%27s-email/10424242",
+      "title": "Vice President of Product"
+    },
+    "ct-org-coursera-aaron-mccullough": {
+      "company": "Coursera",
+      "contact_id": "ct-org-coursera-aaron-mccullough",
+      "full_name": "Aaron McCullough",
+      "organization_id": "org-coursera",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=aaronmccullough",
+      "title": "VP Product Management - Growth, Consumer, and Degrees"
+    },
+    "ct-org-criteria-corp-stephen-gordon": {
+      "company": "Criteria Corp",
+      "contact_id": "ct-org-criteria-corp-stephen-gordon",
+      "full_name": "Stephen Gordon",
+      "organization_id": "org-criteria-corp",
+      "priority": "medium",
+      "source_url": "https://www.linkedin.com/posts/criteria-corp_more-than-my-resume-stephens-story-activity-7435809588622348288-LOdX",
+      "title": "Director of Product"
+    },
+    "ct-org-debate-me-now-technologies-inc-dan-unger": {
+      "company": "Debate Me Now Technologies, Inc.",
+      "contact_id": "ct-org-debate-me-now-technologies-inc-dan-unger",
+      "full_name": "Dan Unger",
+      "organization_id": "org-debate-me-now-technologies-inc",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=danielunger",
+      "title": "CEO"
+    },
+    "ct-org-directv-jourdan-mission": {
+      "company": "DIRECTV",
+      "contact_id": "ct-org-directv-jourdan-mission",
+      "full_name": "Jourdan Mission",
+      "organization_id": "org-directv",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jourdanmission",
+      "title": "Lead Product Management & Development"
+    },
+    "ct-org-disney-jason-curtis": {
+      "company": "Disney",
+      "contact_id": "ct-org-disney-jason-curtis",
+      "full_name": "Jason Curtis",
+      "organization_id": "org-disney",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jasoncurtis2",
+      "title": "Business Operations"
+    },
+    "ct-org-dp-technology-mike-lauer": {
+      "company": "DP Technology",
+      "contact_id": "ct-org-dp-technology-mike-lauer",
+      "full_name": "Mike Lauer",
+      "organization_id": "org-dp-technology",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=michaellauer",
+      "title": "General Manager, Asia Pacific"
+    },
+    "ct-org-dropbox-yuhua-wang": {
+      "company": "Dropbox",
+      "contact_id": "ct-org-dropbox-yuhua-wang",
+      "full_name": "Yuhua Wang",
+      "organization_id": "org-dropbox",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/yuhua-wang%27s-email/9800990",
+      "title": "Lead Product Manager, Web Core Experience"
+    },
+    "ct-org-duolingo-jaylyn-jones": {
+      "company": "Duolingo",
+      "contact_id": "ct-org-duolingo-jaylyn-jones",
+      "full_name": "Jaylyn Jones",
+      "organization_id": "org-duolingo",
+      "priority": "medium",
+      "source_url": "https://urxconference.com/speaker/jaylyn-jones/",
+      "title": "University Recruiter"
+    },
+    "ct-org-dvsum-ali-simnad": {
+      "company": "DvSum",
+      "contact_id": "ct-org-dvsum-ali-simnad",
+      "full_name": "Ali Simnad",
+      "organization_id": "org-dvsum",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=alisimnad2&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Chief Product Officer at DvSum"
+    },
+    "ct-org-edvo-shireen-jaffer": {
+      "company": "Edvo",
+      "contact_id": "ct-org-edvo-shireen-jaffer",
+      "full_name": "Shireen Jaffer",
+      "organization_id": "org-edvo",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=shireenjaffer3",
+      "title": "Co-Founder and CEO"
+    },
+    "ct-org-envelon-ai-dhruv-channa": {
+      "company": "Envelon AI",
+      "contact_id": "ct-org-envelon-ai-dhruv-channa",
+      "full_name": "Dhruv Channa",
+      "organization_id": "org-envelon-ai",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=dhruvchanna2&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Founder & CEO - Envelon AI | Prev @ Cekura (YC F24), CollectWise (YC F24) | USC Alumni"
+    },
+    "ct-org-epson-america-inc-kaila-murphy": {
+      "company": "Epson America Inc.",
+      "contact_id": "ct-org-epson-america-inc-kaila-murphy",
+      "full_name": "Kaila Murphy",
+      "organization_id": "org-epson-america-inc",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kailamurphy",
+      "title": "Associate Product Manager"
+    },
+    "ct-org-euro-asia-pay-matthew-jefferson": {
+      "company": "Euro Asia Pay",
+      "contact_id": "ct-org-euro-asia-pay-matthew-jefferson",
+      "full_name": "Matthew Jefferson",
+      "organization_id": "org-euro-asia-pay",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=matthewjefferson",
+      "title": "Director, Product & Strategy"
+    },
+    "ct-org-ever-johnny-chen": {
+      "company": "Ever",
+      "contact_id": "ct-org-ever-johnny-chen",
+      "full_name": "Johnny Chen",
+      "organization_id": "org-ever",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=johnnychen",
+      "title": "Head of Product"
+    },
+    "ct-org-expedia-group-harshul-mulchandani": {
+      "company": "Expedia Group",
+      "contact_id": "ct-org-expedia-group-harshul-mulchandani",
+      "full_name": "Harshul Mulchandani",
+      "organization_id": "org-expedia-group",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=harshulmulchandani",
+      "title": "Lead Product Manager"
+    },
+    "ct-org-ezyhaul-mudasar-mohamed": {
+      "company": "Ezyhaul",
+      "contact_id": "ct-org-ezyhaul-mudasar-mohamed",
+      "full_name": "Mudasar Mohamed",
+      "organization_id": "org-ezyhaul",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=mudasarmohamed",
+      "title": "Co-Founder and COO"
+    },
+    "ct-org-fastly-james-nguyen": {
+      "company": "Fastly",
+      "contact_id": "ct-org-fastly-james-nguyen",
+      "full_name": "James Nguyen",
+      "organization_id": "org-fastly",
+      "priority": "medium",
+      "source_url": "https://www.fastly.com/blog/author/james-nguyen",
+      "title": "Product Manager"
+    },
+    "ct-org-funnel9-ian-sephton": {
+      "company": "Funnel9",
+      "contact_id": "ct-org-funnel9-ian-sephton",
+      "full_name": "Ian \u267e Sephton",
+      "organization_id": "org-funnel9",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=iansephton",
+      "title": "Founder & Chief Executive Officer"
+    },
+    "ct-org-gable-chayanne-aranda": {
+      "company": "Gable",
+      "contact_id": "ct-org-gable-chayanne-aranda",
+      "full_name": "Chayanne Aranda",
+      "organization_id": "org-gable",
+      "priority": "medium",
+      "source_url": "https://www.wayup.com/profile/Chayanne-Aranda-9d7b853570/",
+      "title": "Chief of Staff"
+    },
+    "ct-org-givedish-paul-willmes": {
+      "company": "GiveDish",
+      "contact_id": "ct-org-givedish-paul-willmes",
+      "full_name": "Paul Willmes",
+      "organization_id": "org-givedish",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=paulwillmes",
+      "title": "Co-Founder / CEO"
+    },
+    "ct-org-glg-ray-chen": {
+      "company": "GLG",
+      "contact_id": "ct-org-glg-ray-chen",
+      "full_name": "Ray Chen",
+      "organization_id": "org-glg",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/ray-chen%27s-email/182387690",
+      "title": "Product Manager"
+    },
+    "ct-org-godaddy-austin-sugai": {
+      "company": "GoDaddy",
+      "contact_id": "ct-org-godaddy-austin-sugai",
+      "full_name": "Austin Sugai",
+      "organization_id": "org-godaddy",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=austinsugai",
+      "title": "University Recruiter"
+    },
+    "ct-org-google-cody-rakela": {
+      "company": "Google",
+      "contact_id": "ct-org-google-cody-rakela",
+      "full_name": "Cody Rakela",
+      "organization_id": "org-google",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=codyrakela2",
+      "title": "Product"
+    },
+    "ct-org-google-cristi-vaughan": {
+      "company": "Google",
+      "contact_id": "ct-org-google-cristi-vaughan",
+      "full_name": "Cristi Vaughan",
+      "organization_id": "org-google",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=cristinavaughan",
+      "title": "Lead Program Manager, Creator Music"
+    },
+    "ct-org-google-jackie-dejesse": {
+      "company": "Google",
+      "contact_id": "ct-org-google-jackie-dejesse",
+      "full_name": "Jackie DeJesse",
+      "organization_id": "org-google",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jacquelinedejesse",
+      "title": "Product"
+    },
+    "ct-org-greatschools-salma-khan": {
+      "company": "GreatSchools",
+      "contact_id": "ct-org-greatschools-salma-khan",
+      "full_name": "Salma Khan",
+      "organization_id": "org-greatschools",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=salmakhan",
+      "title": "COO"
+    },
+    "ct-org-gusto-cara-cubicciotti": {
+      "company": "Gusto",
+      "contact_id": "ct-org-gusto-cara-cubicciotti",
+      "full_name": "Cara Cubicciotti",
+      "organization_id": "org-gusto",
+      "priority": "medium",
+      "source_url": "https://theorg.com/org/gusto/teams/product-management-and-design",
+      "title": "Product"
+    },
+    "ct-org-haveli-vansh-jain": {
+      "company": "Haveli",
+      "contact_id": "ct-org-haveli-vansh-jain",
+      "full_name": "Vansh Jain",
+      "organization_id": "org-haveli",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=vanshjain",
+      "title": "Founder"
+    },
+    "ct-org-hubtas-ashna-paul": {
+      "company": "Hubtas",
+      "contact_id": "ct-org-hubtas-ashna-paul",
+      "full_name": "Ashna Paul",
+      "organization_id": "org-hubtas",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=ashnapaul",
+      "title": "CEO & Co-Founder"
+    },
+    "ct-org-jam-city-ki-bum-kb-kim": {
+      "company": "Jam City",
+      "contact_id": "ct-org-jam-city-ki-bum-kb-kim",
+      "full_name": "Ki Bum (KB) Kim",
+      "organization_id": "org-jam-city",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kibumkbkim",
+      "title": "Director of Product Management"
+    },
+    "ct-org-kingsferry-capital-management-group-hugo-chan": {
+      "company": "Kingsferry Capital Management Group",
+      "contact_id": "ct-org-kingsferry-capital-management-group-hugo-chan",
+      "full_name": "Hugo Chan",
+      "organization_id": "org-kingsferry-capital-management-group",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=hugochan2",
+      "title": "Chairman and Chief Investment Officer"
+    },
+    "ct-org-live-nation-quinlan-adney": {
+      "company": "Live Nation",
+      "contact_id": "ct-org-live-nation-quinlan-adney",
+      "full_name": "Quinlan Adney",
+      "organization_id": "org-live-nation",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=quinlanadney",
+      "title": "Lead Product Manager"
+    },
+    "ct-org-live-portrait-ish-hunanyan": {
+      "company": "Live Portrait",
+      "contact_id": "ct-org-live-portrait-ish-hunanyan",
+      "full_name": "Ish Hunanyan",
+      "organization_id": "org-live-portrait",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=ishhunanyan",
+      "title": "Strategy & Business Operations Associate"
+    },
+    "ct-org-lockheed-martin-devin-fort-pmp-csm": {
+      "company": "Lockheed Martin",
+      "contact_id": "ct-org-lockheed-martin-devin-fort-pmp-csm",
+      "full_name": "Devin Fort\u00e9, PMP, CSM",
+      "organization_id": "org-lockheed-martin",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=devinfortpmp",
+      "title": "Program Manager"
+    },
+    "ct-org-lpl-financial-alana-brown": {
+      "company": "LPL Financial",
+      "contact_id": "ct-org-lpl-financial-alana-brown",
+      "full_name": "Alana Brown",
+      "organization_id": "org-lpl-financial",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=alanabrown&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "VP, Product & Strategy at LPL Financial"
+    },
+    "ct-org-lucasfilm-lauren-gorski": {
+      "company": "Lucasfilm",
+      "contact_id": "ct-org-lucasfilm-lauren-gorski",
+      "full_name": "Lauren Gorski",
+      "organization_id": "org-lucasfilm",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=laurengorski2",
+      "title": "Talent Acquisition Coordinator"
+    },
+    "ct-org-manulife-wealth-asset-management-alexandria-sullivan": {
+      "company": "Manulife Wealth & Asset Management",
+      "contact_id": "ct-org-manulife-wealth-asset-management-alexandria-sullivan",
+      "full_name": "Alexandria Sullivan",
+      "organization_id": "org-manulife-wealth-asset-management",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/alexandria-sullivan%27s-email/108893112",
+      "title": "AVP, Head of Business Operations"
+    },
+    "ct-org-masa-trang-ho": {
+      "company": "Masa",
+      "contact_id": "ct-org-masa-trang-ho",
+      "full_name": "Trang Ho",
+      "organization_id": "org-masa",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=trangho3",
+      "title": "Cofounder"
+    },
+    "ct-org-medtech-innovator-michael-shahidi": {
+      "company": "MedTech Innovator",
+      "contact_id": "ct-org-medtech-innovator-michael-shahidi",
+      "full_name": "Michael Shahidi",
+      "organization_id": "org-medtech-innovator",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=michaelshahidi&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Principal Data Scientist at MedTech Innovator"
+    },
+    "ct-org-medtronic-edward-to": {
+      "company": "Medtronic",
+      "contact_id": "ct-org-medtronic-edward-to",
+      "full_name": "Edward To",
+      "organization_id": "org-medtronic",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=edwardto2",
+      "title": "Sr Program Manager"
+    },
+    "ct-org-meta-ashley-williams": {
+      "company": "Meta",
+      "contact_id": "ct-org-meta-ashley-williams",
+      "full_name": "Ashley Williams",
+      "organization_id": "org-meta",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=ashleywilliams2",
+      "title": "Product Manager"
+    },
+    "ct-org-meta-carissa-melasippo": {
+      "company": "Meta",
+      "contact_id": "ct-org-meta-carissa-melasippo",
+      "full_name": "Carissa Melasippo",
+      "organization_id": "org-meta",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=carissamelasippo",
+      "title": "Director Business Operations - Enterprise Engineering"
+    },
+    "ct-org-meta-cathy-jeffery": {
+      "company": "Meta",
+      "contact_id": "ct-org-meta-cathy-jeffery",
+      "full_name": "Cathy Jeffery",
+      "organization_id": "org-meta",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=cathyjeffery2",
+      "title": "Recruiting Sourcer"
+    },
+    "ct-org-meta-hsueh-yuan-hu": {
+      "company": "Meta",
+      "contact_id": "ct-org-meta-hsueh-yuan-hu",
+      "full_name": "Hsueh-Yuan Hu",
+      "organization_id": "org-meta",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=hsuehyuanhu",
+      "title": "Program Manager"
+    },
+    "ct-org-microsoft-sean-leonard": {
+      "company": "Microsoft",
+      "contact_id": "ct-org-microsoft-sean-leonard",
+      "full_name": "Sean Leonard",
+      "organization_id": "org-microsoft",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=seanleonard3",
+      "title": "Program Manager II"
+    },
+    "ct-org-nestigator-patrick-doyle": {
+      "company": "Nestigator",
+      "contact_id": "ct-org-nestigator-patrick-doyle",
+      "full_name": "Patrick Doyle",
+      "organization_id": "org-nestigator",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=patrickdoyle5&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Jr. Product Manager/Data Analyst at Nestigator"
+    },
+    "ct-org-netapp-adam-j-gramling": {
+      "company": "NetApp",
+      "contact_id": "ct-org-netapp-adam-j-gramling",
+      "full_name": "Adam J. Gramling",
+      "organization_id": "org-netapp",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=adamgramling",
+      "title": "Corporate Strategy"
+    },
+    "ct-org-netflix-adam-rubin": {
+      "company": "Netflix",
+      "contact_id": "ct-org-netflix-adam-rubin",
+      "full_name": "Adam Rubin",
+      "organization_id": "org-netflix",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=adamrubin3",
+      "title": "Program Manager"
+    },
+    "ct-org-new-american-funding-lili-shiota": {
+      "company": "New American Funding",
+      "contact_id": "ct-org-new-american-funding-lili-shiota",
+      "full_name": "Lili Shiota",
+      "organization_id": "org-new-american-funding",
+      "priority": "high",
+      "source_url": "https://theorg.com/org/new-american-funding/teams/product-management",
+      "title": "Product Manager"
+    },
+    "ct-org-newegg-angel-delgado": {
+      "company": "Newegg",
+      "contact_id": "ct-org-newegg-angel-delgado",
+      "full_name": "Angel Delgado",
+      "organization_id": "org-newegg",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=angeldelgado",
+      "title": "Director of Product Management"
+    },
+    "ct-org-nike-kyle-connolly": {
+      "company": "Nike",
+      "contact_id": "ct-org-nike-kyle-connolly",
+      "full_name": "Kyle Connolly",
+      "organization_id": "org-nike",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=kyleconnolly&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Technical Product Owner | Senior Software Engineer @ Nike | Web Development | Founder, Plndr Mobile | Co-Founder, Voterfied"
+    },
+    "ct-org-ntwrk-nick-kaimakis": {
+      "company": "NTWRK",
+      "contact_id": "ct-org-ntwrk-nick-kaimakis",
+      "full_name": "Nick Kaimakis",
+      "organization_id": "org-ntwrk",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=nicholaskaimakis",
+      "title": "Product"
+    },
+    "ct-org-openzeppelin-david-bessin": {
+      "company": "OpenZeppelin",
+      "contact_id": "ct-org-openzeppelin-david-bessin",
+      "full_name": "David Bessin",
+      "organization_id": "org-openzeppelin",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=davidbessin",
+      "title": "Senior Recruiter"
+    },
+    "ct-org-oracle-murtaza-husain": {
+      "company": "Oracle",
+      "contact_id": "ct-org-oracle-murtaza-husain",
+      "full_name": "Murtaza Husain",
+      "organization_id": "org-oracle",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=murtazahusain&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Director, Product Management at Oracle | USC-Marshall MBA"
+    },
+    "ct-org-oracle-priyesh-lakar": {
+      "company": "Oracle",
+      "contact_id": "ct-org-oracle-priyesh-lakar",
+      "full_name": "Priyesh Lakar",
+      "organization_id": "org-oracle",
+      "priority": "medium",
+      "source_url": "https://blogs.oracle.com/ai-data-platform/pass-parameters-in-oracle-ai-data-platform",
+      "title": "Senior Product Manager"
+    },
+    "ct-org-pado-ai-wannie-park": {
+      "company": "Pado AI",
+      "contact_id": "ct-org-pado-ai-wannie-park",
+      "full_name": "Wannie Park",
+      "organization_id": "org-pado-ai",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=wanniepark&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Founder and CEO at Pado AI"
+    },
+    "ct-org-palmetto-justine-nugent": {
+      "company": "Palmetto",
+      "contact_id": "ct-org-palmetto-justine-nugent",
+      "full_name": "Justine Nugent",
+      "organization_id": "org-palmetto",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=justinenugent&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Product @ Palmetto | 0-to-N for Consumer, Fintech & Data SaaS Products | Win or Learn Mindset | University Advisor & WTM Ambassador"
+    },
+    "ct-org-panopto-jim-mcneill": {
+      "company": "Panopto",
+      "contact_id": "ct-org-panopto-jim-mcneill",
+      "full_name": "Jim McNeill",
+      "organization_id": "org-panopto",
+      "priority": "medium",
+      "source_url": "https://www.theofficialboard.com/biography/jim-mcneill-60e10",
+      "title": "Senior Product Manager"
+    },
+    "ct-org-paypal-kyra-drugas": {
+      "company": "PayPal",
+      "contact_id": "ct-org-paypal-kyra-drugas",
+      "full_name": "Kyra Drugas",
+      "organization_id": "org-paypal",
+      "priority": "medium",
+      "source_url": "https://theorg.com/org/paypal/org-chart/kyra-drugas",
+      "title": "Strategy & Business Operations"
+    },
+    "ct-org-paypal-michelle-fuentes": {
+      "company": "PayPal",
+      "contact_id": "ct-org-paypal-michelle-fuentes",
+      "full_name": "Michelle Fuentes",
+      "organization_id": "org-paypal",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=michellefuentes2",
+      "title": "Business Operations Analyst"
+    },
+    "ct-org-paypal-neeti-deshmukh": {
+      "company": "PayPal",
+      "contact_id": "ct-org-paypal-neeti-deshmukh",
+      "full_name": "Neeti Deshmukh",
+      "organization_id": "org-paypal",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=neetideshmukh&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Senior Director of Product Management at PayPal"
+    },
+    "ct-org-point-cara-fishman-m-s": {
+      "company": "Point",
+      "contact_id": "ct-org-point-cara-fishman-m-s",
+      "full_name": "Cara Fishman, M.S.",
+      "organization_id": "org-point",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=carafishmanms",
+      "title": "Recruiting"
+    },
+    "ct-org-polybase-labs-sidhant-gandhi": {
+      "company": "Polybase Labs",
+      "contact_id": "ct-org-polybase-labs-sidhant-gandhi",
+      "full_name": "Sidhant Gandhi",
+      "organization_id": "org-polybase-labs",
+      "priority": "high",
+      "source_url": "https://polybaselabs.com/about",
+      "title": "Co-founder & CEO"
+    },
+    "ct-org-prime-video-amazon-studios-michael-a-rodriguez": {
+      "company": "Prime Video & Amazon Studios",
+      "contact_id": "ct-org-prime-video-amazon-studios-michael-a-rodriguez",
+      "full_name": "Michael A Rodriguez",
+      "organization_id": "org-prime-video-amazon-studios",
+      "priority": "medium",
+      "source_url": "https://wiza.co/d/primevideoamazonstudios/e6e8/michael-rodriguez",
+      "title": "Head of Business Operations, Europe"
+    },
+    "ct-org-prolific-interactive-jesse-weinberg": {
+      "company": "Prolific interactive",
+      "contact_id": "ct-org-prolific-interactive-jesse-weinberg",
+      "full_name": "Jesse Weinberg",
+      "organization_id": "org-prolific-interactive",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jesseweinberg2",
+      "title": "Mobile Product Management"
+    },
+    "ct-org-prorata-ai-garrett-dallas": {
+      "company": "ProRata.ai",
+      "contact_id": "ct-org-prorata-ai-garrett-dallas",
+      "full_name": "Garrett Dallas",
+      "organization_id": "org-prorata-ai",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=garrettdallas&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Technical Advisor, Product Engineering & Operations at ProRata.ai; Interim Strategy & Insights Lead at eBay"
+    },
+    "ct-org-rabbit-air-edwin-cheung": {
+      "company": "Rabbit Air",
+      "contact_id": "ct-org-rabbit-air-edwin-cheung",
+      "full_name": "Edwin Cheung",
+      "organization_id": "org-rabbit-air",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=edwincheung2&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Co-founder at Rabbit Air"
+    },
+    "ct-org-realtime-brett-abbey-mba-pmp": {
+      "company": "realtime",
+      "contact_id": "ct-org-realtime-brett-abbey-mba-pmp",
+      "full_name": "Brett Abbey, MBA, PMP",
+      "organization_id": "org-realtime",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=robertabbey",
+      "title": "CFO"
+    },
+    "ct-org-redis-rishi-kabra": {
+      "company": "Redis",
+      "contact_id": "ct-org-redis-rishi-kabra",
+      "full_name": "Rishi Kabra",
+      "organization_id": "org-redis",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=rishikabra",
+      "title": "Senior Director GTM Systems"
+    },
+    "ct-org-riot-games-aleena-byrne": {
+      "company": "Riot Games",
+      "contact_id": "ct-org-riot-games-aleena-byrne",
+      "full_name": "Aleena Byrne",
+      "organization_id": "org-riot-games",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=aleenabyrne",
+      "title": "Product Manager"
+    },
+    "ct-org-riot-games-yuechao-chao-pei": {
+      "company": "Riot Games",
+      "contact_id": "ct-org-riot-games-yuechao-chao-pei",
+      "full_name": "Yuechao (Chao) Pei",
+      "organization_id": "org-riot-games",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=yuechaopei",
+      "title": "Product Manager"
+    },
+    "ct-org-salesforce-gonzalo-gambino": {
+      "company": "Salesforce",
+      "contact_id": "ct-org-salesforce-gonzalo-gambino",
+      "full_name": "Gonzalo Gambino",
+      "organization_id": "org-salesforce",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=gonzalogambino",
+      "title": "Senior Product Manager, Salesforce Platform"
+    },
+    "ct-org-salesforce-kaitlin-lee": {
+      "company": "Salesforce",
+      "contact_id": "ct-org-salesforce-kaitlin-lee",
+      "full_name": "Kaitlin Lee",
+      "organization_id": "org-salesforce",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kaitlinlee3",
+      "title": "Product"
+    },
+    "ct-org-scale-ai-derrick-choi": {
+      "company": "Scale AI",
+      "contact_id": "ct-org-scale-ai-derrick-choi",
+      "full_name": "Derrick Choi",
+      "organization_id": "org-scale-ai",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=derrickchoi&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Manager, Enterprise AI at Scale AI"
+    },
+    "ct-org-senditlater-sahil-sachdev": {
+      "company": "SendItLater",
+      "contact_id": "ct-org-senditlater-sahil-sachdev",
+      "full_name": "Sahil Sachdev",
+      "organization_id": "org-senditlater",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=sahilsachdev",
+      "title": "Co-Founder & CBO"
+    },
+    "ct-org-servicechannel-elizabeth-mercado": {
+      "company": "ServiceChannel",
+      "contact_id": "ct-org-servicechannel-elizabeth-mercado",
+      "full_name": "Elizabeth Mercado",
+      "organization_id": "org-servicechannel",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=elizabethmercado2",
+      "title": "Business Operations Specialist"
+    },
+    "ct-org-servicetitan-liane-huang": {
+      "company": "ServiceTitan",
+      "contact_id": "ct-org-servicetitan-liane-huang",
+      "full_name": "Liane Huang",
+      "organization_id": "org-servicetitan",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=lianehuang2",
+      "title": "Recruiting & Ops"
+    },
+    "ct-org-significo-inc-cy-serrano": {
+      "company": "Significo, Inc.",
+      "contact_id": "ct-org-significo-inc-cy-serrano",
+      "full_name": "Cy Serrano",
+      "organization_id": "org-significo-inc",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=cyrilserrano",
+      "title": "Vice President of Product Management"
+    },
+    "ct-org-silicon-valley-bank-thomas-han": {
+      "company": "Silicon Valley Bank",
+      "contact_id": "ct-org-silicon-valley-bank-thomas-han",
+      "full_name": "Thomas Han",
+      "organization_id": "org-silicon-valley-bank",
+      "priority": "medium",
+      "source_url": "https://me.sh/profile/tom-han",
+      "title": "Product Manager"
+    },
+    "ct-org-smart-columbus-arash-ghazvini": {
+      "company": "Smart Columbus",
+      "contact_id": "ct-org-smart-columbus-arash-ghazvini",
+      "full_name": "Arash Ghazvini",
+      "organization_id": "org-smart-columbus",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=arashghazvini",
+      "title": "Principal Product Manager"
+    },
+    "ct-org-snowflake-tugba-bodrumlu": {
+      "company": "Snowflake",
+      "contact_id": "ct-org-snowflake-tugba-bodrumlu",
+      "full_name": "Tugba Bodrumlu",
+      "organization_id": "org-snowflake",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=tugbabodrumluasena",
+      "title": "Technical Program Manager"
+    },
+    "ct-org-sony-interactive-entertainment-sangita-bhatia": {
+      "company": "Sony Interactive Entertainment",
+      "contact_id": "ct-org-sony-interactive-entertainment-sangita-bhatia",
+      "full_name": "Sangita Bhatia",
+      "organization_id": "org-sony-interactive-entertainment",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=sangitapatel2",
+      "title": "Director, Business Operations"
+    },
+    "ct-org-splitero-david-zvaifler": {
+      "company": "Splitero",
+      "contact_id": "ct-org-splitero-david-zvaifler",
+      "full_name": "David Zvaifler",
+      "organization_id": "org-splitero",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=davidzvaifler",
+      "title": "Co-Founder and COO"
+    },
+    "ct-org-spren-leigh-yeh": {
+      "company": "Spren",
+      "contact_id": "ct-org-spren-leigh-yeh",
+      "full_name": "Leigh Yeh",
+      "organization_id": "org-spren",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=leighyeh",
+      "title": "Chief of Staff"
+    },
+    "ct-org-spring-health-kelsi-yu": {
+      "company": "Spring Health",
+      "contact_id": "ct-org-spring-health-kelsi-yu",
+      "full_name": "Kelsi Yu",
+      "organization_id": "org-spring-health",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kelsiyu2",
+      "title": "Senior Business Operations Associate"
+    },
+    "ct-org-stealth-mode-healthtech-startup-anna-t": {
+      "company": "stealth-mode HealthTech Startup",
+      "contact_id": "ct-org-stealth-mode-healthtech-startup-anna-t",
+      "full_name": "anna T.",
+      "organization_id": "org-stealth-mode-healthtech-startup",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=annat2&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Founder at stealth-mode HealthTech Startup"
+    },
+    "ct-org-storyflow-meehna-goldsmith": {
+      "company": "StoryFlow",
+      "contact_id": "ct-org-storyflow-meehna-goldsmith",
+      "full_name": "Meehna Goldsmith",
+      "organization_id": "org-storyflow",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=meehnagoldsmith&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Founder, StoryFlow | Award-Winning Screenwriter | Building Human- Centered AI for Storytellers"
+    },
+    "ct-org-stripe-reema-doshi": {
+      "company": "Stripe",
+      "contact_id": "ct-org-stripe-reema-doshi",
+      "full_name": "Reema Doshi",
+      "organization_id": "org-stripe",
+      "priority": "medium",
+      "source_url": "https://theorg.com/org/stripe/org-chart/reema-doshi",
+      "title": "Head of GTM Transformation Office, Revenue Operations"
+    },
+    "ct-org-stripe-sharon-dsouza": {
+      "company": "Stripe",
+      "contact_id": "ct-org-stripe-sharon-dsouza",
+      "full_name": "Sharon DSouza",
+      "organization_id": "org-stripe",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=sharondsouza",
+      "title": "Technical Program Manager"
+    },
+    "ct-org-supernatural-anshul-dhawan": {
+      "company": "Supernatural",
+      "contact_id": "ct-org-supernatural-anshul-dhawan",
+      "full_name": "Anshul Dhawan",
+      "organization_id": "org-supernatural",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=anshuldhawan",
+      "title": "VP Product and Growth"
+    },
+    "ct-org-swift-ventures-melissa-demma": {
+      "company": "Swift Ventures",
+      "contact_id": "ct-org-swift-ventures-melissa-demma",
+      "full_name": "Melissa Demma",
+      "organization_id": "org-swift-ventures",
+      "priority": "medium",
+      "source_url": "https://www.privateequityinternational.com/institution-profiles/swift-ventures.html",
+      "title": "Principal"
+    },
+    "ct-org-tableau-software-ian-coe": {
+      "company": "Tableau Software",
+      "contact_id": "ct-org-tableau-software-ian-coe",
+      "full_name": "Ian Coe",
+      "organization_id": "org-tableau-software",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=iancoe&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Enterprise Product Consulting Manager at Tableau Software"
+    },
+    "ct-org-tala-bing-gin": {
+      "company": "Tala",
+      "contact_id": "ct-org-tala-bing-gin",
+      "full_name": "Bing Gin",
+      "organization_id": "org-tala",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=binggin",
+      "title": "Product"
+    },
+    "ct-org-techgc-talia-t-tanielian": {
+      "company": "TechGC",
+      "contact_id": "ct-org-techgc-talia-t-tanielian",
+      "full_name": "Talia T. Tanielian",
+      "organization_id": "org-techgc",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=taliatanielian&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Head of Community @ TechGC // Startup & VC Lawyer // USC Alum x2"
+    },
+    "ct-org-tinder-kiara-sanford": {
+      "company": "Tinder",
+      "contact_id": "ct-org-tinder-kiara-sanford",
+      "full_name": "Kiara Sanford",
+      "organization_id": "org-tinder",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kiarasanford",
+      "title": "Associate Recruiter"
+    },
+    "ct-org-toyota-usa-brian-lieberson": {
+      "company": "Toyota USA",
+      "contact_id": "ct-org-toyota-usa-brian-lieberson",
+      "full_name": "Brian Lieberson",
+      "organization_id": "org-toyota-usa",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=brianlieberson",
+      "title": "IT Program Manager"
+    },
+    "ct-org-trace-neuroscience-nick-mordwinkin": {
+      "company": "Trace Neuroscience",
+      "contact_id": "ct-org-trace-neuroscience-nick-mordwinkin",
+      "full_name": "Nick Mordwinkin",
+      "organization_id": "org-trace-neuroscience",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=nicholasmordwinkin",
+      "title": "Chief Business Officer and Chief Strategy Officer"
+    },
+    "ct-org-twilio-peri-graham": {
+      "company": "Twilio",
+      "contact_id": "ct-org-twilio-peri-graham",
+      "full_name": "Peri Graham",
+      "organization_id": "org-twilio",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=perigraham",
+      "title": "Program Manager, Vertical Sales"
+    },
+    "ct-org-twitter-radhika-rastogi": {
+      "company": "Twitter",
+      "contact_id": "ct-org-twitter-radhika-rastogi",
+      "full_name": "Radhika Rastogi",
+      "organization_id": "org-twitter",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=radhikarastogi",
+      "title": "Product Manager"
+    },
+    "ct-org-two-labs-jose-lustre": {
+      "company": "Two Labs",
+      "contact_id": "ct-org-two-labs-jose-lustre",
+      "full_name": "Jose Lustre",
+      "organization_id": "org-two-labs",
+      "priority": "high",
+      "source_url": "https://theorg.com/org/two-labs/org-chart/jose-lustre",
+      "title": "VP, Strategic Business Operations"
+    },
+    "ct-org-unity-technologies-jenna-li": {
+      "company": "Unity Technologies",
+      "contact_id": "ct-org-unity-technologies-jenna-li",
+      "full_name": "Jenna Li",
+      "organization_id": "org-unity-technologies",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=jiali3",
+      "title": "Senior Technical Program Manager"
+    },
+    "ct-org-usc-tara-skipper": {
+      "company": "USC",
+      "contact_id": "ct-org-usc-tara-skipper",
+      "full_name": "Tara Skipper",
+      "organization_id": "org-usc",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=taraskipper",
+      "title": "Talent Acquisition Partner"
+    },
+    "ct-org-walmart-connect-rocky-valiente": {
+      "company": "Walmart Connect",
+      "contact_id": "ct-org-walmart-connect-rocky-valiente",
+      "full_name": "Rocky Valiente",
+      "organization_id": "org-walmart-connect",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/rocky-valiente%27s-email/3150079",
+      "title": "Senior Product Manager, Ads Measurement"
+    },
+    "ct-org-walmart-winston-lee": {
+      "company": "Walmart",
+      "contact_id": "ct-org-walmart-winston-lee",
+      "full_name": "Winston Lee",
+      "organization_id": "org-walmart",
+      "priority": "medium",
+      "source_url": "https://www.signalhire.com/profiles/winston-lee%27s-email/4761825",
+      "title": "Senior Product Manager"
+    },
+    "ct-org-watertower-ventures-rafael-tavarez": {
+      "company": "Watertower Ventures",
+      "contact_id": "ct-org-watertower-ventures-rafael-tavarez",
+      "full_name": "Rafael Tavarez",
+      "organization_id": "org-watertower-ventures",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=rafaeltavarez",
+      "title": "Investor - Platforms & Sourcing"
+    },
+    "ct-org-wearshare-kavan-bahrami": {
+      "company": "WEARSHARE",
+      "contact_id": "ct-org-wearshare-kavan-bahrami",
+      "full_name": "Kavan Bahrami",
+      "organization_id": "org-wearshare",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=kavanbahrami",
+      "title": "Co-Founder"
+    },
+    "ct-org-weave-social-will-mease": {
+      "company": "Weave Social",
+      "contact_id": "ct-org-weave-social-will-mease",
+      "full_name": "Will Mease",
+      "organization_id": "org-weave-social",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=williammease",
+      "title": "Co-Founder"
+    },
+    "ct-org-wells-fargo-lauren-egan": {
+      "company": "Wells Fargo",
+      "contact_id": "ct-org-wells-fargo-lauren-egan",
+      "full_name": "Lauren Egan",
+      "organization_id": "org-wells-fargo",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=laurenegan",
+      "title": "Associate Product Manager"
+    },
+    "ct-org-willprep-randal-bouverat": {
+      "company": "WillPrep",
+      "contact_id": "ct-org-willprep-randal-bouverat",
+      "full_name": "Randal Bouverat",
+      "organization_id": "org-willprep",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=randalbouverat",
+      "title": "Founder and CEO"
+    },
+    "ct-org-wired-impact-jonathan-goldford": {
+      "company": "Wired Impact",
+      "contact_id": "ct-org-wired-impact-jonathan-goldford",
+      "full_name": "Jonathan Goldford",
+      "organization_id": "org-wired-impact",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=jonathangoldford&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Co-Founder & Web Developer at Wired Impact"
+    },
+    "ct-org-workday-david-wachtel": {
+      "company": "Workday",
+      "contact_id": "ct-org-workday-david-wachtel",
+      "full_name": "David Wachtel",
+      "organization_id": "org-workday",
+      "priority": "high",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?userProfile=davidwachtel",
+      "title": "Vice President of Product Management"
+    },
+    "ct-org-yelp-jed-diamond": {
+      "company": "Yelp",
+      "contact_id": "ct-org-yelp-jed-diamond",
+      "full_name": "Jed Diamond",
+      "organization_id": "org-yelp",
+      "priority": "medium",
+      "source_url": "https://usc.peoplegrove.com/hub/usc-career-network/person?modal=profile&userProfile=jeddiamond&showBack=true&hubId=19&messageOrigin=NETWORK",
+      "title": "Manager, Strategy at Yelp; Product & Product Strategy"
+    },
+    "ct-org-youtube-mike-thomsen": {
+      "company": "YouTube",
+      "contact_id": "ct-org-youtube-mike-thomsen",
+      "full_name": "Mike Thomsen",
+      "organization_id": "org-youtube",
+      "priority": "medium",
+      "source_url": "https://contactout.com/Mike-Thomsen-131507",
+      "title": "Director, Global Strategic Planning & Business Operations"
+    }
+  },
+  "updated_at": "2026-07-14T10:02:13.932079+00:00",
+  "workspace": "workspace"
+}

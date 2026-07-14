@@ -1,0 +1,5113 @@
+{
+  "accepted_affiliation_counts": {
+    "thapar_product_us": 46,
+    "usc_marshall_product_us": 46,
+    "usc_product_us": 56
+  },
+  "accepted_category_counts": {
+    "founder_c_suite": 6,
+    "product_engineering": 1,
+    "product_product_strategy": 139,
+    "venture_startup_operator": 1
+  },
+  "capture_batch": "linkedin-institution-80207c04f6aa",
+  "captured_at": "2026-07-14T07:31:02+00:00",
+  "captured_by": "codex-linkedin-institution-first",
+  "company_candidates": 65,
+  "company_candidates_path": "/Users/akshat/Desktop/Claude projects/Outreach/workspace/institution_first_company_candidates.csv",
+  "current_role_review_required": 39,
+  "decisions": [
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/pratibhashivnani/",
+      "name": "Pratibha Shivnani",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 94,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Technical Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/harshit-mendiratta/",
+      "name": "Harshit Mendiratta",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/mittal-chandni/",
+      "name": "Chandni Mittal",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sukritimhjn/",
+      "name": "Sukriti Mahajan",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sharanpreetkaur/",
+      "name": "Sharanpreet Kaur",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sheenammittal/",
+      "name": "Sheenam Mittal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Tinder",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/manishchhabra27/",
+      "name": "Manish Chhabra",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/vaibhavkhunger/",
+      "name": "Vaibhav Khunger",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Snowflake",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sgupta07/",
+      "name": "Shobhit Gupta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Head of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/surabhi-grover-57394253/",
+      "name": "Surabhi Grover",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "PayPal",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/amitgrover126/",
+      "name": "Amit Grover",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/pallavithakur/",
+      "name": "Pallavi Thakur",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/akashvir-mann-b828277/",
+      "name": "Akashvir Mann",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "AI Product Lead"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Intuit",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sachinkgupta1/",
+      "name": "Sachin G.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ramit-kanda-38561614/",
+      "name": "Ramit Kanda",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/amitranjanar/",
+      "name": "Amit Ranjan",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Product Manager- Technical"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Qualcomm",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/jatindersinghbajwa/",
+      "name": "Jatinder Singh Bajwa",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Drata",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/aashimadhankhar/",
+      "name": "Aashima Dhankhar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/pallavi-aron-42557521/",
+      "name": "Pallavi Aron",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product & Strategy"
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "SupportLogic",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/karansood08/",
+      "name": "Karan Sood",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 93,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Chief Product and Technology Officer"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jatinderkaur/",
+      "name": "Jatinder K.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Odessa",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sumandeep/",
+      "name": "Sumandeep Kaur Chhatwal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "SVP, Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/mayagupt/",
+      "name": "Mayank Gupta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Lead Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/saransh-bansal/",
+      "name": "Saransh Bansal",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "OKX",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/garg-kushal/",
+      "name": "Kushal Garg",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager II"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/bhavleenahuja/",
+      "name": "Bhavleen Kaur Ahuja",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Citrix",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/arorayashu/",
+      "name": "Yashu Arora",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "PayPal",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/abhinav-sardana-440ab7111/",
+      "name": "Abhinav Sardana",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Sr. Lead Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Uber",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/suneet-srivastava-55581570/",
+      "name": "Suneet Srivastava",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Operations"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/gagan-prompt/",
+      "name": "Gagan Singh",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/harshchau/",
+      "name": "Harsh Chaudhary",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sonia-bargla/",
+      "name": "Sonia Bargla, CSPO, CSM",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/shwetalatawa/",
+      "name": "Shweta Latawa",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/akashdewan/",
+      "name": "Akash Dewan",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/vinod-kapila-1564315/",
+      "name": "Vinod Kapila",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/dgupta13/",
+      "name": "Deepti Gupta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Lead"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/harsimratkaur2590/",
+      "name": "Harsimrat Kaur",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/amit-bajaj-0717713/",
+      "name": "Amit Bajaj",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Goldman Sachs",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/asthachhabra0907/",
+      "name": "Astha Chhabra",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Associate, Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sarikakhanna/",
+      "name": "Sarika Khanna",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/mittalsumeet/",
+      "name": "Sumeet Mittal",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "ServiceNow",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/nikitakaura/",
+      "name": "Nikita Kaura",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Deloitte",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/bharti-singla-pmqa/",
+      "name": "Bharti Singla",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Owner - Senior Consultant"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/pratham-sarin/",
+      "name": "Pratham Sarin",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jaskiratsohi/",
+      "name": "Jaskirat Sohi",
+      "reason": "unverified_us_location",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kamkisho/",
+      "name": "Kamal Kishore",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rajdeepmann/",
+      "name": "Rajdeep Mann",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ishan-saran/",
+      "name": "Ishan S.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sv650/",
+      "name": "Sunil Verma",
+      "reason": "ambiguous_composite_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/khushboo-j-8a4b98b9/",
+      "name": "Khushboo J.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Coworker.ai",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/saurabh-mohan-461633139/",
+      "name": "Saurabh Mohan",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Principal Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/ankitgoyal14/",
+      "name": "Ankit Goyal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Uber",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/jasdeep-singh-brar-24bb4921/",
+      "name": "Jasdeep Singh Brar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/akshaykohli/",
+      "name": "Akshay Kohli, MBA",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ritu-g/",
+      "name": "Ritu Bansal",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rajivb1/",
+      "name": "Rajiv Bansal",
+      "reason": "invalid_current_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/vikramsikand/",
+      "name": "Vikram Sikand, MBA",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sonia-singh03/",
+      "name": "Sonia S.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sahil-kwatra/",
+      "name": "Sahil Kwatra, CFA, FRM",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ruhanimalik/",
+      "name": "Ruhani M.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "VLink",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sparshgupta26/",
+      "name": "Sparsh Gupta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ssachit/",
+      "name": "Sachit Sharma",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rishabdeep-rana-541799243/",
+      "name": "Rishabdeep Rana",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kshitij-rajiv/",
+      "name": "Kshitij Rajiv",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/singhgarima295/",
+      "name": "Garima S.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Letter AI",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/ayushkhanna16/",
+      "name": "Ayush Khanna",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Adobe",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/arorasiddharth001/",
+      "name": "Siddharth Arora",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Group Manager Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "Hover",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sumeet-howe-38b53a2a/",
+      "name": "Sumeet Howe",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 93,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Chief Product Officer"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/puriaditya1/",
+      "name": "Aditya Puri",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Product Leader building AI, Data Intelligence & Commerce Platforms"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Kong",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sandhua/",
+      "name": "Amandeep Sandhu",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Head of Product Growth"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Blue Shield of California",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sumitcmu/",
+      "name": "Sumit Das",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Principal Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Deloitte",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/nishant-aggarwal-b53bb13/",
+      "name": "Nishant Aggarwal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "VP of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/akhaira/",
+      "name": "Amanjot Khaira",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Shopify",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/bhisham-gudwani/",
+      "name": "Bhisham Gudwani",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/meenakshi-dhingra-31926a23/",
+      "name": "Meenakshi Dhingra",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Imagine.io",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/rachit-nanda/",
+      "name": "Rachit Nanda",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Head of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/bikramtathgir/",
+      "name": "Bikram Tathgir",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Arm",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/adityabedi/",
+      "name": "Aditya Bedi",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sunil-garg-76a0327/",
+      "name": "Sunil Garg",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ayush-ghosh/",
+      "name": "Ayush Ghosh",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/nitinsablok/",
+      "name": "Nitin Sablok",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Capital One",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/anmoldeepaksinghaulakh/",
+      "name": "Anmoldeepak Singh Aulakh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 84,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Manager, Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/vaks009/",
+      "name": "Varun Kumar",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/nikhilgoyal18/",
+      "name": "Nikhil Goyal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "U.S. Bank",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/komudibahal/",
+      "name": "Komudi Bahal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Digital Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ankushgupta82/",
+      "name": "Ankush Gupta",
+      "reason": "unverified_us_location",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Moody's Analytics",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/mohinderpahuja/",
+      "name": "Mohinder Pahuja, CFA, FRM",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Sr. Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/shubhamalchem/",
+      "name": "Shubham Bansal",
+      "reason": "explicit_non_us_location",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jaisavbajoria/",
+      "name": "Jaisav Bajoria",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/siddhant-mohindra-48826973/",
+      "name": "Siddhant Mohindra",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/tomarprashant/",
+      "name": "Prashant Tomar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/natashakumar91/",
+      "name": "Natasha Kumar",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "HP Inc.",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/ramansh-shukla/",
+      "name": "Ramansh Shukla",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 84,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/vinod-kapila-5086247/",
+      "name": "Vinod Kapila",
+      "reason": "legacy_or_acquired_company_requires_enrichment",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sushant-sharma-1b99792/",
+      "name": "Sushant Sharma",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Senior Technical Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jrohatgi/",
+      "name": "Jitesh Rohatgi",
+      "reason": "unverified_us_location",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/guneetpaintal/",
+      "name": "Guneet Paintal",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/varshit-gupta/",
+      "name": "Varshit G.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Datadecor",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "Thapar"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/manat-singh905/",
+      "name": "Manat Singh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "thapar_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/peter-romagnano/",
+      "name": "Peter Romagnano",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Uber",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/brindapanchal/",
+      "name": "Brinda Panchal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ravneetks/",
+      "name": "Ravneet Sahni",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "PayPal",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/raveenakumar/",
+      "name": "Raveena Kumar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Uber",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": true,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/farrahgulzar/",
+      "name": "Farrah Gulzar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Sr Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/justinsindelar/",
+      "name": "Justin Sindelar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Apple",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sameersvij/",
+      "name": "Sameer Vij",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/prajaktasjoshi/",
+      "name": "Prajakta Joshi",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/patrickryanhennessey/",
+      "name": "Patrick Hennessey",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Uber",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/akshay-hasija-1094762/",
+      "name": "Akshay Hasija",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Qualcomm",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/lekha-motiwala-ba5a8077/",
+      "name": "Lekha Motiwala",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Director, Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/raj-pagare-6520915/",
+      "name": "Raj Pagare",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us",
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/amishkagalwala/",
+      "name": "Amish Kagalwala",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Rippling",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/ssavalia/",
+      "name": "Suraj Savalia",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 96,
+      "search_keys": [
+        "usc_marshall_product_us",
+        "usc_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "LinkedIn",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/harshulm/",
+      "name": "Harshul M.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/crystal-song/",
+      "name": "Crystal Song",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/markbollar/",
+      "name": "Mark Bollar",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us",
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/palak-desai-jambusaria-8395922/",
+      "name": "Palak Desai - Jambusaria",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Atlassian",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/anandrohra/",
+      "name": "Anand R.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Principal Outbound Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/dwipaldesai/",
+      "name": "Dwipal D.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/christine-cole-2347706/",
+      "name": "Christine Cole",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Poshmark",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/nicolebpay/",
+      "name": "Nicole Pay",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "2K",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/jiayinkuang407/",
+      "name": "Jiayin(Joy) Kuang",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Oracle",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/alexanderprincemathew/",
+      "name": "Alexander Prince Mathew",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Sr. Principal Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/alexwchiu/",
+      "name": "Alex Chiu",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/patelmonal/",
+      "name": "Monal P.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/amit-shah-0385484/",
+      "name": "Amit Shah",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Apple",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/victor-m-diaz/",
+      "name": "Victor Diaz",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager, Digital Payments"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rajrupa-ghosh-nandy-8432064/",
+      "name": "Rajrupa Ghosh Nandy",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/amandalli/",
+      "name": "Amanda Li",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rajat91/",
+      "name": "Rajat Verma",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Salesforce",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/otakevin/",
+      "name": "Kevin Ota",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Symantec",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/prateektemkar/",
+      "name": "Prateek Temkar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Director of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/erikroodsari/",
+      "name": "Erik Roodsari",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/devikayeravdekar/",
+      "name": "Devika Yeravdekar",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_engineering",
+      "company": "Aramas AI",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/randomsync/",
+      "name": "Gaurav Gupta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 87,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product Engineering"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/larrys839/",
+      "name": "🔥 Larry Sequino",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/mikin-macwan/",
+      "name": "Mikin Macwan",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kashyapm/",
+      "name": "Kashyap M.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "LogicMonitor",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/bharatbharat/",
+      "name": "Bharat Singh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product, AI"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/david-n-50022a52/",
+      "name": "David N.",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/greghirshland/",
+      "name": "Greg Hirshland",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/ushita-palande/",
+      "name": "Ushita Palande Shah",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "FabFitFun",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/andrewhasel/",
+      "name": "Andrew Hasel",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Qualcomm",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/abhijeetprasad/",
+      "name": "Abhijeet Prasad",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Director Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/allegratepper/",
+      "name": "Allegra Tepper",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/prashant-bhalchandra/",
+      "name": "Prashant Bhalchandra",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Ashby",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/vineeta-singh-2322a6139/",
+      "name": "Vineeta Singh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Palo Alto Networks",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/chintanudeshi/",
+      "name": "Chintan Udeshi",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Principal Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/poojits/",
+      "name": "Poojit Sharma",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/uditshah43/",
+      "name": "Udit J. Shah",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Xero",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sammiechiu/",
+      "name": "Samantha Chiu",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jyotisach/",
+      "name": "Jyoti Sachdeva",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Druva",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/mvasa/",
+      "name": "Mayank Vasa",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Vice President of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Cloudflare",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/jaspereisenberg/",
+      "name": "Jasper E.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior AI Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/plohith/",
+      "name": "Lohith Paripati",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Lead"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "JPMorgan Chase & Co.",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/anant-kumar-745643/",
+      "name": "Anant Kumar",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ninadjunnarkar/",
+      "name": "Ninad Junnarkar",
+      "reason": "invalid_current_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Okta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/kchhina/",
+      "name": "Karan Chhina",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "BNY",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/jay-hinton-8b61791/",
+      "name": "Jay Hinton",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Global Head of Product, Data & Analytics"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Intuit",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/jenniezhou/",
+      "name": "Jennie Zhou",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Principal Product Manager, Growth"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/prafullalchandani/",
+      "name": "Praful Lalchandani",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Spring Health",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/caseycoviello/",
+      "name": "Casey Coviello",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/olegpravdin/",
+      "name": "Oleg Pravdin",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/pratik-patel-2b499720/",
+      "name": "Pratik Patel",
+      "reason": "already_in_workbook",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Okta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sawanttanmay/",
+      "name": "Tanmay Sawant",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Group Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "LendAPI",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/chakresh-peela/",
+      "name": "Chakresh Peela",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "VP of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kathy-j-lee-85a87690/",
+      "name": "Kathy J. Lee",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/winstonjlee/",
+      "name": "Winston L.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Upside",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/shradha-sharma-4264527/",
+      "name": "Shradha Sharma",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/krystalchen/",
+      "name": "Krystal C.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "wovn",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sanchez-antonio/",
+      "name": "Antonio Sanchez",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/nishithagarwal/",
+      "name": "Nishith A.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "TikTok",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/980602/",
+      "name": "Yining Hu",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Perplexity",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/pjpauljung/",
+      "name": "Paul Jung",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/bryanfinck/",
+      "name": "Bryan Finck",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/erpallavisharma/",
+      "name": "Pallavi Sharma",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product, Agentic AI Platforms"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "eBay",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/nandum/",
+      "name": "Nandu Menon",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "NuFACE",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/saranganesh/",
+      "name": "Saran Ganesh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Albi",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/heyryanoliver/",
+      "name": "Ryan Oliver",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kushagrapatel/",
+      "name": "Kushagra Patel",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rishisha/",
+      "name": "Rishi Sharma",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Veeva",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/kunalmorparia/",
+      "name": "Kunal Morparia",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sanatkamal/",
+      "name": "Sanat Kamal Bahl",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "Tagboard",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/christine-chalk/",
+      "name": "Christine Chalk",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 93,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Chief Product Officer"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Coupa Software",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/shuchi/",
+      "name": "Shuchi Chatterjee",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/andy-abramson/",
+      "name": "Andy Abramson",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/parinshah21/",
+      "name": "Parin Shah",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/amitproductleader/",
+      "name": "Amit Patel",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/will-congbalay/",
+      "name": "Will Congbalay",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Wondr Health",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/jeff-serrano-71133615/",
+      "name": "Jeff Serrano",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "SVP, Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/pratikmba/",
+      "name": "Pratik Patel",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Digital Room Inc",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": true,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sojennifer/",
+      "name": "Jennifer So",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Head of Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/davidcanlas/",
+      "name": "David C.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/pragya-anand-2453897/",
+      "name": "Pragya Anand",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Batch",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/katja-max/",
+      "name": "Katja Max",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Crusoe",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/jandro-riveron/",
+      "name": "Jandro Riverón",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Group Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jinkang/",
+      "name": "Jin Kang",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "Urgently",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/gabriel-a-huerta/",
+      "name": "Gabriel Huerta",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 93,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": "Chief Product & Technology Officer"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/miladm6/",
+      "name": "Milad M.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/kirancnair/",
+      "name": "Kiran C Nair",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 94,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kunalagarwalusc/",
+      "name": "Kunal Agarwal",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/cnijhara/",
+      "name": "Chaitanya Nijhara",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Roblox",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sandeeprajagopal/",
+      "name": "Sandeep Rajagopal",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Leader"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/helenjwang/",
+      "name": "Helen W.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "PayPal",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/westontong/",
+      "name": "Weston Tong",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/kgvarun/",
+      "name": "Kumar G. Varun",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "MobilityWare",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/christopherkao/",
+      "name": "Christopher K.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/zhengshana/",
+      "name": "Shana Zheng 郑莎娜",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/tedmerendino/",
+      "name": "Ted Merendino",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "NVIDIA",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/nchichioco/",
+      "name": "Nathaniel Chichioco",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Sr. Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "General Motors",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/brian-pong/",
+      "name": "Brian Pong",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "DoorDash",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/praneet-singh/",
+      "name": "Praneet Singh",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Gusto",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/pavankb214/",
+      "name": "Pavan Kumar Bandarupalli",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Principal Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Veritone",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/chrisdoe/",
+      "name": "Chris Doe",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Vice President Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/bianca-gandhi-75900914/",
+      "name": "Bianca Gandhi",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Director of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Experian",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/erikrehder/",
+      "name": "Erik Rehder",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Vice President, Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/chanelhung/",
+      "name": "Chanel Hung",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/alokabhishek/",
+      "name": "Alok Abhishek",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "VMware",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/anirban-chakraborty-8064498/",
+      "name": "Anirban Chakraborty",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Line Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/sushant-mohanty-1316bb1/",
+      "name": "Sushant Mohanty",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/vz1005/",
+      "name": "Vivienne Zheng",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/yerramilli/",
+      "name": "Vinay Yerramilli",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Scopely",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/hchen3030/",
+      "name": "Howard Chen",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "VP Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ridhimaarora/",
+      "name": "Ridhima Arora",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/shreyaoswal/",
+      "name": "Shreya Oswal",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/yuningyu/",
+      "name": "Yu Ning (Ning) Yu",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/aditi-gupta-241203a/",
+      "name": "Aditi Gupta",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/eric-uaje/",
+      "name": "Eric Uaje",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "Mudflap",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/cocosharon/",
+      "name": "Sharon Yapp",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 97,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Co-Founder & Head of Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/varunparanjpe/",
+      "name": "Varun Paranjpe",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/christopherbodmer/",
+      "name": "Christopher Bodmer",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Stubhub",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/karenchik/",
+      "name": "Karen Chik",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/karenyang-mba/",
+      "name": "Karen Yang, MBA",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/williamjetter/",
+      "name": "Bill Jetter",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "venture_startup_operator",
+      "company": "OnePay",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/harsh2193/",
+      "name": "Harsh Patel",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 85,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Head of Growth Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/arjunyadav12/",
+      "name": "Arjun Yadav",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "NEXT GENERATION MOBILE INC",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/marcpaul/",
+      "name": "Marc Paul",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Principal & Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rahksharma/",
+      "name": "Rahul Sharma",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rickeybijlani/",
+      "name": "Rickey Bijlani",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Disney",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/iambangaly/",
+      "name": "Bangaly Kaba",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Vice President, Product Management"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/raniarvapally/",
+      "name": "Rani Arvapally",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jennywei8/",
+      "name": "Jenny Wei",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Wisk",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/suchitrapalat/",
+      "name": "Suchitra Palat",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Staff Product Manager , Autonomy & Airspace Integration"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/christine-kuo85/",
+      "name": "Christine K.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "eero",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/alana-abbitt/",
+      "name": "Alana Abbitt",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/joshua-ogundu-b92b835b/",
+      "name": "Joshua Ogundu",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/rebecka-marcucci/",
+      "name": "Rebecka Marcucci",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/zacharymbohn/",
+      "name": "Zachary Bohn",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/judyjkkim/",
+      "name": "Judy Kim",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Roku",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/anveshreddyj/",
+      "name": "Anvesh Junnuthula",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Qualcomm",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/sananaghipour/",
+      "name": "Sana Naghipour",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Sr. Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/fmsweet/",
+      "name": "Francesca Sweet",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jimmychang316/",
+      "name": "James Chang",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/christopherlarscarlson/",
+      "name": "Christopher Carlson",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/johnnychen0/",
+      "name": "Johnny Chen",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "MeshyAI",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/superyan/",
+      "name": "Yan Yang",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Growth Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/alekseylazaryev/",
+      "name": "Aleksey Lazaryev, MBA, PMP",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/orentuchin/",
+      "name": "Oren Tuchin",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jessica-dhillon/",
+      "name": "Jessica Dhillon",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/hanna-ma/",
+      "name": "Hanna Ma",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Apple",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/shivanigummadi/",
+      "name": "Shivani Gummadi",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Accenture",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/arumoy-chakravarty/",
+      "name": "Arumoy Chakravarty, MS, MBA",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "NetApp",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/sakethssr/",
+      "name": "Saketh Reddy Satharla",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 94,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/matt-n-755881/",
+      "name": "Matt N.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/jintingnass/",
+      "name": "Jinting N.",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/mimi-lu-497a108/",
+      "name": "Mimi Lu",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/shatik/",
+      "name": "Shatik Dua",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Amazon",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/rmcharg/",
+      "name": "Ryan McHarg",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/piyushraj21/",
+      "name": "Piyush Raj",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/benson-lao/",
+      "name": "Benson Lao",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Tatari",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/vidbhamb/",
+      "name": "Vidisha Bhambri",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/yongw/",
+      "name": "Will Yong",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Meta",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/dipesh-bhattacharya-57a76b/",
+      "name": "Dipesh Bhattacharya",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "SoundHound AI",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/kevinchatow/",
+      "name": "Kevin Chatow",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Vice President of Product Management"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "ServiceNow",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/chhavijain7/",
+      "name": "Chhavi Jain",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Sr. Product Manager, AI Control Tower"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/choprakhushboo/",
+      "name": "Khushboo Chopra",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Easley-Dunn Productions, Inc.",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/pranavkarthikeyan/",
+      "name": "Pranav Anand K.",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/trinh-pham/",
+      "name": "Trinh Pham",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/praneetac/",
+      "name": "Praneeta Chaudhary",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "TikTok",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/nathan-wu-5113b540/",
+      "name": "Nathan Wu",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Walmart",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/amanda-pace68/",
+      "name": "Amanda Pace",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Group Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/maxinelau/",
+      "name": "Maxine Lau",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Cengage Group",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/roxannejwang/",
+      "name": "Roxanne J. Wang",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/chris-youssefzadeh-42702839/",
+      "name": "Chris Youssefzadeh",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Oracle",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/prasadprofile/",
+      "name": "Pandit Prasad",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "core",
+      "score": 81,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Product"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Abbott",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/monmiburagohain/",
+      "name": "Monmi Buragohain",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/ayushverma2107/",
+      "name": "Ayush Verma",
+      "reason": "conflicting_current_company_evidence",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/christopherkisopkim/",
+      "name": "Christopher Kim",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/dwivedishweta/",
+      "name": "Shweta Dwivedi",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Shopmonkey",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/will-kopperl/",
+      "name": "Will Kopperl",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager, Fintech"
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/taniahansraj/",
+      "name": "Tania H.",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/laramccaskill/",
+      "name": "Lara McCaskill",
+      "reason": "no_high_signal_product_role",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": false,
+      "category": "",
+      "company": "",
+      "linkedin_url": "https://www.linkedin.com/in/quangvnguyen/",
+      "name": "Quang Nguyen",
+      "reason": "unparseable_current_role_company",
+      "score": 0,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": ""
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Google",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": true,
+      "linkedin_url": "https://www.linkedin.com/in/amandalorialexander/",
+      "name": "Amanda Alexander",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "product_product_strategy",
+      "company": "Twitch",
+      "current_role_review_required": false,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/bryan-valladares/",
+      "name": "Bryan Valladares",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "leadership",
+      "score": 91,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Senior Product Manager"
+    },
+    {
+      "accepted": true,
+      "category": "founder_c_suite",
+      "company": "Edmunds.com",
+      "current_role_review_required": true,
+      "existing_contact_enrichment": false,
+      "institution_labels": [
+        "USC Marshall"
+      ],
+      "known_company": false,
+      "linkedin_url": "https://www.linkedin.com/in/eugene-park-80a3a9/",
+      "name": "Eugene Park",
+      "reason": "accepted",
+      "role_identity_count": 1,
+      "role_level": "executive",
+      "score": 93,
+      "search_keys": [
+        "usc_marshall_product_us"
+      ],
+      "title": "Chief Product Officer"
+    }
+  ],
+  "existing_contact_enrichments": 2,
+  "existing_contacts_suppressed": 1,
+  "input_path": "/Users/akshat/Desktop/Claude projects/Outreach/artifacts/20260714-130102-institution-first-linkedin-capture.json",
+  "input_sha256": "80207c04f6aa7e7c286f691caa91a81ed2d6ad2c787885925cca3dd26ef0e85b",
+  "known_company_leads": 77,
+  "minimum_score": 72,
+  "new_company_leads": 70,
+  "output_path": "/Users/akshat/Desktop/Claude projects/Outreach/workspace/relationship_leads_linkedin_institution_first.csv",
+  "query_coverage": {
+    "thapar_product_us": {
+      "final_url": "https://www.linkedin.com/search/results/people/?keywords=product&origin=FACETED_SEARCH&geoUrn=%5B%22103644278%22%5D&schoolFilter=%5B%22485592%22%5D&page=10",
+      "limit": 100,
+      "max_pages": 10,
+      "query": "product",
+      "raw_count": 99,
+      "school_filter": "Thapar Institute of Engineering & Technology",
+      "school_urn": "485592",
+      "termination_state": "bounded_page_window",
+      "us_geo_urn": "103644278",
+      "use_us_location": true
+    },
+    "usc_marshall_product_us": {
+      "final_url": "https://www.linkedin.com/search/results/people/?keywords=product&origin=FACETED_SEARCH&geoUrn=%5B%22103644278%22%5D&schoolFilter=%5B%223083%22%5D&page=10",
+      "limit": 100,
+      "max_pages": 10,
+      "query": "product",
+      "raw_count": 100,
+      "school_filter": "USC Marshall School of Business",
+      "school_urn": "3083",
+      "termination_state": "bounded_sample_cap",
+      "us_geo_urn": "103644278",
+      "use_us_location": true
+    },
+    "usc_product_us": {
+      "final_url": "https://www.linkedin.com/search/results/people/?keywords=product&origin=FACETED_SEARCH&geoUrn=%5B%22103644278%22%5D&schoolFilter=%5B%223084%22%5D&page=10",
+      "limit": 100,
+      "max_pages": 10,
+      "query": "product",
+      "raw_count": 100,
+      "school_filter": "University of Southern California",
+      "school_urn": "3084",
+      "termination_state": "bounded_sample_cap",
+      "us_geo_urn": "103644278",
+      "use_us_location": true
+    }
+  },
+  "raw_rows": 299,
+  "reason_counts": {
+    "accepted": 147,
+    "already_in_workbook": 1,
+    "ambiguous_composite_company": 1,
+    "conflicting_current_company_evidence": 1,
+    "explicit_non_us_location": 1,
+    "invalid_current_company": 2,
+    "legacy_or_acquired_company_requires_enrichment": 1,
+    "no_high_signal_product_role": 28,
+    "unparseable_current_role_company": 111,
+    "unverified_us_location": 3
+  },
+  "rows_accepted": 147,
+  "rows_rejected": 149,
+  "schema_version": 1,
+  "searches_run": 3,
+  "summary_path": "/Users/akshat/Desktop/Claude projects/Outreach/workspace/relationship_leads_linkedin_institution_first.summary.json",
+  "unique_profiles": 296
+}

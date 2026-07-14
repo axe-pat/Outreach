@@ -1,60 +1,149 @@
-preferred_directness: "direct, concrete, and oriented toward the reply we want"
-preferred_casualness: "warm and human, but not deferential or over-polished"
-
+preferred_directness: direct, concrete, and oriented toward the reply we want
+preferred_casualness: warm and human, but not deferential or over-polished
 banned_phrases:
-  - "would love to connect"
-  - "pick your brain"
-  - "quick coffee chat"
-  - "your work stood out"
-  - "learn from your experience"
-  - "product/company direction"
-  - "AI product direction"
-
+- would love to connect
+- pick your brain
+- quick coffee chat
+- your work stood out
+- learn from your experience
+- product/company direction
+- AI product direction
 self_intro_variants:
-  - "I'm a Marshall MBA and former data/platform engineer exploring technical product roles."
-  - "I'm an MBA with Intuit/Gojek engineering experience, now targeting technical PM/product roles."
-  - "I'm building toward technical product roles where data, platforms, and operations meet."
-
+- I'm a Marshall MBA and former data/platform engineer exploring technical product roles.
+- I'm an MBA with Intuit/Gojek engineering experience, now targeting technical PM/product roles.
+- I'm building toward technical product roles where data, platforms, and operations meet.
 approved_asks_by_recipient_type:
   founder:
-    - "Ask whether a technical MBA/product background fits anything useful there."
-    - "Ask who owns product, ops, or internship hiring if there is a credible fit."
+  - Ask whether a technical MBA/product background fits anything useful there.
+  - Ask who owns product, ops, or internship hiring if there is a credible fit.
   senior_product:
-    - "Ask a specific team-direction or product-scope question tied to Akshat's background."
-    - "Ask how technical PM candidates can be useful to the team."
+  - Ask a specific team-direction or product-scope question tied to Akshat's background.
+  - Ask how technical PM candidates can be useful to the team.
   junior_product_apm:
-    - "Ask how to get on the hiring team's radar."
-    - "Ask what signal matters most for APM or early-PM candidates."
+  - Ask how to get on the hiring team's radar.
+  - Ask what signal matters most for APM or early-PM candidates.
   engineer_india:
-    - "Ask for a referral or hiring-team pointer when the company and role fit are reasonable."
-    - "Ask whether they can point you to the right referral or hiring path if there is a relevant opening."
+  - Ask for a referral or hiring-team pointer when the company and role fit are reasonable.
+  - Ask whether they can point you to the right referral or hiring path if there is a relevant opening.
   engineer:
-    - "Ask how builders influence product decisions there."
-    - "Ask how technical PM or product candidates stand out."
+  - Ask how builders influence product decisions there.
+  - Ask how technical PM or product candidates stand out.
   recruiter:
-    - "Ask for process or screening guidance for the relevant role path."
-    - "Ask whether there is a better hiring-team contact for PM, product ops, or strategy roles."
+  - Ask for process or screening guidance for the relevant role path.
+  - Ask whether there is a better hiring-team contact for PM, product ops, or strategy roles.
   general:
-    - "Ask for one concrete pointer, routing suggestion, or next person to speak with."
-
+  - Ask for one concrete pointer, routing suggestion, or next person to speak with.
 strong_messages:
-  - label: "engineer_referral_pointer"
-    recipient_type: "engineer_india"
-    message: "Hi Mehak, thanks for connecting. I'm targeting technical PM/product roles where my data-platform background is useful. If Snyk has a relevant opening, would you be open to a referral or hiring-team pointer?"
-    notes: "Concrete ask; gives the recipient an easy yes/no next step."
-  - label: "founder_product_read"
-    recipient_type: "founder"
-    message: "Hi Sean, thanks for connecting. I'm a Marshall MBA and former data/platform engineer exploring product roles at Synphony. Does that background fit anything useful there? Any recs on who I should talk to about that?"
-    notes: "Founder ask is about usefulness, not generic networking."
-
+- label: engineer_referral_pointer
+  recipient_type: engineer_india
+  message: Hi Mehak, thanks for connecting. I'm targeting technical PM/product roles where my data-platform background is useful. If Snyk has a relevant opening, would you be open to a referral or hiring-team pointer?
+  notes: Concrete ask; gives the recipient an easy yes/no next step.
+- label: founder_product_read
+  recipient_type: founder
+  message: Hi Sean, thanks for connecting. I'm a Marshall MBA and former data/platform engineer exploring product roles at Synphony. Does that background fit anything useful there? Any recs on who I should talk to about that?
+  notes: Founder ask is about usefulness, not generic networking.
+- label: learned_gold_2759bd777f
+  recipient_type: engineer
+  message: But thanks for the info, I'll try reaching out to Irina about this!
+  notes: Learned gold example | manually sent LinkedIn message | company=TRACTIAN | recipient=Bratee Podder
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_9aebd4d40d
+  recipient_type: engineer
+  message: Thanks for connecting, Emiliano. I'm exploring technical PM/product paths at Snyk from a backend/data engineering background. Does that background fit product work there? Any recommendations on people I should talk to about that?
+  notes: Learned gold example | manually sent LinkedIn message | company=Snyk | recipient=Emiliano Castro
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_7f2bedd078
+  recipient_type: engineer
+  message: Thanks for connecting, Kelson. I'm exploring product roles at Amplitude from an engineering + data/platform background. Does that background seem relevant to product work there?
+  notes: Learned gold example | manually sent LinkedIn message | company=Amplitude | recipient=Kelson Warner
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_2a32f482ab
+  recipient_type: senior_product
+  message: Thanks for connecting, Tommy. I'm exploring product roles at Instawork from an engineering + data/platform background. Does that background seem relevant to product work there?
+  notes: Learned gold example | manually sent LinkedIn message | company=Instawork | recipient=Tommy Tseng
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_48b8d8f6dd
+  recipient_type: strategy_ops
+  message: Thanks for connecting, Chusen. I'm exploring product roles at Healthee from an engineering + data/platform background. Your AI/data infrastructure work feels close to problems I've worked around. Does that background seem relevant to product work there?
+  notes: Learned gold example | manually sent LinkedIn message | company=Healthee | recipient=Chusen (Sam) Liang
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_67498e015d
+  recipient_type: engineer
+  message: Thanks for connecting, Harshil. I'm trying to get on the radar at Ottimate for BizOps/Strategy roles where my data/platform engineering background helps. If there is a relevant opening, would you be open to a referral or pointing me to the right hiring contact?
+  notes: Learned gold example | manual outbound captured from tracker | company=Ottimate | recipient=Harshil Khant
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_c44d819a52
+  recipient_type: other
+  message: Oh okay Thanks a lot anyways!😃
+  notes: Learned gold example | manually sent LinkedIn message | company=d-Matrix | recipient=Shubhankit R.
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_f39208de7c
+  recipient_type: engineer
+  message: Sure, thanks a lot!!😃
+  notes: Learned gold example | manually sent LinkedIn message | company=Ottimate | recipient=Anchal Gupta
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_75d7bdceeb
+  recipient_type: founder
+  message: Done, thanks Jordan!!
+  notes: Learned gold example | manually sent LinkedIn message | company=LemonLime | recipient=Jordan Zietz
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_39b8ea2f4e
+  recipient_type: engineer
+  message: Thanks so much Bratee for making the effort to share all this! Very helpful, really appreciate it.
+  notes: Learned gold example | manually sent LinkedIn message | company=TRACTIAN | recipient=Bratee Podder
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_gold_e81237ff1b
+  recipient_type: engineer
+  message: You sent an attachment
+  notes: Learned gold example | manually sent LinkedIn message | company=Lila Sciences | recipient=Priyam Shah
+  source: comms_learning/linkedin_examples.jsonl
 weak_messages:
-  - label: "generic_connection"
-    recipient_type: "general"
-    message: "Hi Priya, your work stood out and I would love to connect and learn from your experience."
-    notes: "Too generic; gives no reason to reply or route."
-  - label: "soft_coffee"
-    recipient_type: "senior_product"
-    message: "Hi Alex, I'm exploring PM roles and would love a quick coffee chat to pick your brain."
-    notes: "Soft ask and banned phrasing; relationship goal is unclear."
-
-notes: "This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups."
+- label: generic_connection
+  recipient_type: general
+  message: Hi Priya, your work stood out and I would love to connect and learn from your experience.
+  notes: Too generic; gives no reason to reply or route.
+- label: soft_coffee
+  recipient_type: senior_product
+  message: Hi Alex, I'm exploring PM roles and would love a quick coffee chat to pick your brain.
+  notes: Soft ask and banned phrasing; relationship goal is unclear.
+- label: learned_negative_b50623105a
+  recipient_type: engineer
+  message: Sure, thanks Bratee. Is there a PM/product internship path at TRACTIAN? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=TRACTIAN | recipient=Bratee Podder
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_21cf62a82a
+  recipient_type: other
+  message: Thanks Shubhankit, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at d-Matrix? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=d-Matrix | recipient=Shubhankit R.
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_c863e42083
+  recipient_type: engineer
+  message: Thanks Anchal, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Ottimate? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=Ottimate | recipient=Anchal Gupta
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_6010c16a8d
+  recipient_type: engineer
+  message: Thanks Priyam, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Lila Sciences? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=Lila Sciences | recipient=Priyam Shah
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_f488e7ce59
+  recipient_type: founder
+  message: Thanks Jordan, appreciate it. I'll email careers@lemonlime.ai with my resume and a short note on where my engineering + MBA background could be useful for product work at LemonLime.
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=LemonLime | recipient=Jordan Zietz
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_4a3b776d6a
+  recipient_type: engineer
+  message: Thanks Harsh, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that background fit anything at Sortly? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=Sortly | recipient=Harsh Ranjan
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_2af6758645
+  recipient_type: founder
+  message: Thanks Austin, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Salestrics? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=Salestrics | recipient=Austin Buhl
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_9451537cb6
+  recipient_type: engineer
+  message: Thanks for connecting, Emiliano. I'm exploring technical PM/product paths at Snyk from a backend/data engineering background. Does that background fit product work there? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft replaced or cleared after manual send | company=Snyk | recipient=Emiliano Castro
+  source: comms_learning/linkedin_examples.jsonl
+notes: This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups.

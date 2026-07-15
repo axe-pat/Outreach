@@ -1449,6 +1449,13 @@ def build_track_2_daily_plan(
 
     selected.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
     skipped.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
+    invite_backfill = [
+        item.__dict__
+        for item in skipped
+        if item.skip_reason == "linkedin_invites_budget_exhausted"
+        and item.expected_linkedin_invites > 0
+        and str(item.phase).startswith("5_send_linkedin_invites")
+    ]
     return {
         "budget": budget.__dict__,
         "used": used,
@@ -1456,6 +1463,8 @@ def build_track_2_daily_plan(
         "skipped_count": len(skipped),
         "selected": [item.__dict__ for item in selected],
         "skipped": [item.__dict__ for item in skipped],
+        "invite_backfill": invite_backfill,
+        "invite_backfill_count": len(invite_backfill),
         "summary": _daily_plan_summary(selected),
         "phase_summary": _daily_plan_phase_summary(selected),
         "execution_order": _daily_plan_execution_order(),

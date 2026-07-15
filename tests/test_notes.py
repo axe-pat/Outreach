@@ -167,6 +167,95 @@ def test_shared_history_note_names_matched_company() -> None:
     assert note.within_limit is True
 
 
+def test_thapar_shared_history_beats_trojan_template() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Bhavleen Kaur Ahuja",
+            "role_bucket": "Product",
+            "usc": False,
+            "usc_marshall": True,
+            "existing_connection": False,
+            "shared_history": True,
+            "shared_history_signals": ["Thapar", "Thaparian"],
+            "snippet": "Deepak Garg, Sanjay Gupta Thaparian & 132 other mutual connections",
+        },
+        company="Cisco",
+        company_mode="big_company",
+    )
+
+    assert note.family == "shared_history"
+    assert "Thapar" in note.text
+    # usc_marshall is also flagged, so the note should name both affinities
+    # instead of burying Thapar under a generic Trojan template.
+    assert "USC" in note.text or "Trojan" in note.text
+    assert note.within_limit is True
+
+
+def test_thapar_shared_history_beats_existing_connection_template() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Bhavleen Kaur Ahuja",
+        "role_bucket": "Product",
+        "usc": True,
+        "usc_marshall": True,
+        "existing_connection": True,
+        "shared_history": True,
+        "shared_history_signals": ["Thapar"],
+        "title": "AI Product Manager 2",
+    }
+    note = generator.generate(candidate, company="Cisco", company_mode="big_company")
+    quality = generator.quality_check(candidate, note)
+
+    assert note.family == "shared_history"
+    assert "Thapar" in note.text
+    assert "confirmed Thapar connection was dropped from the invite" not in quality.flags
+
+
+def test_thapar_plus_usc_note_acknowledges_both_affinities() -> None:
+    generator = NoteGenerator()
+    note = generator.generate(
+        {
+            "name": "Bhavleen Kaur Ahuja",
+            "role_bucket": "Product",
+            "usc": True,
+            "usc_marshall": True,
+            "existing_connection": False,
+            "shared_history": True,
+            "shared_history_signals": ["Thapar"],
+            "title": "AI Product Manager 2",
+        },
+        company="Cisco",
+        company_mode="big_company",
+    )
+
+    assert note.family == "shared_history"
+    assert "Thapar" in note.text
+    assert "USC" in note.text or "Trojan" in note.text
+    assert note.within_limit is True
+
+
+def test_quality_check_flags_thapar_drop() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Fellow Alum",
+        "shared_history": True,
+        "shared_history_signals": ["Thapar"],
+        "usc": True,
+        "role_bucket": "Product",
+        "title": "Product Manager",
+    }
+    note = generator.generate(candidate, company="Adobe", company_mode="big_company")
+    # Force a Trojan-style note that omits Thapar.
+    note.text = (
+        "Hi Fellow, fellow Trojan here — Marshall MBA exploring PM roles at Adobe. "
+        "Open to connecting?"
+    )
+    note.length = len(note.text)
+    quality = generator.quality_check(candidate, note)
+    assert "confirmed Thapar connection was dropped from the invite" in quality.flags
+
+
 def test_senior_product_note_uses_contribution_fit_ending() -> None:
     generator = NoteGenerator()
     note = generator.generate(

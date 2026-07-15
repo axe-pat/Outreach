@@ -13,7 +13,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Mapping
 
 import typer
 from pydantic import ValidationError
@@ -51,12 +51,14 @@ from outreach.services.linkedin import (
 )
 from outreach.invite_reservations import (
     atomic_write_json,
+    filter_candidates_blocked_by_reservations,
     finalize_invite_attempt,
+    load_invite_reservations,
     reconcile_invite_reservation,
     reservation_ledger_path,
     reserve_invite_attempt,
 )
-from outreach.services.notes import NoteGenerator
+from outreach.services.notes import NoteGenerator, strip_mutual_connection_snippet
 from outreach.messaging_roles import (
     TargetRoleContext,
     infer_target_role_context,
@@ -303,7 +305,7 @@ def detect_shared_history(raw_text: str, settings: OutreachSettings) -> bool:
 
 
 def detect_shared_history_signals(raw_text: str, settings: OutreachSettings) -> list[str]:
-    text = raw_text.lower()
+    text = strip_mutual_connection_snippet(raw_text).lower()
     signals: list[str] = []
     for keyword in settings.search.shared_history_keywords:
         if keyword in text:
@@ -320,6 +322,9 @@ _LINKEDIN_COMPANY_SEARCH_NAMES = {
     "globalization partners": "Globalization Partners International",
     "parsec automation": "Parsec Automation, LLC",
     "justinian": "Justinian (YC S26)",
+    "compa": "Compa Technologies, Inc.",
+    "md anderson cancer center": "The University of Texas MD Anderson Cancer Center",
+    "md anderson": "The University of Texas MD Anderson Cancer Center",
 }
 
 
@@ -3861,6 +3866,8 @@ def build_persisted_inbound_reconcile_results(
                     original_invite_note=original_invite_note,
                 ),
                 "state_reason": "persistent_unanswered_inbound",
+                "is_new_thread": False,
+                "thread_changed": False,
                 "original_invite_note": original_invite_note,
                 "target_role_family": invite_metadata.get("target_role_family", ""),
                 "target_role_label": invite_metadata.get("target_role_label", ""),
@@ -4670,6 +4677,9 @@ def build_linkedin_followup_drafts(
                 "original_invite_note": item.get("original_invite_note", ""),
                 "thread_id": item.get("thread_id", ""),
                 "thread_url": item.get("thread_url", ""),
+                "is_new_thread": bool(item.get("is_new_thread")),
+                "thread_changed": bool(item.get("thread_changed")),
+                "state_reason": str(item.get("state_reason") or ""),
             }
         if ai_result is not None:
             draft_payload["ai_messaging"] = {
@@ -6282,11 +6292,115 @@ def build_daily_execution_manifest(daily_plan: dict) -> list[dict[str, object]]:
     return manifest
 
 
+def _followup_draft_report_scope(item: Mapping[str, object] | dict) -> str:
+    """Classify a follow-up draft as this-run vs carryover using thread provenance.
+
+    Exact-run draft artifacts used to force ``scope=this_run`` for every row they
+    contained, which re-labeled regenerated unanswered threads as brand-new.
+    New / materially changed threads stay this-run; unchanged recovered threads
+    and durable-queue leftovers are carryover.
+    """
+
+    explicit = str(item.get("scope") or "").strip().casefold()
+    if explicit in {"carryover", "workspace_snapshot"}:
+        return "carryover"
+    state_reason = str(item.get("state_reason") or "").strip().casefold()
+    if (
+        bool(item.get("is_new_thread"))
+        or bool(item.get("thread_changed"))
+        or state_reason in {"new_thread", "changed_latest"}
+    ):
+        return "this_run"
+    if state_reason in {
+        "include_seen",
+        "baseline_seen",
+        "persistent_unanswered_inbound",
+    }:
+        return "carryover"
+    # Legacy draft rows without provenance keep file-based this_run labeling.
+    if explicit == "this_run":
+        return "this_run"
+    return "this_run" if explicit != "carryover" else "carryover"
+
+
 def _daily_plan_items_matching(daily_plan: dict, *, phase_prefix: str | None = None) -> list[dict]:
     items = list(daily_plan.get("selected") or [])
     if phase_prefix is None:
         return items
     return [item for item in items if str(item.get("phase") or "").startswith(phase_prefix)]
+
+
+_REFUNDABLE_INVITE_STATUSES = frozenset(
+    {
+        "already_connected",
+        "unavailable",
+        "send_already_reserved",
+        "protected_review",
+        "skipped",
+    }
+)
+DEFAULT_MAX_INVITE_BACKFILL_COMPANIES = 6
+
+
+def _invite_slots_consumed(status_counts: Mapping[str, object] | None) -> int:
+    """Slots that must stay charged against today's invite target.
+
+    Non-send terminals (already reserved, unavailable, already connected) are
+    refunded so the runner can backfill lower-ranked companies toward the
+    target. Unknown delivery stays charged.
+    """
+
+    counts = status_counts if isinstance(status_counts, Mapping) else {}
+    consumed = 0
+    for status, raw in counts.items():
+        key = str(status or "").strip().casefold()
+        try:
+            value = int(raw or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0 or key in _REFUNDABLE_INVITE_STATUSES:
+            continue
+        # Unknown statuses fail closed as consumed so we never over-send.
+        consumed += value
+    return max(0, consumed)
+
+
+def _invite_backfill_queue(
+    daily_plan: Mapping[str, object],
+    *,
+    attempted_keys: set[str],
+    limit: int,
+) -> list[dict]:
+    """Lower-ranked invite companies deferred only by the invite target cap."""
+
+    if limit <= 0:
+        return []
+    explicit = list(daily_plan.get("invite_backfill") or [])
+    if not explicit:
+        explicit = [
+            item
+            for item in list(daily_plan.get("skipped") or [])
+            if isinstance(item, dict)
+            and str(item.get("skip_reason") or "") == "linkedin_invites_budget_exhausted"
+            and int(item.get("expected_linkedin_invites") or 0) > 0
+            and str(item.get("phase") or "").startswith("5_send_linkedin_invites")
+        ]
+    queue: list[dict] = []
+    for item in explicit:
+        if not isinstance(item, dict):
+            continue
+        company = str(item.get("company") or "").strip()
+        org_id = str(item.get("organization_id") or "").strip()
+        key = org_id or company.casefold()
+        if not key or key in attempted_keys:
+            continue
+        planned_cap = int(item.get("expected_linkedin_invites") or 0)
+        if planned_cap <= 0:
+            continue
+        queue.append(dict(item))
+        if len(queue) >= limit:
+            break
+    return queue
 
 
 def _daily_plan_company_names(daily_plan: dict, *, phase_prefix: str | None = None) -> list[str]:
@@ -9339,7 +9453,12 @@ def write_artifact_daily_report(
             item for item in list(payload.get("cadence_held") or []) if isinstance(item, dict)
         ]
         for item in draft_rows:
-            enriched = {**item, "source_artifact": str(path), "scope": "this_run"}
+            scoped = _followup_draft_report_scope(item)
+            enriched = {
+                **item,
+                "source_artifact": str(path),
+                "scope": scoped,
+            }
             recommendation = str(item.get("send_recommendation") or "")
             if recommendation in HUMAN_REVIEW_RECOMMENDATIONS:
                 pending_review_items.append(enriched)
@@ -11479,6 +11598,15 @@ def run_track_2_daily_plan_cmd(
         str,
         typer.Option(help="External email finder provider: auto, prospeo, or hunter"),
     ] = "auto",
+    max_invite_backfill_companies: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "When planned invite companies yield zero usable sends, attempt at most "
+                "this many lower-ranked invite companies to fill the invite target"
+            )
+        ),
+    ] = DEFAULT_MAX_INVITE_BACKFILL_COMPANIES,
 ) -> None:
     """Run the bounded Track 2 daily plan in phase order."""
     if send_linkedin and not execute:
@@ -11699,6 +11827,16 @@ def run_track_2_daily_plan_cmd(
                     style_profile=messaging_profile,
                 ),
             )[:followup_budget]
+            new_drafts = [
+                draft
+                for draft in drafts
+                if _followup_draft_report_scope(draft) == "this_run"
+            ]
+            regenerated_carryover_drafts = [
+                draft
+                for draft in drafts
+                if _followup_draft_report_scope(draft) == "carryover"
+            ]
             cadence_allowed_drafts, cadence_held_drafts = _apply_linkedin_cadence_guards(
                 workbook=workbook,
                 drafts=drafts,
@@ -11710,6 +11848,8 @@ def run_track_2_daily_plan_cmd(
                 {
                     "source_artifact": str(reconcile_artifact),
                     "count": len(drafts),
+                    "new_draft_count": len(new_drafts),
+                    "regenerated_carryover_draft_count": len(regenerated_carryover_drafts),
                     "summary": action_summary,
                     "results": drafts,
                     "cadence_allowed_count": len(cadence_allowed_drafts),
@@ -11735,6 +11875,8 @@ def run_track_2_daily_plan_cmd(
                     "execution_result_count": len(execution_results),
                     "unmatched_thread_count": len(unmatched_results),
                     "draft_count": len(drafts),
+                    "new_draft_count": len(new_drafts),
+                    "regenerated_carryover_draft_count": len(regenerated_carryover_drafts),
                     "cadence_allowed_count": len(cadence_allowed_drafts),
                     "cadence_held_count": len(cadence_held_drafts),
                     "action_summary": action_summary,
@@ -12107,7 +12249,11 @@ def run_track_2_daily_plan_cmd(
         phase_results.append(mapping_result)
 
     invite_items = _daily_plan_items_matching(daily_plan, phase_prefix="5_send_linkedin_invites")
-    if invite_items:
+    if invite_items or list(daily_plan.get("invite_backfill") or []) or any(
+        str(item.get("skip_reason") or "") == "linkedin_invites_budget_exhausted"
+        for item in list(daily_plan.get("skipped") or [])
+        if isinstance(item, dict)
+    ):
         planned_invite_budget = int(
             (daily_plan.get("used") or {}).get("linkedin_invites") or 0
         )
@@ -12115,18 +12261,29 @@ def run_track_2_daily_plan_cmd(
             planned_invite_budget,
             int((daily_plan.get("budget") or {}).get("max_linkedin_invites") or 0),
         )
-        affinity_headroom = max(0, global_invite_budget - planned_invite_budget)
-        initial_affinity_headroom = affinity_headroom
+        # Treat max_linkedin_invites as a best-effort target. Remaining starts at
+        # the full global budget so zero-yield planned companies free slots for
+        # bounded backfill instead of permanently burning the planned sum.
+        affinity_headroom = 0
+        initial_affinity_headroom = 0
         invite_result: dict[str, object] = {
             "phase": "5_send_linkedin_invites",
             "status": "planned",
             "budget": planned_invite_budget,
             "max_budget": global_invite_budget,
+            "target_budget": global_invite_budget,
             "affinity_headroom": affinity_headroom,
             "send_enabled": send_linkedin,
             "runs": [],
+            "backfill_company_count": 0,
+            "backfill_sent_count": 0,
+            "reservation_prefiltered_count": 0,
         }
-        remaining_invites = planned_invite_budget
+        remaining_invites = global_invite_budget
+        attempted_invite_keys: set[str] = set()
+        invite_work: list[tuple[dict, bool]] = [
+            (item, False) for item in invite_items
+        ]
         if execute and allow_live_linkedin:
             invite_style_profile = load_style_profile_if_exists(
                 workspace / "communication_style_profile.yml"
@@ -12139,14 +12296,27 @@ def run_track_2_daily_plan_cmd(
                 ),
                 ai_message_limit=settings.ai_messaging_max_batch,
             )
-            for item in invite_items:
+            reservation_ledger = load_invite_reservations(
+                reservation_ledger_path(settings.resolved_tracking_workspace_dir)
+            )
+            work_index = 0
+            backfill_queued = False
+            while work_index < len(invite_work):
+                item, is_backfill = invite_work[work_index]
+                work_index += 1
                 if remaining_invites <= 0:
                     break
                 company = str(item.get("company") or "")
+                org_id = str(item.get("organization_id") or "").strip()
+                attempt_key = org_id or company.casefold()
+                if not company or (attempt_key and attempt_key in attempted_invite_keys):
+                    continue
                 planned_company_cap = int(item.get("expected_linkedin_invites") or 0)
                 if planned_company_cap <= 0:
                     continue
-                org = org_by_id.get(str(item.get("organization_id") or ""))
+                if attempt_key:
+                    attempted_invite_keys.add(attempt_key)
+                org = org_by_id.get(org_id)
                 payload: dict[str, object] = {}
                 pipeline_artifact: Path | None = None
                 discovery_error = ""
@@ -12200,6 +12370,7 @@ def run_track_2_daily_plan_cmd(
                             "target_role": str(item.get("target_role") or ""),
                             "sent": False,
                             "status": "discovery_failed",
+                            "backfill": is_backfill,
                             "error": discovery_error,
                         }
                     )
@@ -12214,6 +12385,7 @@ def run_track_2_daily_plan_cmd(
                             "target_role": str(item.get("target_role") or ""),
                             "sent": False,
                             "status": "discovery_failed",
+                            "backfill": is_backfill,
                             "error": "No mapped or live-search invite source was produced.",
                         }
                     )
@@ -12290,6 +12462,19 @@ def run_track_2_daily_plan_cmd(
                         organization=org,
                     )
                 )
+                batch, reservation_blocked = filter_candidates_blocked_by_reservations(
+                    batch,
+                    company=company,
+                    reservations=reservation_ledger,
+                )
+                selected_batch, _selected_blocked = filter_candidates_blocked_by_reservations(
+                    selected_batch,
+                    company=company,
+                    reservations=reservation_ledger,
+                )
+                invite_result["reservation_prefiltered_count"] = int(
+                    invite_result.get("reservation_prefiltered_count") or 0
+                ) + len(reservation_blocked)
                 run_entry: dict[str, object] = {
                     "company": company,
                     "pipeline_artifact": str(pipeline_artifact),
@@ -12297,6 +12482,7 @@ def run_track_2_daily_plan_cmd(
                     "company_search_error": discovery_error,
                     "candidate_count": len(batch),
                     "selected_candidate_count": len(selected_batch),
+                    "reservation_blocked_count": len(reservation_blocked),
                     "protected_review_count": len(protected_invite_candidates),
                     "protected_review_candidates": protected_invite_candidates,
                     "effective_min_score": effective_min_score_value,
@@ -12305,6 +12491,7 @@ def run_track_2_daily_plan_cmd(
                     "effective_company_cap": per_company_limit,
                     "target_role": str(item.get("target_role") or ""),
                     "sent": False,
+                    "backfill": is_backfill,
                     "status": (
                         "send_blocked_company_filter"
                         if company_filter_failed
@@ -12313,17 +12500,14 @@ def run_track_2_daily_plan_cmd(
                             if batch
                             else "protected_review_required"
                             if protected_invite_candidates
+                            else "all_already_reserved"
+                            if reservation_blocked
                             else "no_eligible_candidates"
                         )
                     ),
                     "company_filter_failed": company_filter_failed,
                     "target_company_evidence_rejected_count": company_evidence_rejected_count,
                 }
-                # Reserve the prepared batch before attempting a live send. A
-                # send exception can occur after partial progress was persisted,
-                # so reusing those slots for another company could exceed the
-                # global daily cap.
-                remaining_invites = max(0, remaining_invites - len(batch))
                 if send_linkedin and selected_batch:
                     try:
                         send_artifact, progress_artifact, status_counts, contacts_added, touchpoints_added = (
@@ -12340,11 +12524,15 @@ def run_track_2_daily_plan_cmd(
                             )
                         )
                     except Exception as exc:
+                        # Fail closed: charge the prepared batch so a crashed
+                        # send cannot free the same slots for another company.
+                        remaining_invites = max(0, remaining_invites - len(batch))
                         run_entry.update(
                             {
                                 "sent": False,
                                 "status": "send_failed",
                                 "error": str(exc),
+                                "slots_consumed": len(batch),
                             }
                         )
                     else:
@@ -12358,6 +12546,8 @@ def run_track_2_daily_plan_cmd(
                         protected_review_count = int(
                             status_counts.get("protected_review") or 0
                         )
+                        slots_consumed = _invite_slots_consumed(status_counts)
+                        remaining_invites = max(0, remaining_invites - slots_consumed)
                         if unknown_reserved_count and processed_count > unknown_reserved_count:
                             run_status = "partial_send_unknown_reserved"
                         elif unknown_reserved_count:
@@ -12378,9 +12568,17 @@ def run_track_2_daily_plan_cmd(
                                 "status_counts": status_counts,
                                 "contacts_added": contacts_added,
                                 "touchpoints_added": touchpoints_added,
+                                "slots_consumed": slots_consumed,
                             }
                         )
+                        if is_backfill:
+                            invite_result["backfill_sent_count"] = int(
+                                invite_result.get("backfill_sent_count") or 0
+                            ) + known_sent_count
                 else:
+                    # Prepare-only runs still reserve prepared sendable slots so
+                    # the reported remaining target matches what would be sent.
+                    remaining_invites = max(0, remaining_invites - len(batch))
                     candidate_artifact = write_artifact(
                         settings.artifacts_dir,
                         "track-2-linkedin-invite-candidates",
@@ -12391,12 +12589,32 @@ def run_track_2_daily_plan_cmd(
                             "limit": per_company_limit,
                             "count": len(batch),
                             "results": batch,
+                            "reservation_blocked_count": len(reservation_blocked),
+                            "reservation_blocked": reservation_blocked,
                             "protected_review_count": len(protected_invite_candidates),
                             "protected_review_candidates": protected_invite_candidates,
                         },
                     )
                     run_entry["candidate_artifact"] = str(candidate_artifact)
+                    run_entry["slots_consumed"] = len(batch)
                 invite_result["runs"].append(run_entry)
+                if is_backfill:
+                    invite_result["backfill_company_count"] = int(
+                        invite_result.get("backfill_company_count") or 0
+                    ) + 1
+                if (
+                    not backfill_queued
+                    and work_index >= len(invite_work)
+                    and remaining_invites > 0
+                    and max_invite_backfill_companies > 0
+                ):
+                    backfill_items = _invite_backfill_queue(
+                        daily_plan,
+                        attempted_keys=attempted_invite_keys,
+                        limit=max_invite_backfill_companies,
+                    )
+                    invite_work.extend((item, True) for item in backfill_items)
+                    backfill_queued = True
             invite_result["affinity_headroom_allocated"] = (
                 initial_affinity_headroom - affinity_headroom
             )

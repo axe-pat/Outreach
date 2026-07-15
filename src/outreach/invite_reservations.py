@@ -212,6 +212,66 @@ def _auto_retry_blocked(reservation: Mapping[str, object]) -> bool:
     )
 
 
+def invite_reservation_blocks_retry(
+    reservation: Mapping[str, object] | None,
+) -> bool:
+    """True when a durable reservation must not consume another target slot."""
+
+    if not isinstance(reservation, Mapping):
+        return False
+    return _auto_retry_blocked(reservation)
+
+
+def filter_candidates_blocked_by_reservations(
+    candidates: list[Mapping[str, object]] | list[dict],
+    *,
+    company: str,
+    reservations: Mapping[str, object] | None,
+) -> tuple[list[dict], list[dict]]:
+    """Split live-selected candidates from ones the durable ledger already owns.
+
+    The ledger remains authoritative at `reserve_invite_attempt`; this is a
+    read-only pre-filter so already-reserved people never occupy today's
+    invite target before the send worker runs.
+    """
+
+    ledger = (
+        reservations.get("reservations")
+        if isinstance(reservations, Mapping)
+        else None
+    )
+    if not isinstance(ledger, Mapping):
+        ledger = {}
+    allowed: list[dict] = []
+    blocked: list[dict] = []
+    for raw in candidates:
+        if not isinstance(raw, Mapping):
+            continue
+        candidate = dict(raw)
+        linkedin_url = str(candidate.get("linkedin_url") or "").strip()
+        name = str(candidate.get("name") or "Unknown").strip()
+        try:
+            key = reservation_key(
+                linkedin_url=linkedin_url, company=company, name=name
+            )
+        except ValueError:
+            allowed.append(candidate)
+            continue
+        existing = ledger.get(key)
+        if invite_reservation_blocks_retry(
+            existing if isinstance(existing, Mapping) else None
+        ):
+            blocked_candidate = dict(candidate)
+            blocked_candidate["reservation_blocked"] = True
+            blocked_candidate["reservation_status"] = str(
+                (existing or {}).get("status") or ""
+            )
+            blocked.append(blocked_candidate)
+            continue
+        allowed.append(candidate)
+    return allowed, blocked
+
+
 @contextmanager
 def _locked_payload(path: Path) -> Iterator[dict[str, object]]:
     path = Path(path)

@@ -1180,6 +1180,81 @@ def test_daily_report_separates_exact_run_review_from_carryover_and_hold_wins(
     )
 
 
+def test_daily_report_marks_regenerated_include_seen_drafts_as_carryover(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    OutreachWorkbook(workspace).initialize()
+    drafts = artifacts / "exact-linkedin-followup-drafts.json"
+    drafts.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-old",
+                        "company": "OldCo",
+                        "name": "Old Person",
+                        "send_recommendation": "review",
+                        "draft_message": "Regenerated old draft.",
+                        "state_reason": "include_seen",
+                        "is_new_thread": False,
+                        "thread_changed": False,
+                    },
+                    {
+                        "contact_id": "ct-new",
+                        "company": "NewCo",
+                        "name": "New Person",
+                        "send_recommendation": "review",
+                        "draft_message": "Actually new inbound.",
+                        "state_reason": "changed_latest",
+                        "is_new_thread": False,
+                        "thread_changed": True,
+                    },
+                ],
+                "cadence_held": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"linkedin_followup_draft_artifacts": [str(drafts)]}),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "run_id": REPORT_RUN_ID,
+                "daily_engine_manifest": str(manifest),
+                "outreach_maintenance": {"ran": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = SimpleNamespace(
+        artifacts_dir=artifacts,
+        resolved_tracking_workspace_dir=workspace,
+    )
+
+    report_json, _md, _html, _latest = write_artifact_daily_report(
+        settings=settings,
+        workspace=workspace,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        nightly_summary_path=summary,
+    )
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+
+    assert [row["name"] for row in payload["messages_to_review"]] == ["New Person"]
+    assert [row["name"] for row in payload["carryover_messages_to_review"]] == [
+        "Old Person"
+    ]
+    assert payload["run_outcome"]["current_review_drafts_from_run"] == 1
+    assert payload["run_outcome"]["carryover_messages_to_review"] == 1
+
+
 def test_pending_followup_clear_removes_stale_versions_of_the_same_thread(
     tmp_path: Path,
 ) -> None:
@@ -2287,6 +2362,23 @@ def test_company_search_aliases_strip_common_startup_suffixes() -> None:
     )
     assert linkedin_company_search_name("Parsec Automation") == "Parsec Automation, LLC"
     assert linkedin_company_search_name("Justinian") == "Justinian (YC S26)"
+    assert (
+        linkedin_company_search_name("MD Anderson Cancer Center")
+        == "The University of Texas MD Anderson Cancer Center"
+    )
+    assert linkedin_company_search_name("Compa") == "Compa Technologies, Inc."
+
+
+def test_detect_shared_history_ignores_mutual_connection_names() -> None:
+    settings = OutreachSettings()
+    raw = (
+        "AI Product Manager 2 at Cisco · San Francisco Bay Area\n"
+        "Deepak Garg, Sanjay Gupta Thaparian & 132 other mutual connections"
+    )
+    assert detect_shared_history_signals(raw, settings) == []
+    assert detect_shared_history_signals(
+        "Thapar Institute alum · Product at Adobe", settings
+    ) == ["Thapar", "Thapar Institute"]
 
 
 def test_exact_company_filter_miss_stops_only_before_any_success() -> None:
@@ -3150,6 +3242,280 @@ def test_track_2_unknown_invite_slot_is_not_reused_and_summary_is_truthful(
         "send_unknown_reserved",
         "send_completed",
     ]
+
+
+def test_track_2_invite_target_refunds_dead_outcomes_and_backfills(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.snapshot_message_threads",
+        lambda self, **_kwargs: [],
+    )
+    fake_plan = {
+        "selected_count": 1,
+        "budget": {"max_linkedin_invites": 2},
+        "used": {"linkedin_invites": 2},
+        "summary": {"send_initial_invites": 1},
+        "phase_summary": {"5_send_linkedin_invites": 1},
+        "selected": [
+            {
+                "organization_id": "org-planned",
+                "company": "Planned Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 2,
+            }
+        ],
+        "skipped": [
+            {
+                "organization_id": "org-backfill",
+                "company": "Backfill Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 2,
+                "skip_reason": "linkedin_invites_budget_exhausted",
+                "daily_action_priority": 70,
+            }
+        ],
+        "invite_backfill": [
+            {
+                "organization_id": "org-backfill",
+                "company": "Backfill Co",
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 2,
+                "skip_reason": "linkedin_invites_budget_exhausted",
+                "daily_action_priority": 70,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+
+    def _pipeline(company: str) -> Path:
+        path = tmp_path / f"{company.lower().replace(' ', '-')}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "company": company,
+                    "company_mode": "default",
+                    "results": [
+                        {
+                            "name": f"{company} Person",
+                            "title": "Product Manager",
+                            "linkedin_url": (
+                                "https://www.linkedin.com/in/"
+                                + company.lower().replace(" ", "-")
+                            ),
+                            "score": 80,
+                            "note": "Hello",
+                            "note_qc": {"verdict": "send"},
+                        }
+                    ],
+                    "affinity_expansion": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    monkeypatch.setattr(
+        "outreach.cli.execute_linkedin_company_run",
+        lambda **kwargs: _pipeline(str(kwargs["company"])),
+    )
+    send_calls: list[str] = []
+
+    def fake_execute_batch(**kwargs):
+        company = str(kwargs["company"])
+        send_calls.append(company)
+        send_path = tmp_path / f"{company}-send.json"
+        progress_path = tmp_path / f"{company}-progress.json"
+        send_path.write_text("{}", encoding="utf-8")
+        progress_path.write_text("{}", encoding="utf-8")
+        counts = (
+            {"send_already_reserved": 1}
+            if company == "Planned Co"
+            else {"sent": 1}
+        )
+        return send_path, progress_path, counts, 0, 0
+
+    monkeypatch.setattr("outreach.cli.execute_invite_batch", fake_execute_batch)
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+            "--send-linkedin",
+            "--max-invite-backfill-companies",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert send_calls == ["Planned Co", "Backfill Co"]
+    run_payload = next(payload for kind, payload in written if kind == "track-2-daily-run")
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["sent_count"] == 1
+    assert invite_phase["backfill_company_count"] == 1
+    assert invite_phase["backfill_sent_count"] == 1
+    assert invite_phase["remaining_budget"] == 1
+    assert [run["company"] for run in invite_phase["runs"]] == [
+        "Planned Co",
+        "Backfill Co",
+    ]
+    assert invite_phase["runs"][0]["slots_consumed"] == 0
+    assert invite_phase["runs"][1]["backfill"] is True
+
+
+def test_track_2_invite_prefilters_ledger_blocked_candidates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from outreach.invite_reservations import (
+        reservation_key,
+        utc_now_iso,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.snapshot_message_threads",
+        lambda self, **_kwargs: [],
+    )
+    company = "Cisco"
+    person = "Already Reserved"
+    linkedin_url = "https://www.linkedin.com/in/already-reserved/"
+    key = reservation_key(linkedin_url=linkedin_url, company=company, name=person)
+    monkeypatch.setattr(
+        "outreach.cli.load_invite_reservations",
+        lambda _path: {
+            "schema_version": 1,
+            "updated_at": utc_now_iso(),
+            "reservations": {
+                key: {
+                    "reservation_key": key,
+                    "status": "sent",
+                    "reconciliation_required": False,
+                    "linkedin_url": linkedin_url,
+                    "company": company,
+                    "name": person,
+                }
+            },
+        },
+    )
+    fake_plan = {
+        "selected_count": 1,
+        "budget": {"max_linkedin_invites": 1},
+        "used": {"linkedin_invites": 1},
+        "summary": {"send_initial_invites": 1},
+        "phase_summary": {"5_send_linkedin_invites": 1},
+        "selected": [
+            {
+                "organization_id": "org-cisco",
+                "company": company,
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            }
+        ],
+        "skipped": [],
+        "invite_backfill": [],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+    pipeline = tmp_path / "cisco.json"
+    pipeline.write_text(
+        json.dumps(
+            {
+                "company": company,
+                "company_mode": "default",
+                "results": [
+                    {
+                        "name": person,
+                        "title": "Product Manager",
+                        "linkedin_url": linkedin_url,
+                        "score": 90,
+                        "note": "Hello",
+                        "note_qc": {"verdict": "send"},
+                    }
+                ],
+                "affinity_expansion": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "outreach.cli.execute_linkedin_company_run",
+        lambda **_kwargs: pipeline,
+    )
+    send_calls: list[dict] = []
+    monkeypatch.setattr(
+        "outreach.cli.execute_invite_batch",
+        lambda **kwargs: send_calls.append(kwargs),
+    )
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+            "--send-linkedin",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert send_calls == []
+    run_payload = next(payload for kind, payload in written if kind == "track-2-daily-run")
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["reservation_prefiltered_count"] == 1
+    assert invite_phase["runs"][0]["status"] == "all_already_reserved"
+    assert invite_phase["runs"][0]["slots_consumed"] == 0
+    assert invite_phase["remaining_budget"] == 1
 
 
 def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(

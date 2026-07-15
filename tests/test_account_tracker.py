@@ -547,6 +547,12 @@ def test_track_2_daily_plan_enforces_budgets(tmp_path: Path) -> None:
     assert plan["used"]["company_mapping"] <= 2
     assert plan["used"]["email_research"] <= 1
     assert plan["skipped_count"] > 0
+    assert "invite_backfill" in plan
+    assert plan["invite_backfill_count"] == len(plan["invite_backfill"])
+    assert all(
+        item["skip_reason"] == "linkedin_invites_budget_exhausted"
+        for item in plan["invite_backfill"]
+    )
     selected = plan["selected"]
     assert selected == sorted(
         selected,

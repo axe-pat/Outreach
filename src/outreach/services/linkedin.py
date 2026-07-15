@@ -256,20 +256,28 @@ class LinkedInScraper:
                     if not self._safe_goto(page, search_url):
                         raise RuntimeError(f"Could not load filtered LinkedIn people search: {search_url}")
                     self._human_pause(page)
-                    self._apply_people_filters(
-                        page=page,
-                        company=company,
-                        school=school,
-                        connection_degree=connection_degree,
-                        use_us_location=use_us_location,
-                    )
-                    missing_filters = missing_people_filter_url_params(
-                        page.url,
-                        company=company,
-                        school=school,
-                        connection_degree=connection_degree,
-                        use_us_location=use_us_location,
-                    )
+                    missing_filters: list[str] = []
+                    for filter_attempt in range(2):
+                        self._apply_people_filters(
+                            page=page,
+                            company=company,
+                            school=school,
+                            connection_degree=connection_degree,
+                            use_us_location=use_us_location,
+                        )
+                        missing_filters = missing_people_filter_url_params(
+                            page.url,
+                            company=company,
+                            school=school,
+                            connection_degree=connection_degree,
+                            use_us_location=use_us_location,
+                        )
+                        if not missing_filters:
+                            break
+                        if filter_attempt == 0:
+                            # Modal can appear to accept values while returning an
+                            # unfiltered FACETED_SEARCH URL. Re-open filters once.
+                            continue
                     if missing_filters:
                         raise RuntimeError(
                             "LinkedIn dropped requested people-search filters: "
@@ -1562,27 +1570,51 @@ class LinkedInScraper:
 
     def _session_preflight(self, context, target_url: str = "https://www.linkedin.com/feed/") -> dict:
         page_count_before = len(context.pages)
-        page = context.new_page()
-        page.set_default_timeout(15000)
-        try:
-            self._safe_goto(page, target_url)
-            cookies = context.cookies(["https://www.linkedin.com"])
-            has_li_at = any(cookie.get("name") == "li_at" for cookie in cookies)
-            logged_in = self._looks_logged_in(page)
-            authwall = self._is_authwall_or_login(page)
-            return {
-                "ok": logged_in and not authwall,
-                "current_url": page.url,
-                "title": page.title(),
-                "logged_in_heuristic": logged_in,
-                "authwall_or_login": authwall,
-                "has_li_at_cookie": has_li_at,
-                "cookie_names": sorted(cookie.get("name", "") for cookie in cookies),
-                "body_preview": self._body_preview(page),
-                "context_pages_before": page_count_before,
-            }
-        finally:
-            self._close_page_safely(page)
+        last_result: dict | None = None
+        # chrome-error:// landings are usually transient CDP navigation flakes,
+        # distinct from authwall / logged-out failures. Retry once.
+        for attempt in range(2):
+            page = context.new_page()
+            page.set_default_timeout(15000)
+            try:
+                self._safe_goto(page, target_url)
+                cookies = context.cookies(["https://www.linkedin.com"])
+                has_li_at = any(cookie.get("name") == "li_at" for cookie in cookies)
+                logged_in = self._looks_logged_in(page)
+                authwall = self._is_authwall_or_login(page)
+                result = {
+                    "ok": logged_in and not authwall,
+                    "current_url": page.url,
+                    "title": page.title(),
+                    "logged_in_heuristic": logged_in,
+                    "authwall_or_login": authwall,
+                    "has_li_at_cookie": has_li_at,
+                    "cookie_names": sorted(cookie.get("name", "") for cookie in cookies),
+                    "body_preview": self._body_preview(page),
+                    "context_pages_before": page_count_before,
+                    "preflight_attempt": attempt + 1,
+                }
+                if result["ok"]:
+                    return result
+                last_result = result
+                current_url = str(result.get("current_url") or "").lower()
+                if "chrome-error://" in current_url and attempt == 0 and not authwall:
+                    continue
+                return result
+            finally:
+                self._close_page_safely(page)
+        return last_result or {
+            "ok": False,
+            "current_url": "",
+            "title": "",
+            "logged_in_heuristic": False,
+            "authwall_or_login": False,
+            "has_li_at_cookie": False,
+            "cookie_names": [],
+            "body_preview": "",
+            "context_pages_before": page_count_before,
+            "preflight_attempt": 2,
+        }
 
     def _safe_goto(self, page: Page, url: str, timeout_ms: int = 30000) -> bool:
         def _looks_loaded() -> bool:
@@ -2378,52 +2410,84 @@ class LinkedInScraper:
         raise PlaywrightTimeoutError("Could not click Send in invite modal.")
 
     def _fill_filter_typeahead(self, page: Page, trigger_text: str, value: str) -> None:
-        self._click_filter_control(page, trigger_text)
-        self._human_pause(page)
-
-        active_input = self._select_filter_typeahead_input(page, trigger_text)
-        active_input.fill(value)
-        self._human_pause(page)
-
-        options = page.get_by_role("option")
-        requested = normalize_typeahead_text(value)
-        exact_option = None
-        best_option = None
-        best_score = -10_000
-        try:
-            option_count = min(options.count(), 20)
-        except Exception:
-            option_count = 0
-        for index in range(option_count):
-            option = options.nth(index)
+        is_company = normalize_typeahead_text(trigger_text) == "add a company"
+        last_error: Exception | None = None
+        for attempt in range(2):
             try:
-                text = option.inner_text().strip()
-            except Exception:
-                continue
-            normalized = (
-                primary_typeahead_label(text)
-                if normalize_typeahead_text(trigger_text) == "add a company"
-                else normalize_typeahead_text(text)
-            )
-            if normalized == requested:
-                exact_option = option
-                break
-            score = score_typeahead_option(trigger_text, value, text)
-            if score > best_score:
-                best_score = score
-                best_option = option
+                self._click_filter_control(page, trigger_text)
+                self._human_pause(page)
 
-        if exact_option is not None:
-            exact_option.click()
-        elif normalize_typeahead_text(trigger_text) == "add a company":
-            raise PlaywrightTimeoutError(
-                f"Could not find an exact company suggestion for '{value}'."
-            )
-        elif best_option is not None and best_score > 0:
-            best_option.click()
-        else:
-            page.keyboard.press("Enter")
-        self._human_pause(page)
+                active_input = self._select_filter_typeahead_input(page, trigger_text)
+                active_input.fill(value)
+                self._human_pause(page)
+
+                options = page.get_by_role("option")
+                requested = normalize_typeahead_text(value)
+                exact_option = None
+                best_option = None
+                best_score = -10_000
+                option_count = self._count_typeahead_options(page, options)
+                if option_count == 0 and attempt == 0:
+                    # Suggestions often render a beat after fill; wait then retry
+                    # the full fill cycle once before treating this as failure.
+                    try:
+                        page.wait_for_timeout(900)
+                    except Exception:
+                        pass
+                    option_count = self._count_typeahead_options(page, options)
+                    if option_count == 0:
+                        continue
+
+                for index in range(option_count):
+                    option = options.nth(index)
+                    try:
+                        text = option.inner_text().strip()
+                    except Exception:
+                        continue
+                    normalized = (
+                        primary_typeahead_label(text)
+                        if is_company
+                        else normalize_typeahead_text(text)
+                    )
+                    if normalized == requested:
+                        exact_option = option
+                        break
+                    score = score_typeahead_option(trigger_text, value, text)
+                    if score > best_score:
+                        best_score = score
+                        best_option = option
+
+                if exact_option is not None:
+                    exact_option.click()
+                    self._human_pause(page)
+                    return
+                if is_company:
+                    raise PlaywrightTimeoutError(
+                        f"Could not find an exact company suggestion for '{value}'."
+                    )
+                if best_option is not None and best_score > 0:
+                    best_option.click()
+                else:
+                    page.keyboard.press("Enter")
+                self._human_pause(page)
+                return
+            except PlaywrightTimeoutError as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise PlaywrightTimeoutError(
+            f"Could not find an exact company suggestion for '{value}'."
+        )
+
+    @staticmethod
+    def _count_typeahead_options(page: Page, options: Locator) -> int:
+        try:
+            return min(options.count(), 20)
+        except Exception:
+            return 0
 
     def _select_filter_typeahead_input(self, page: Page, trigger_text: str) -> Locator:
         inputs = page.locator(

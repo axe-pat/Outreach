@@ -263,6 +263,46 @@ def test_fill_filter_typeahead_uses_unique_visible_fallback(monkeypatch) -> None
     assert visible_generic.filled_value == "USC Marshall"
 
 
+def test_fill_filter_typeahead_retries_when_company_options_arrive_late(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    visible_company = _TypeaheadInput(placeholder="Add a company")
+    page = _TypeaheadPage([visible_company])
+    clicks: list[str] = []
+
+    class _Option:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def inner_text(self) -> str:
+            return self._text
+
+        def click(self) -> None:
+            clicks.append(self._text)
+
+    class _Options:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def count(self) -> int:
+            self.calls += 1
+            return 0 if self.calls < 3 else 1
+
+        def nth(self, _index: int):
+            return _Option("Compa Technologies, Inc.")
+
+    options = _Options()
+    page.wait_for_timeout = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(scraper, "_click_filter_control", lambda *_args: None)
+    monkeypatch.setattr(scraper, "_human_pause", lambda *_args: None)
+    monkeypatch.setattr(page, "get_by_role", lambda *_args, **_kwargs: options)
+
+    scraper._fill_filter_typeahead(page, "Add a company", "Compa Technologies, Inc.")
+
+    assert visible_company.filled_value == "Compa Technologies, Inc."
+    assert clicks == ["Compa Technologies, Inc."]
+    assert options.calls >= 2
+
+
 def test_fill_filter_typeahead_fails_clearly_without_visible_input(monkeypatch) -> None:
     scraper = LinkedInScraper(OutreachSettings())
     page = _TypeaheadPage(

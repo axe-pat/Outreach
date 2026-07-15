@@ -18,6 +18,27 @@ from outreach.style_profile import CommunicationStyleProfile, load_style_profile
 NOTE_CHAR_LIMIT = 300
 
 
+def strip_mutual_connection_snippet(raw_text: str) -> str:
+    """Remove LinkedIn mutual-connection trailers from search-result text."""
+
+    text = str(raw_text or "")
+    match = re.search(r"(?i)\bmutual connections?\b", text)
+    if not match:
+        return text
+    head = text[: match.start()]
+    cut = max(
+        head.rfind("\n"),
+        head.rfind("•"),
+        head.rfind("|"),
+        head.rfind(". "),
+        head.rfind("; "),
+    )
+    if cut >= 0:
+        keep = cut + (1 if head[cut] == "." else 0)
+        return text[:keep].strip()
+    return head.strip()
+
+
 @dataclass
 class GeneratedNote:
     text: str
@@ -122,7 +143,15 @@ class NoteGenerator:
                     target_role_is_concrete=target_role.is_concrete,
                 )
 
-        if candidate.get("existing_connection"):
+        if self._has_thapar_shared_history(candidate):
+            # Thapar must not be buried under existing-connection or Trojan/USC
+            # templates. When LinkedIn or mapped evidence shows a Thapar overlap,
+            # name it explicitly — including for 1st-degree reconnects.
+            family = "shared_history"
+            variants = self._shared_history_variants(
+                first_name, company_for_note, ask_style, candidate
+            )
+        elif candidate.get("existing_connection"):
             family = "existing_connection"
             variants = self._existing_connection_variants(first_name, company_for_note, ask_style)
         elif candidate.get("usc_marshall"):
@@ -363,6 +392,12 @@ class NoteGenerator:
             score -= 12
         else:
             strengths.append("Light, clear ask")
+
+        if self._has_thapar_shared_history(candidate) and "thapar" not in lower:
+            flags.append("confirmed Thapar connection was dropped from the invite")
+            score -= 20
+        elif self._has_thapar_shared_history(candidate):
+            strengths.append("Names the Thapar overlap")
 
         if any(
             phrase in lower
@@ -946,6 +981,24 @@ class NoteGenerator:
         candidate: dict | None = None,
     ) -> list[str]:
         signal = self._shared_history_signal(candidate or {})
+        candidate_data = candidate or {}
+        dual_usc = signal == "Thapar" and bool(
+            candidate_data.get("usc_marshall") or candidate_data.get("usc")
+        )
+        if dual_usc:
+            # Both overlaps are real and rare together; name them both instead of
+            # picking one. Mirrors the AI path's dual-affinity rule.
+            if ask_style == "guidance":
+                return [
+                    f"Hi {first_name}, a fellow Thaparian and Trojan — small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. I'd value your take.",
+                    f"Hi {first_name}, we share both Thapar and USC — had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; I'd value your quick guidance.",
+                    f"Hi {first_name}, spotted the double overlap: Thapar and USC. I'm at Marshall after engineering at Intuit/Gojek, exploring PM opportunities at {company}. I'd value your thoughts.",
+                ]
+            return [
+                f"Hi {first_name}, a fellow Thaparian and Trojan — small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, we share both Thapar and USC — had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, spotted the double overlap: Thapar and USC. I'm at Marshall after engineering at Intuit/Gojek, exploring PM opportunities at {company}. Open to connecting?",
+            ]
         if signal:
             if ask_style == "guidance":
                 return [
@@ -976,16 +1029,38 @@ class NoteGenerator:
             for item in candidate.get("shared_history_signals", [])
             if str(item).strip()
         ]
+        for preferred in ("Thapar", "Thaparian", "Thapar Institute"):
+            for signal in signals:
+                if preferred.casefold() in signal.casefold():
+                    return "Thapar"
         if signals:
             return signals[0]
         text = " ".join(
             str(candidate.get(field) or "")
             for field in ["title", "subtitle", "snippet", "raw_text"]
         ).lower()
+        if "thapar" in text or "thaparian" in text:
+            return "Thapar"
         for company in ["Intuit", "Gojek", "Hevo", "Hevo Data", "Optum"]:
             if company.lower() in text:
                 return company
         return ""
+
+    @staticmethod
+    def _has_thapar_shared_history(candidate: dict) -> bool:
+        if not candidate.get("shared_history"):
+            return False
+        signals = [
+            str(item).casefold()
+            for item in list(candidate.get("shared_history_signals") or [])
+        ]
+        if any("thapar" in signal for signal in signals):
+            return True
+        blob = " ".join(
+            strip_mutual_connection_snippet(str(candidate.get(field) or ""))
+            for field in ("title", "subtitle", "snippet", "raw_text", "school")
+        ).casefold()
+        return "thapar" in blob or "thaparian" in blob
 
     def _product_variants(self, first_name: str, company: str, ask_style: str) -> list[str]:
         if ask_style == "conversation":

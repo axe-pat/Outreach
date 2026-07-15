@@ -535,7 +535,7 @@ Current implementation uses an automatic first pass:
 | Score | Company type |
 |-------|-------------|
 | 12 | Top-tier product/company brand or explicit `dream` / `tier-a` manual tag |
-| 10 | Explicit `priority`, `core`, `relationship`, or `target` manual tag |
+| 10 | Explicit `priority` or `core` manual tag |
 | 8 | Strong known product company |
 | 5 | YC signal |
 | 3 | Recognizable source signal such as BuiltIn/growth-stage/funding text |
@@ -543,6 +543,63 @@ Current implementation uses an automatic first pass:
 
 Manual priority and brand live in the same capped component so they can promote an
 account without double-counting.
+
+Only genuinely manual tags count as manual priority: `priority`, `core`, `dream`,
+`tier-a`. Import-stamped tags (`track-2`, `relationship`, `target`, from the
+account-universe importer) must NOT grant the manual-priority bonus — that bug
+uniformly inflated the entire Track 2 universe by +10 and compressed the ranking.
+
+Hiring-tech **product** companies (Greenhouse, Ashby, Workday-type) are strong-brand
+matches for the FlairX/ResumeGenerator credential. Companies whose *product is
+staffing/recruiting services* (agencies, placement shops) get a −12 penalty and the
+`staffing_services_org` quality flag instead — there are no PM roles for Akshat at
+a talent agency.
+
+### Domain Weights: Healthcare Demotion
+
+Healthcare domain tags (`healthcare`, `health-tech`, `digital-health`, `medtech`)
+are weighted 1 (was 3). The Optum credential is real but interest is low, and
+health companies were crowding out core-fit companies at the top of the queue.
+
+### Tier A Gates and the Dream-Startup Band
+
+Tier A eligibility (`_is_tier_a_eligible`) additionally requires:
+- not a `staffing_services_org`
+- team size > 2 (a solo builder cannot host a PM path, regardless of score)
+- teams < 15 need a strong funding/traction brand signal (score_brand ≥ 5, e.g.
+  YC-backed) to qualify — otherwise they cap at Tier B
+
+The dream-startup band (50–1000 people — Mercor/Vercel/Scale AI shape, where
+outreach compounds) gets a +3 account-score bonus.
+
+### Radar State
+
+Companies tagged `radar` (or `keep-on-radar`) get campaign action `keep_on_radar`:
+they stay visible in reports and the tracker but are excluded from campaign plan
+rows and consume zero daily budget. Live conversations still take precedence — a
+radar company with a replied contact continues the conversation normally.
+
+### Selection Aging and the Large-Company Invite Slice
+
+Two anti-stagnation mechanisms in the daily plan
+(`workspace/track2_selection_history.json` records selections):
+
+- **Aging decay** — a company selected for mapping/invites on consecutive days
+  without stage progress loses 5 daily-priority points per stale day (capped at
+  15), so squatters rotate out and the next candidates rotate in. Progress resets
+  the counter.
+- **Reserved L1/L2 invite slice** — `reserved_large_company_invites` (default 5,
+  capped at half the invite budget) is held back from Tier A/B companies so the
+  large-company track always gets a daily slice. L1/L2 need mostly referrals via
+  the India network, but high-leverage individuals there are worth real invites.
+
+### High-Leverage People Lane
+
+Contacts with a senior title (Director/VP/Head-of-Product/EM and up) **and** a
+warm path (USC/Marshall, Thapar, India network, or shared employer) are flagged
+per account (`high_leverage_contacts`) and surfaced as a `high_leverage_people`
+lane in the daily plan artifact and the operator plan view. Title alone never
+qualifies — there is an infinite supply of directors; the affinity is the signal.
 
 ### Hiring Likelihood
 

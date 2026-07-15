@@ -9,6 +9,7 @@ from outreach.ai_messaging import (
     AIMessagingService,
     AIMessageRequest,
     institution_signals_from_candidate,
+    normalize_outbound_punctuation,
     story_evidence_from_context,
 )
 from outreach.messaging_roles import infer_target_role_context, rewrite_message_for_target_role
@@ -386,6 +387,17 @@ class NoteGenerator:
                 r"\b(referral|pointer|radar|useful|contribute|stand out|project areas|team.*excited|hiring team)\b",
                 lower,
             )
+            # The AI composer phrases asks the earlier vocabulary missed
+            # ("any recommendations on who I should talk to?"). Blocking those
+            # notes threw away entire qualified invite batches.
+            or re.search(
+                r"\b(recommend|recommendation|advice|suggest|introduce|intro|right person|best person|point me)\b",
+                lower,
+            )
+            or re.search(
+                r"\b(who|person|people|someone)\b[^.?!]{0,40}\b(talk|speak|chat|reach out|connect)\b",
+                lower,
+            )
         )
         if not ask_is_clear:
             flags.append("Ask is not clear")
@@ -398,6 +410,10 @@ class NoteGenerator:
             score -= 20
         elif self._has_thapar_shared_history(candidate):
             strengths.append("Names the Thapar overlap")
+
+        if "\u2014" in note or "\u2013" in note:
+            flags.append("Em/en dash in outbound message; Akshat never sends them")
+            score -= 15
 
         if any(
             phrase in lower
@@ -990,13 +1006,13 @@ class NoteGenerator:
             # picking one. Mirrors the AI path's dual-affinity rule.
             if ask_style == "guidance":
                 return [
-                    f"Hi {first_name}, a fellow Thaparian and Trojan — small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. I'd value your take.",
-                    f"Hi {first_name}, we share both Thapar and USC — had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; I'd value your quick guidance.",
+                    f"Hi {first_name}, a fellow Thaparian and Trojan - small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. I'd value your take.",
+                    f"Hi {first_name}, we share both Thapar and USC - had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}; I'd value your quick guidance.",
                     f"Hi {first_name}, spotted the double overlap: Thapar and USC. I'm at Marshall after engineering at Intuit/Gojek, exploring PM opportunities at {company}. I'd value your thoughts.",
                 ]
             return [
-                f"Hi {first_name}, a fellow Thaparian and Trojan — small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. Open to connecting?",
-                f"Hi {first_name}, we share both Thapar and USC — had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, a fellow Thaparian and Trojan - small world! I'm at USC Marshall after engineering roles at Intuit/Gojek, exploring PM roles at {company}. Open to connecting?",
+                f"Hi {first_name}, we share both Thapar and USC - had to reach out. I'm a Marshall MBA and former engineer at Intuit/Gojek exploring PM roles at {company}. Open to connecting?",
                 f"Hi {first_name}, spotted the double overlap: Thapar and USC. I'm at Marshall after engineering at Intuit/Gojek, exploring PM opportunities at {company}. Open to connecting?",
             ]
         if signal:
@@ -1126,7 +1142,7 @@ class NoteGenerator:
         return signature
 
     def _tighten_to_limit(self, note: str) -> str:
-        tightened = " ".join(note.split())
+        tightened = normalize_outbound_punctuation(" ".join(note.split()))
         replacements = [
             ("I'm a 1Y MBA at USC Marshall and former engineer at Intuit/Gojek, ", "I'm a Marshall MBA and former engineer at Intuit/Gojek, "),
             ("I'm a 1Y MBA at USC Marshall with a background in data platforms and enterprise software, ", "I'm a Marshall MBA with a background in data platforms, "),

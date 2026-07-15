@@ -4,6 +4,7 @@ Scoring design decisions: docs/relationship_engine.md → Scoring Philosophy
 """
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -90,12 +91,12 @@ DOMAIN_TAGS: dict[str, int] = {
     "financial-technology": 4,
     "billing": 4,
     "banking": 3,
-    # Healthcare IT — Optum
-    "healthcare": 3,
-    "health-tech": 3,
-    "healthtech": 3,
-    "digital-health": 3,
-    "medtech": 3,
+    # Healthcare IT — Optum credential has aged; keep a sliver, never a driver.
+    "healthcare": 1,
+    "health-tech": 1,
+    "healthtech": 1,
+    "digital-health": 1,
+    "medtech": 1,
     # AI agents / autonomous workflow — ResumeGenerator, Outreach
     "agentic": 5,
     "autonomous": 4,
@@ -107,7 +108,10 @@ LINKEDIN_WAVE_SIZE = 8
 MIN_MAPPED_CONTACTS = 3
 BRAND_SCORE_MAX = 12
 PITCH_SCORE_MAX = 10
-MANUAL_PRIORITY_TAGS = {"priority", "core", "relationship", "target", "dream", "track-2", "tier-a"}
+# Only tags Akshat sets by hand. Import pipelines stamp `track-2`,
+# `relationship`, and `target`-style lane names onto every company they touch,
+# so those must never count as a manual priority signal.
+MANUAL_PRIORITY_TAGS = {"priority", "core", "dream", "tier-a"}
 RELATIONSHIP_TIER_A_TOTAL = 32
 TIER_B_TOTAL = 50
 TIER_A_MIN_SCORE = 30
@@ -206,6 +210,8 @@ class AccountRow:
     campaign_reason: str = ""
     lane_1_policy: str = ""
     account_track: str = ""
+    high_leverage_contacts: str = ""
+    high_leverage_count: int = 0
 
 
 @dataclass
@@ -243,6 +249,9 @@ class DailyPlanBudget:
     max_email_research: int = 5
     max_context_enrichment: int = 8
     max_email_drafts: int = 0
+    # Guaranteed daily invite slice for L1/L2 companies so Tier A can never
+    # starve the large-company track ("a Salesforce every once in a while").
+    reserved_large_company_invites: int = 5
 
 
 @dataclass
@@ -527,6 +536,38 @@ def _score_team_gate(team_size: Optional[int]) -> int:
     return 0
 
 
+_STAFFING_SERVICES_TERMS = (
+    "staffing",
+    "recruiting agency",
+    "recruitment agency",
+    "talent agency",
+    "talent solutions",
+    "talent services",
+    "headhunt",
+    "executive search",
+    "job search service",
+    "applies to jobs",
+    "apply to jobs for you",
+    "rpo",
+)
+
+_STAFFING_NAME_TOKENS = ("staffing", "talent360", "scale.jobs")
+
+
+def _is_staffing_services_org(org: OrganizationRecord) -> bool:
+    """True for talent agencies and job-application services.
+
+    Akshat has no target roles at staffing/recruiting *services*; his
+    hiring-tech credential matches product companies like Greenhouse or Ashby,
+    which must not be caught here.
+    """
+    name = org.name.lower()
+    if any(token in name for token in _STAFFING_NAME_TOKENS):
+        return True
+    text = " ".join([org.notes, org.target_lists]).lower()
+    return any(_mentions_domain_term(text, term) for term in _STAFFING_SERVICES_TERMS)
+
+
 def _data_quality_flags(
     *,
     org: OrganizationRecord,
@@ -548,6 +589,36 @@ def _data_quality_flags(
     if "identity_conflict" in org.notes.lower():
         flags.append("identity_conflict")
     return flags
+
+
+_HIGH_LEVERAGE_TITLE_RE = re.compile(
+    r"\b(head of product|head of engineering|director|vp|vice president|"
+    r"chief product|chief technology|cpo|cto|group product manager|"
+    r"engineering manager)\b",
+    re.IGNORECASE,
+)
+
+_WARM_PATH_TERMS = ("usc", "marshall", "thapar", "thaparian", "india", "delhi")
+
+
+def _high_leverage_contacts(contacts: list[ContactRecord]) -> list[str]:
+    """Senior people who can influence hiring AND share a warm path.
+
+    Title alone is useless (there are infinite directors); the flag requires a
+    real affinity: USC/Marshall, Thapar, India network, or a shared employer.
+    """
+    found: list[str] = []
+    for contact in contacts:
+        title = contact.title or ""
+        if not _HIGH_LEVERAGE_TITLE_RE.search(title):
+            continue
+        blob = " ".join([contact.target_lists, contact.notes]).lower()
+        warm = any(term in blob for term in _WARM_PATH_TERMS) or any(
+            employer in blob for employer in SHARED_EMPLOYERS
+        )
+        if warm:
+            found.append(f"{contact.full_name} ({title})")
+    return found
 
 
 def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
@@ -586,6 +657,11 @@ def _score_brand(org: OrganizationRecord) -> tuple[int, str]:
         "celonis",
         "navan",
         "maven",
+        # Hiring-tech product companies map directly onto the FlairX /
+        # ResumeGenerator credential (products, not talent agencies).
+        "greenhouse",
+        "ashby",
+        "ashbyhq",
     }
     company = org.name.lower().strip()
     manual_score = 0
@@ -957,6 +1033,17 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
             "Someone accepted but has not replied; send the accepted-invite follow-up before new outreach.",
             "track_2_owns",
         )
+    if _is_radar_account(row):
+        # Live conversations above still get continued; radar only blocks new
+        # spend (mapping, invites, email touches) so the company stays visible
+        # without consuming budget.
+        return (
+            "keep_on_radar",
+            "none",
+            8,
+            "Marked keep-on-radar; stays visible in reports without spending relationship-engine budget.",
+            "lane_1_allowed",
+        )
     if row.account_stage == "people_mapped" and row.invites_sent == 0:
         if row.email_contacts > 0 and row.tier in {"A", "L1"}:
             return (
@@ -1048,10 +1135,21 @@ def _account_rank_key(row: AccountRow) -> tuple[int, int, str]:
 
 
 def _is_tier_a_eligible(row: AccountRow) -> bool:
-    return (
-        row.account_score >= TIER_A_MIN_SCORE
-        and row.account_track in TIER_A_TRACK_QUOTAS
-    )
+    if row.account_score < TIER_A_MIN_SCORE:
+        return False
+    if row.account_track not in TIER_A_TRACK_QUOTAS:
+        return False
+    flags = set(row.data_quality_flags.split(";"))
+    if "staffing_services_org" in flags:
+        return False
+    # Sub-scale gate: a solo builder is never Tier A; a small team needs a real
+    # funding/traction signal (YC, venture round, prestige backer) to qualify.
+    if row.team_size is not None:
+        if row.team_size <= 2:
+            return False
+        if row.team_size < 15 and row.score_brand < 5:
+            return False
+    return True
 
 
 def _assign_segmented_tiers(rows: list[AccountRow]) -> None:
@@ -1109,6 +1207,15 @@ def _assign_segmented_tiers(rows: list[AccountRow]) -> None:
 
 def _target_tags(row: AccountRow) -> set[str]:
     return _split_normalized_tags(" ".join([row.target_lists, row.why_fit, row.tags]))
+
+
+RADAR_TAGS = {"radar", "keep-on-radar", "on-radar"}
+
+
+def _is_radar_account(row: AccountRow) -> bool:
+    """Manually parked: keep visible in reports, spend no campaign budget."""
+    tags = _split_normalized_tags(row.target_lists) | _split_normalized_tags(row.tags)
+    return bool(tags.intersection(RADAR_TAGS))
 
 
 def _is_strategic_wishlist(row: AccountRow) -> bool:
@@ -1278,6 +1385,17 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             data_quality_flags=quality_flags,
         )
 
+        staffing_services = _is_staffing_services_org(org)
+        if staffing_services:
+            quality_flags.append("staffing_services_org")
+            # Their hiring signals reflect their business model, not a role for
+            # Akshat; fit/hiring tag stacking must not rank them as targets.
+            account_score = max(0, account_score - 12)
+            fit_score = max(0, fit_score - 12)
+        dream_band = team_size is not None and 50 <= team_size <= 1000
+        if dream_band:
+            account_score += 3
+
         # Build why_fit
         seen: set[str] = set()
         labels: list[str] = []
@@ -1287,6 +1405,10 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
                 seen.add(lbl)
                 labels.append(lbl)
         labels.extend(r_signals)
+        if staffing_services:
+            labels.insert(0, "staffing/recruiting services")
+        if dream_band:
+            labels.append("dream-band scale")
         if brand_label:
             labels.append(brand_label)
         if pitch_label:
@@ -1305,6 +1427,7 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         replies = sum(1 for c in company_contacts if c.status in REPLIED_STATUSES)
 
         stage, next_action, next_due = _derive_stage(account_score, company_contacts)
+        high_leverage = _high_leverage_contacts(company_contacts)
         row = AccountRow(
             organization_id=org.organization_id,
             company=org.name,
@@ -1338,6 +1461,8 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
             score_pitch_strength=s_pitch,
             score_account_hiring=s_account_hiring,
             data_quality_flags=";".join(quality_flags),
+            high_leverage_contacts="; ".join(high_leverage),
+            high_leverage_count=len(high_leverage),
         )
         (
             row.campaign_action,
@@ -1369,7 +1494,7 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
     actionable = [
         row
         for row in rows
-        if row.campaign_action not in {"pause_account", "wait_for_accepts"}
+        if row.campaign_action not in {"pause_account", "wait_for_accepts", "keep_on_radar"}
     ]
     actionable.sort(
         key=lambda row: (
@@ -1409,12 +1534,95 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
     ]
 
 
+_SELECTION_HISTORY_FILENAME = "track2_selection_history.json"
+_AGED_ACTIONS = {
+    "map_more_contacts",
+    "send_initial_invites",
+    "expand_linkedin_wave",
+    "send_initial_multichannel_outreach",
+}
+_AGING_DECAY_PER_DAY = 5
+_AGING_DECAY_MAX = 15
+
+
+def load_selection_history(workspace: Path) -> dict[str, dict]:
+    path = Path(workspace) / _SELECTION_HISTORY_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_selection_history(workspace: Path, history: dict[str, dict]) -> Path:
+    path = Path(workspace) / _SELECTION_HISTORY_FILENAME
+    path.write_text(json.dumps(history, indent=1, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _history_progress_marker(row: CampaignPlanRow) -> str:
+    return f"{row.account_stage}|{row.invites_sent}|{row.people_mapped}"
+
+
+def _selection_age(history: dict[str, dict], row: CampaignPlanRow) -> int:
+    entry = history.get(row.organization_id or row.company.lower())
+    if not isinstance(entry, dict):
+        return 0
+    if str(entry.get("progress_marker") or "") != _history_progress_marker(row):
+        return 0
+    try:
+        return max(0, int(entry.get("consecutive_selections") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _record_selection(
+    history: dict[str, dict],
+    item: DailyPlanItem,
+    row_by_key: dict[str, CampaignPlanRow],
+    today: str,
+) -> None:
+    key = item.organization_id or item.company.lower()
+    row = row_by_key.get(key)
+    if row is None:
+        return
+    marker = _history_progress_marker(row)
+    entry = history.get(key)
+    if not isinstance(entry, dict) or str(entry.get("progress_marker") or "") != marker:
+        entry = {"consecutive_selections": 0, "progress_marker": marker}
+    if str(entry.get("last_selected") or "") != today:
+        entry["consecutive_selections"] = int(entry.get("consecutive_selections") or 0) + 1
+        entry["last_selected"] = today
+    entry["progress_marker"] = marker
+    entry["company"] = item.company
+    history[key] = entry
+
+
 def build_track_2_daily_plan(
     rows: list[AccountRow],
     *,
     budget: DailyPlanBudget = DailyPlanBudget(),
+    selection_history: dict[str, dict] | None = None,
 ) -> dict[str, object]:
     campaign_rows = build_campaign_plan_rows(rows)
+    history = selection_history if selection_history is not None else {}
+    row_by_key: dict[str, CampaignPlanRow] = {}
+    for row in campaign_rows:
+        key = row.organization_id or row.company.lower()
+        row_by_key[key] = row
+        # Aging: a company repeatedly selected for mapping/invites without any
+        # stage progress loses priority so it rotates out instead of squatting.
+        if row.campaign_action in _AGED_ACTIONS:
+            age = _selection_age(history, row)
+            if age > 0:
+                decay = min(_AGING_DECAY_MAX, _AGING_DECAY_PER_DAY * age)
+                row.daily_action_priority = max(1, row.daily_action_priority - decay)
+    campaign_rows.sort(
+        key=lambda row: (row.daily_action_priority, row.account_score, row.fit_score),
+        reverse=True,
+    )
     selected: list[DailyPlanItem] = []
     skipped: list[DailyPlanItem] = []
     used = {
@@ -1426,8 +1634,10 @@ def build_track_2_daily_plan(
         "email_research": 0,
         "context_enrichment": 0,
         "email_drafts": 0,
+        "large_company_invites": 0,
     }
     seen_companies: set[str] = set()
+    today = date.today().isoformat()
 
     for row in campaign_rows:
         item = _daily_plan_item_for_campaign(row)
@@ -1446,6 +1656,10 @@ def build_track_2_daily_plan(
         used["email_research"] += item.expected_email_research
         used["context_enrichment"] += item.expected_context_enrichment
         used["email_drafts"] += item.expected_email_drafts
+        if item.tier in {"L1", "L2"}:
+            used["large_company_invites"] += item.expected_linkedin_invites
+        if selection_history is not None and item.campaign_action in _AGED_ACTIONS:
+            _record_selection(history, item, row_by_key, today)
 
     selected.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
     skipped.sort(key=lambda item: (item.phase_order, -item.daily_action_priority, item.company.lower()))
@@ -1456,6 +1670,17 @@ def build_track_2_daily_plan(
         and item.expected_linkedin_invites > 0
         and str(item.phase).startswith("5_send_linkedin_invites")
     ]
+    high_leverage_people = [
+        {
+            "company": row.company,
+            "tier": row.tier,
+            "account_score": row.account_score,
+            "contacts": row.high_leverage_contacts,
+            "contact_count": row.high_leverage_count,
+        }
+        for row in sorted(rows, key=lambda r: -r.account_score)
+        if row.high_leverage_count > 0
+    ][:20]
     return {
         "budget": budget.__dict__,
         "used": used,
@@ -1465,6 +1690,7 @@ def build_track_2_daily_plan(
         "skipped": [item.__dict__ for item in skipped],
         "invite_backfill": invite_backfill,
         "invite_backfill_count": len(invite_backfill),
+        "high_leverage_people": high_leverage_people,
         "summary": _daily_plan_summary(selected),
         "phase_summary": _daily_plan_phase_summary(selected),
         "execution_order": _daily_plan_execution_order(),
@@ -1540,6 +1766,14 @@ def _daily_plan_skip_reason(
     if used["companies"] + 1 > budget.max_companies:
         return "company_budget_exhausted"
     _degrade_mapping_email_research_if_needed(item, used, budget)
+    if item.expected_linkedin_invites and item.tier not in {"L1", "L2"}:
+        reserved = min(
+            budget.reserved_large_company_invites, budget.max_linkedin_invites // 2
+        )
+        relationship_cap = budget.max_linkedin_invites - reserved
+        relationship_used = used["linkedin_invites"] - used.get("large_company_invites", 0)
+        if relationship_used + item.expected_linkedin_invites > relationship_cap:
+            return "linkedin_invites_budget_exhausted"
     checks = [
         ("linkedin_invites", item.expected_linkedin_invites, budget.max_linkedin_invites),
         ("linkedin_followups", item.expected_linkedin_followups, budget.max_linkedin_followups),

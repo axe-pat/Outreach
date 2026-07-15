@@ -956,3 +956,337 @@ def test_account_tracker_excel_writes_operational_views(tmp_path: Path) -> None:
     assert by_company["Growth Data"].account_track == "Growth / Mid-Market"
     assert by_company["BigCo"].account_track == "Large Company"
     assert by_company["Thin Import"].campaign_action == "enrich_company_context"
+
+
+def test_track_2_import_tags_do_not_grant_manual_priority(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-imported",
+            name="Imported Health",
+            organization_type=OrganizationType.COMPANY,
+            target_lists="jobs;resume_generator;account-universe;track-2",
+            notes="tags=healthcare,ai | description=Healthcare AI workflow product.",
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert "manual priority" not in row.why_fit
+    assert row.score_brand == 0
+
+
+def test_healthcare_tags_are_a_sliver_not_a_driver(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-health",
+            name="PureHealth",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "team_size=80 | tags=healthcare,health-tech,digital-health,medtech | "
+                "description=Clinical care coordination platform for hospitals."
+            ),
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.score_profile_fit <= 4
+
+
+def test_staffing_services_org_is_penalized_and_never_tier_a(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-staffing",
+            name="Talent360 Staffing",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="yc;startup",
+            notes=(
+                "team_size=60 | tags=hiring,recruiting,hr-tech,artificial-intelligence | "
+                "description=Staffing and recruiting agency placing engineers."
+            ),
+        )
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-product",
+            name="HiringProduct",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="yc;startup",
+            notes=(
+                "team_size=60 | tags=hiring,recruiting,hr-tech,artificial-intelligence | "
+                "description=ATS product for recruiting teams."
+            ),
+        )
+    )
+
+    by_company = {row.company: row for row in build_account_rows(tmp_path)}
+    staffing = by_company["Talent360 Staffing"]
+    product = by_company["HiringProduct"]
+
+    assert "staffing_services_org" in staffing.data_quality_flags
+    assert "staffing/recruiting services" in staffing.why_fit
+    assert staffing.account_score < product.account_score
+    assert staffing.tier != "A"
+    assert product.tier == "A"
+
+
+def test_solo_builder_and_unfunded_micro_team_never_tier_a(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    shared = "tags=artificial-intelligence,data-platform,developer-tools | description=AI developer data platform."
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-solo",
+            name="SoloCo",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="dream",
+            notes=f"team_size=1 | {shared}",
+        )
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-micro",
+            name="MicroCo",
+            organization_type=OrganizationType.STARTUP,
+            notes=f"team_size=10 | {shared}",
+        )
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-funded-micro",
+            name="FundedMicro",
+            organization_type=OrganizationType.STARTUP,
+            notes=f"team_size=10 | {shared} | prestige_signals=yc-backed",
+        )
+    )
+
+    by_company = {row.company: row for row in build_account_rows(tmp_path)}
+
+    assert by_company["SoloCo"].tier != "A"
+    assert by_company["MicroCo"].tier != "A"
+    assert by_company["FundedMicro"].tier == "A"
+
+
+def test_radar_tag_blocks_new_spend_but_not_live_conversations(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    shared = "team_size=40 | tags=artificial-intelligence,data-platform | description=AI data platform."
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-parked",
+            name="ParkedCo",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="radar",
+            notes=shared,
+        )
+    )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-parked-live",
+            name="ParkedLive",
+            organization_type=OrganizationType.STARTUP,
+            target_lists="radar",
+            notes=shared,
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-live",
+            organization_id="org-parked-live",
+            full_name="Live Person",
+            title="Product Manager at ParkedLive",
+            status="Replied",
+        )
+    )
+
+    by_company = {row.company: row for row in build_account_rows(tmp_path)}
+
+    assert by_company["ParkedCo"].campaign_action == "keep_on_radar"
+    assert by_company["ParkedLive"].campaign_action == "continue_conversation"
+    plan_rows = build_campaign_plan_rows(list(by_company.values()))
+    assert all(row.company != "ParkedCo" for row in plan_rows)
+
+
+def test_daily_plan_reserves_invite_slice_for_large_companies(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    for index in range(3):
+        workbook.upsert_organization(
+            OrganizationRecord(
+                organization_id=f"org-a-{index}",
+                name=f"StartupInvite {index}",
+                organization_type=OrganizationType.STARTUP,
+                target_lists="yc;startup",
+                notes=(
+                    "team_size=60 | tags=artificial-intelligence,data-platform,developer-tools | "
+                    "description=AI developer data platform."
+                ),
+            )
+        )
+        workbook.upsert_contact(
+            ContactRecord(
+                contact_id=f"ct-a-{index}",
+                organization_id=f"org-a-{index}",
+                full_name=f"Mapped Person {index}",
+                title=f"Product Manager at StartupInvite {index}",
+                status="Discovered",
+            )
+        )
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-large",
+            name="BigPlatform",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "team_size=8000 | tags=artificial-intelligence,data-platform,developer-tools | "
+                "description=Large developer data platform."
+            ),
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-large",
+            organization_id="org-large",
+            full_name="Large Person",
+            title="Product Manager at BigPlatform",
+            status="Discovered",
+        )
+    )
+
+    plan = build_track_2_daily_plan(
+        build_account_rows(tmp_path),
+        budget=DailyPlanBudget(
+            max_total_actions=10,
+            max_companies=10,
+            max_linkedin_invites=6,
+            max_linkedin_followups=0,
+            max_company_mapping=0,
+            max_email_research=0,
+            max_context_enrichment=0,
+            max_email_drafts=0,
+            reserved_large_company_invites=3,
+        ),
+    )
+
+    selected_by_tier = {}
+    for item in plan["selected"]:
+        if item["expected_linkedin_invites"]:
+            selected_by_tier.setdefault(item["tier"], []).append(item["company"])
+    assert "L1" in selected_by_tier, plan["selected"]
+    assert plan["used"]["large_company_invites"] >= 3
+    relationship_invites = plan["used"]["linkedin_invites"] - plan["used"]["large_company_invites"]
+    assert relationship_invites <= 3
+
+
+def test_daily_plan_aging_decay_rotates_stuck_companies(tmp_path: Path) -> None:
+    from outreach.account_tracker import load_selection_history, save_selection_history
+
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    shared = (
+        "team_size=60 | tags=artificial-intelligence,data-platform,workflow-automation | "
+        "description=AI workflow platform."
+    )
+    for org_id, name in (("org-stuck", "StuckCo"), ("org-fresh", "FreshCo")):
+        workbook.upsert_organization(
+            OrganizationRecord(
+                organization_id=org_id,
+                name=name,
+                organization_type=OrganizationType.STARTUP,
+                target_lists="yc;startup",
+                notes=shared,
+            )
+        )
+
+    rows = build_account_rows(tmp_path)
+    stuck = next(row for row in rows if row.company == "StuckCo")
+    marker = f"{stuck.account_stage}|{stuck.invites_sent}|{stuck.people_mapped}"
+    history = {
+        "org-stuck": {
+            "consecutive_selections": 3,
+            "progress_marker": marker,
+            "last_selected": "2026-07-15",
+        }
+    }
+    budget = DailyPlanBudget(
+        max_total_actions=1,
+        max_companies=1,
+        max_linkedin_invites=0,
+        max_linkedin_followups=0,
+        max_company_mapping=1,
+        max_email_research=0,
+        max_context_enrichment=0,
+        max_email_drafts=0,
+    )
+    plan = build_track_2_daily_plan(rows, budget=budget, selection_history=history)
+
+    mapping = [item for item in plan["selected"] if item["expected_company_mapping"]]
+    assert [item["company"] for item in mapping] == ["FreshCo"]
+    assert history["org-fresh"]["consecutive_selections"] == 1
+
+    save_selection_history(tmp_path, history)
+    assert load_selection_history(tmp_path)["org-stuck"]["consecutive_selections"] == 3
+
+
+def test_high_leverage_flag_requires_title_and_warm_path(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id="org-salesforce",
+            name="Salesforce",
+            organization_type=OrganizationType.COMPANY,
+            notes=(
+                "team_size=70000 | tags=artificial-intelligence,data-platform | "
+                "description=Enterprise CRM and AI platform."
+            ),
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-warm-exec",
+            organization_id="org-salesforce",
+            full_name="Warm Exec",
+            title="VP Product at Salesforce",
+            status="Discovered",
+            target_lists="usc-network",
+            notes="triggers=USC alum",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-cold-exec",
+            organization_id="org-salesforce",
+            full_name="Cold Exec",
+            title="Director of Product at Salesforce",
+            status="Discovered",
+        )
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-warm-junior",
+            organization_id="org-salesforce",
+            full_name="Warm Junior",
+            title="Product Manager at Salesforce",
+            status="Discovered",
+            target_lists="thapar-network",
+        )
+    )
+
+    rows = build_account_rows(tmp_path)
+    row = rows[0]
+
+    assert row.high_leverage_count == 1
+    assert "Warm Exec" in row.high_leverage_contacts
+    assert "Cold Exec" not in row.high_leverage_contacts
+
+    plan = build_track_2_daily_plan(rows)
+    lane = plan["high_leverage_people"]
+    assert lane and lane[0]["company"] == "Salesforce"
+    assert lane[0]["contact_count"] == 1

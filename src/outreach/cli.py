@@ -5455,7 +5455,13 @@ def build_track_2_daily_plan_cmd(
     max_email_drafts: Annotated[int, typer.Option(help="Maximum cold email drafts today; keep 0 until email engine is ready")] = 0,
 ) -> None:
     """Build a bounded review-only daily Track 2 operating plan."""
-    from outreach.account_tracker import DailyPlanBudget, build_account_rows, build_track_2_daily_plan
+    from outreach.account_tracker import (
+        DailyPlanBudget,
+        build_account_rows,
+        build_track_2_daily_plan,
+        load_selection_history,
+        save_selection_history,
+    )
 
     budget = DailyPlanBudget(
         max_total_actions=max_total_actions,
@@ -5467,7 +5473,13 @@ def build_track_2_daily_plan_cmd(
         max_context_enrichment=max_context_enrichment,
         max_email_drafts=max_email_drafts,
     )
-    plan = build_track_2_daily_plan(build_account_rows(workspace), budget=budget)
+    selection_history = load_selection_history(workspace)
+    plan = build_track_2_daily_plan(
+        build_account_rows(workspace),
+        budget=budget,
+        selection_history=selection_history,
+    )
+    save_selection_history(workspace, selection_history)
     artifact = write_artifact(
         OutreachSettings().artifacts_dir,
         "track-2-daily-plan",
@@ -6010,7 +6022,7 @@ def draft_track_2_email(
             f"Hi {name},\n\n"
             f"Following up with the specific reason I still think the fit may be real: {fit_line}\n\n"
             "If there is a better person or path for this background, a pointer would be genuinely useful. "
-            "If it is not relevant, no worries—I would rather know than keep nudging.\n\n"
+            "If it is not relevant, no worries - I would rather know than keep nudging.\n\n"
             "Best,\nAkshat"
         )
     elif cadence_action == "email_final_optional":
@@ -6685,7 +6697,13 @@ def _build_daily_plan_for_workspace(
     max_context_enrichment: int,
     max_email_drafts: int,
 ) -> dict:
-    from outreach.account_tracker import DailyPlanBudget, build_account_rows, build_track_2_daily_plan
+    from outreach.account_tracker import (
+        DailyPlanBudget,
+        build_account_rows,
+        build_track_2_daily_plan,
+        load_selection_history,
+        save_selection_history,
+    )
 
     budget = DailyPlanBudget(
         max_total_actions=max_total_actions,
@@ -6697,7 +6715,14 @@ def _build_daily_plan_for_workspace(
         max_context_enrichment=max_context_enrichment,
         max_email_drafts=max_email_drafts,
     )
-    return build_track_2_daily_plan(build_account_rows(workspace), budget=budget)
+    selection_history = load_selection_history(workspace)
+    plan = build_track_2_daily_plan(
+        build_account_rows(workspace),
+        budget=budget,
+        selection_history=selection_history,
+    )
+    save_selection_history(workspace, selection_history)
+    return plan
 
 
 def _artifact_snapshot(artifacts_dir: Path) -> set[Path]:

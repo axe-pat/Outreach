@@ -96,6 +96,33 @@ def missing_people_filter_url_params(
     return missing
 
 
+_US_GEO_URN = "103644278"
+_NETWORK_PARAM_BY_DEGREE = {"1st": "F", "2nd": "S", "3rd+": "O"}
+
+
+def patch_missing_filter_params(
+    url: str,
+    *,
+    connection_degree: str | None = None,
+    use_us_location: bool = False,
+) -> str:
+    """Rebuild degree/location facets LinkedIn silently dropped from the URL.
+
+    Company and school facets need LinkedIn's numeric entity ids from the
+    typeahead, so they cannot be reconstructed here; degree and US location use
+    fixed identifiers and can be patched deterministically.
+    """
+
+    parts = urlparse(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    degree_code = _NETWORK_PARAM_BY_DEGREE.get(connection_degree or "")
+    if degree_code and not query.get("network"):
+        query["network"] = f'["{degree_code}"]'
+    if use_us_location and not query.get("geoUrn"):
+        query["geoUrn"] = f'["{_US_GEO_URN}"]'
+    return parts._replace(query=urlencode(query)).geturl()
+
+
 @dataclass
 class LinkedInCheckResult:
     ok: bool
@@ -278,6 +305,27 @@ class LinkedInScraper:
                             # Modal can appear to accept values while returning an
                             # unfiltered FACETED_SEARCH URL. Re-open filters once.
                             continue
+                    if missing_filters and all(
+                        "connection degree" in item or "location" in item
+                        for item in missing_filters
+                    ):
+                        # Degree/location facets use fixed identifiers, so when
+                        # only those were dropped, rebuild the URL directly
+                        # instead of failing the whole search pass.
+                        patched_url = patch_missing_filter_params(
+                            page.url,
+                            connection_degree=connection_degree,
+                            use_us_location=use_us_location,
+                        )
+                        if patched_url != page.url and self._safe_goto(page, patched_url):
+                            self._human_pause(page)
+                            missing_filters = missing_people_filter_url_params(
+                                page.url,
+                                company=company,
+                                school=school,
+                                connection_degree=connection_degree,
+                                use_us_location=use_us_location,
+                            )
                     if missing_filters:
                         raise RuntimeError(
                             "LinkedIn dropped requested people-search filters: "
@@ -2524,9 +2572,17 @@ class LinkedInScraper:
         if len(exact_inputs) == 1:
             return exact_inputs[0]
         if len(exact_inputs) > 1:
-            raise PlaywrightTimeoutError(
-                f"Found multiple visible, editable inputs matching '{trigger_text}'."
-            )
+            # LinkedIn sometimes renders the same filter typeahead twice (pill
+            # dropdown plus the All-filters modal). Both are functionally the
+            # same input; prefer the focused one, else the most recently
+            # rendered, instead of failing the whole company.
+            for candidate in exact_inputs:
+                try:
+                    if candidate.evaluate("el => el === document.activeElement"):
+                        return candidate
+                except Exception:
+                    continue
+            return exact_inputs[-1]
         if len(visible_inputs) == 1:
             return visible_inputs[0]
         if not visible_inputs:

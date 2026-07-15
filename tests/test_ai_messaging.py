@@ -270,7 +270,9 @@ def test_ai_composer_allows_grounded_shared_employment_claim() -> None:
 
     assert result.used_ai is True
     assert result.attempts == 1
-    assert result.message == message
+    # Outbound punctuation is normalized: em dashes become plain dashes.
+    assert result.message == message.replace("\u2014", " - ")
+    assert "\u2014" not in result.message
 
 
 def test_invite_batch_falls_back_before_ungrounded_ai_copy_can_be_sendable() -> None:

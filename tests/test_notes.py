@@ -755,3 +755,64 @@ def test_note_signature_normalizes_name_and_company() -> None:
     b = "Hi Sonal, fellow Trojan here. I'm exploring PM roles at Snowflake. Fight On!"
 
     assert generator._note_signature(a) == generator._note_signature(b)
+
+
+def test_normalize_outbound_punctuation_strips_dashes() -> None:
+    from outreach.ai_messaging import normalize_outbound_punctuation
+
+    assert (
+        normalize_outbound_punctuation("a fellow Thaparian and Trojan — small world!")
+        == "a fellow Thaparian and Trojan - small world!"
+    )
+    assert normalize_outbound_punctuation("teams of 100–200 people") == "teams of 100-200 people"
+    assert normalize_outbound_punctuation("no dashes here") == "no dashes here"
+
+
+def test_generated_notes_never_contain_em_dashes() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Fellow Alum",
+        "shared_history": True,
+        "shared_history_signals": ["Thapar"],
+        "usc": True,
+        "role_bucket": "Product",
+        "title": "Product Manager",
+    }
+    for _ in range(6):
+        note = generator.generate(candidate, company="Adobe", company_mode="big_company")
+        assert "\u2014" not in note.text
+        assert "\u2013" not in note.text
+
+
+def test_quality_check_flags_em_dash() -> None:
+    generator = NoteGenerator()
+    candidate = {"name": "Sam", "role_bucket": "Product", "title": "PM"}
+    note = generator.generate(candidate, company="Adobe", company_mode="big_company")
+    note.text = "Hi Sam, exploring PM roles at Adobe — open to connecting?"
+    note.length = len(note.text)
+    quality = generator.quality_check(candidate, note)
+    assert any("Em/en dash" in flag for flag in quality.flags)
+
+
+def test_quality_check_recognizes_ai_style_asks() -> None:
+    generator = NoteGenerator()
+    candidate = {
+        "name": "Zack Tanner",
+        "usc": True,
+        "role_bucket": "Product",
+        "title": "Product Manager",
+    }
+    note = generator.generate(candidate, company="Vercel", company_mode="default")
+    for text in [
+        "Hi Zack, fellow Trojan here - I'm exploring technical PM roles at Vercel "
+        "with a data platform background. Does that fit product work there? Any "
+        "recommendations on who I should talk to?",
+        "Hi Zack, I'm exploring technical product roles at Vercel from a backend "
+        "background. How do builders like you influence product decisions there? "
+        "Any one person I should talk to about that?",
+    ]:
+        note.text = text
+        note.length = len(text)
+        quality = generator.quality_check(candidate, note)
+        assert quality.verdict == "send", quality.flags
+        assert "Ask is not clear" not in quality.flags

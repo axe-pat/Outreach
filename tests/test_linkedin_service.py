@@ -851,3 +851,53 @@ def test_open_search_result_connect_checks_multiple_pages(monkeypatch) -> None:
 
     assert opened is True
     assert any("page=2" in url for url in visited)
+
+
+def test_patch_missing_filter_params_rebuilds_degree_and_location() -> None:
+    from outreach.services.linkedin import (
+        missing_people_filter_url_params,
+        patch_missing_filter_params,
+    )
+
+    dropped = (
+        "https://www.linkedin.com/search/results/people/"
+        "?keywords=product%20manager&origin=FACETED_SEARCH"
+        "&currentCompany=%5B%2240692903%22%5D"
+    )
+    patched = patch_missing_filter_params(
+        dropped,
+        connection_degree="2nd",
+        use_us_location=True,
+    )
+    assert missing_people_filter_url_params(
+        patched,
+        company="MD Anderson",
+        connection_degree="2nd",
+        use_us_location=True,
+    ) == []
+    # Existing params must survive untouched.
+    assert "currentCompany" in patched
+    assert "keywords=product" in patched
+
+
+def test_patch_missing_filter_params_cannot_invent_company() -> None:
+    from outreach.services.linkedin import (
+        missing_people_filter_url_params,
+        patch_missing_filter_params,
+    )
+
+    bare = (
+        "https://www.linkedin.com/search/results/people/"
+        "?keywords=software+engineer&origin=FACETED_SEARCH"
+    )
+    patched = patch_missing_filter_params(
+        bare,
+        connection_degree="2nd",
+        use_us_location=True,
+    )
+    assert missing_people_filter_url_params(
+        patched,
+        company="Databricks",
+        connection_degree="2nd",
+        use_us_location=True,
+    ) == ["company"]

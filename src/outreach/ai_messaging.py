@@ -388,8 +388,12 @@ class AIMessagingService:
                 selected_source = str(payload.get("selected_story_source") or "").strip()
                 selected_evidence = str(payload.get("selected_story_evidence") or "").strip()
                 return AIMessageResult(
-                    message=str(payload.get("final_message") or "").strip(),
-                    subject=str(payload.get("subject") or request.subject).strip(),
+                    message=normalize_outbound_punctuation(
+                        str(payload.get("final_message") or "").strip()
+                    ),
+                    subject=normalize_outbound_punctuation(
+                        str(payload.get("subject") or request.subject).strip()
+                    ),
                     used_ai=True,
                     status="composed",
                     model=self.model,
@@ -458,7 +462,8 @@ class AIMessagingService:
             f"{institution_rule}\n"
             "Never invent employment, education, a mutual connection, product knowledge, or a recipient fact. "
             "Preserve any email address or URL in the base message. Keep the target role unchanged. "
-            "Obey the character limit when present.\n\n"
+            "Obey the character limit when present. Never use em dashes or en dashes; "
+            "use ' - ', a comma, or a period instead.\n\n"
             "Return one JSON object only with exactly these fields:\n"
             '{"scenario_summary":"...","selected_story_source":"supplied key or empty",'
             '"selected_story_evidence":"exact supplied value or empty","first_draft":"...",'
@@ -880,3 +885,16 @@ def _context_text(value: object) -> str:
 
 def _clean(value: object) -> str:
     return " ".join(str(value or "").split())
+
+
+_NUMERIC_DASH_RE = re.compile(r"(?<=\d)\s*[\u2013\u2014]\s*(?=\d)")
+_DASH_RE = re.compile(r"\s*[\u2013\u2014]\s*")
+
+
+def normalize_outbound_punctuation(text: str) -> str:
+    """Replace em/en dashes so outbound copy matches Akshat's own writing.
+
+    Numeric ranges keep a bare hyphen (100-200); prose dashes become " - ".
+    """
+    normalized = _NUMERIC_DASH_RE.sub("-", text)
+    return _DASH_RE.sub(" - ", normalized)

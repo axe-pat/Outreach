@@ -141,9 +141,14 @@ weak_messages:
   message: Thanks Austin, this is helpful. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Salestrics? Any recs on who I should talk to about that?
   notes: Learned negative example | generated draft cleared after user-confirmed response | company=Salestrics | recipient=Austin Buhl
   source: comms_learning/linkedin_examples.jsonl
-- label: learned_negative_9451537cb6
+- label: learned_negative_14581663b8
   recipient_type: engineer
-  message: Thanks for connecting, Emiliano. I'm exploring technical PM/product paths at Snyk from a backend/data engineering background. Does that background fit product work there? Any recs on who I should talk to about that?
-  notes: Learned negative example | generated draft replaced or cleared after manual send | company=Snyk | recipient=Emiliano Castro
+  message: Thanks Harsh. I'm exploring product roles where my engineering + MBA background could be useful. Does that background fit anything at Sortly? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=Sortly | recipient=Harsh Ranjan
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_921aa914b5
+  recipient_type: founder
+  message: Thanks Austin. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Salestrics? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=Salestrics | recipient=Austin Buhl
   source: comms_learning/linkedin_examples.jsonl
 notes: This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups.

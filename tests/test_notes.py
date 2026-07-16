@@ -816,3 +816,37 @@ def test_quality_check_recognizes_ai_style_asks() -> None:
         quality = generator.quality_check(candidate, note)
         assert quality.verdict == "send", quality.flags
         assert "Ask is not clear" not in quality.flags
+
+
+def test_generate_batch_keeps_template_note_when_ai_note_fails_qc() -> None:
+    class _RegressingAI:
+        def compose(self, request):
+            from outreach.ai_messaging import AIMessageResult
+
+            # An "ask" QC cannot recognize: no ask vocabulary at all.
+            return AIMessageResult(
+                message="Hi there, Vercel is doing interesting infrastructure work these days.",
+                subject="",
+                model="test-model",
+                used_ai=True,
+                attempts=1,
+                status="composed",
+            )
+
+    generator = NoteGenerator(ai_messaging=_RegressingAI())
+    candidates = [
+        {
+            "name": "Zack Tanner",
+            "usc": True,
+            "role_bucket": "Product",
+            "title": "Product Manager",
+            "linkedin_url": "https://www.linkedin.com/in/zack",
+            "score": 82,
+        }
+    ]
+    annotated = generator.generate_batch(candidates, company="Vercel", company_mode="default")
+
+    item = annotated[0]
+    assert item["note_qc"]["verdict"] == "send", item["note_qc"]["flags"]
+    assert any("kept the sendable template note" in flag for flag in item["note_qc"]["flags"])
+    assert "interesting infrastructure work these days" not in item["note"]

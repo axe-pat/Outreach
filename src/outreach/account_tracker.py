@@ -106,6 +106,11 @@ DOMAIN_TAGS: dict[str, int] = {
 PROFILE_FIT_CAP = 25
 LINKEDIN_WAVE_SIZE = 8
 MIN_MAPPED_CONTACTS = 3
+# Per-account effort ceiling: roughly two dead invite waves, then rest.
+# A company gets a real shot (fresh wave of people if the first went dead),
+# but never an unbounded stream of attempts while better accounts wait.
+ACCOUNT_INVITE_SATURATION = 16
+ACCOUNT_MAPPING_CAP = 30
 BRAND_SCORE_MAX = 12
 PITCH_SCORE_MAX = 10
 # Only tags Akshat sets by hand. Import pipelines stamp `track-2`,
@@ -1069,7 +1074,17 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
             "track_2_owns",
         )
     if row.account_stage == "outreach_active":
-        if row.invites_sent >= LINKEDIN_WAVE_SIZE and row.accepted == 0 and row.replies == 0:
+        no_traction = row.accepted == 0 and row.replies == 0
+        if no_traction and row.invites_sent >= ACCOUNT_INVITE_SATURATION:
+            return (
+                "rest_account",
+                "none",
+                6,
+                f"{row.invites_sent} invites across two waves with zero accepts/replies; "
+                "rest this account and give the budget to fresher targets.",
+                "lane_1_allowed",
+            )
+        if no_traction and row.invites_sent >= LINKEDIN_WAVE_SIZE:
             if row.email_contacts > 0:
                 return (
                     "send_cold_email_followup",
@@ -1078,11 +1093,30 @@ def _campaign_plan_for_account(row: AccountRow) -> tuple[str, str, int, str, str
                     f"{row.invites_sent} LinkedIn invites with no accepts/replies and email exists; switch the next touch to email.",
                     "track_2_owns",
                 )
+            unsent_pool = max(0, row.people_mapped - row.invites_sent)
+            if unsent_pool >= 2:
+                return (
+                    "expand_linkedin_wave",
+                    "linkedin",
+                    62 if row.tier == "A" else 48,
+                    f"First wave went dead but {unsent_pool} mapped contact(s) remain unsent; "
+                    f"run a second wave (rest at {ACCOUNT_INVITE_SATURATION} total invites).",
+                    "track_2_owns",
+                )
+            if row.people_mapped < ACCOUNT_MAPPING_CAP:
+                return (
+                    "map_more_contacts",
+                    "linkedin+email_research" if row.tier in {"A", "L1"} else "linkedin",
+                    60 if row.tier == "A" else 46,
+                    f"First {row.invites_sent}-invite wave went dead; map a fresh wave of people "
+                    f"(capped at {ACCOUNT_MAPPING_CAP} total) before resting the account.",
+                    "track_2_owns",
+                )
             return (
                 "find_email_path",
                 "email_research",
                 90 if row.tier == "A" else 70,
-                f"{row.invites_sent} LinkedIn invites with no accepts/replies; find an email/contact-info path instead of another blind wave.",
+                f"{row.invites_sent} LinkedIn invites with no accepts/replies and the mapping cap is reached; find an email/contact-info path.",
                 "track_2_owns",
             )
         if row.invites_sent < LINKEDIN_WAVE_SIZE:
@@ -1494,7 +1528,8 @@ def build_campaign_plan_rows(rows: list[AccountRow]) -> list[CampaignPlanRow]:
     actionable = [
         row
         for row in rows
-        if row.campaign_action not in {"pause_account", "wait_for_accepts", "keep_on_radar"}
+        if row.campaign_action
+        not in {"pause_account", "wait_for_accepts", "keep_on_radar", "rest_account"}
     ]
     actionable.sort(
         key=lambda row: (
@@ -1710,6 +1745,9 @@ def _daily_plan_item_for_campaign(row: CampaignPlanRow) -> DailyPlanItem:
         target_role=row.target_role,
     )
     remaining_wave = max(0, LINKEDIN_WAVE_SIZE - row.invites_sent)
+    if remaining_wave == 0:
+        # Second wave: budget against the saturation ceiling, not wave one.
+        remaining_wave = max(0, ACCOUNT_INVITE_SATURATION - row.invites_sent)
     if row.campaign_action in {"continue_conversation", "follow_up_connected_contact"}:
         item.expected_linkedin_followups = 1
     elif row.campaign_action == "send_initial_invites":

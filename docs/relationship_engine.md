@@ -593,6 +593,30 @@ Two anti-stagnation mechanisms in the daily plan
   large-company track always gets a daily slice. L1/L2 need mostly referrals via
   the India network, but high-leverage individuals there are worth real invites.
 
+### Per-Account Saturation (Try, Retry, Rest)
+
+A company gets a real shot but never unbounded effort. The invite lifecycle is:
+
+1. **Wave 1** — up to `LINKEDIN_WAVE_SIZE` (8) invites from mapped contacts.
+2. **Dead wave** (8+ invites, 0 accepts/replies) — prefer, in order: cold email
+   if an address exists → **second wave** from remaining unsent mapped contacts
+   → **map a fresh wave** of people (total mapped capped at
+   `ACCOUNT_MAPPING_CAP` = 30) → email-path research.
+3. **Rest** — at `ACCOUNT_INVITE_SATURATION` (16) total invites with zero
+   traction, the account moves to `rest_account`: visible in reports, excluded
+   from campaign rows, consumes no budget. Any accept/reply resets the account
+   into the normal conversation flow.
+
+### Note QC Fallback (Warmest Sendable Note Always Wins)
+
+The AI rewrite is an upgrade attempt, never a gate. In `generate_batch`, if the
+AI-composed note fails QC but the deterministic template note passed, the
+template note is kept and the candidate stays sendable (flagged
+"AI note failed QC; kept the sendable template note"). `polish_batch` applies
+the same rule: a regressed polish never overrides a sendable base note. A
+qualified candidate can no longer be silently dropped because the AI made the
+note worse.
+
 ### High-Leverage People Lane
 
 Contacts with a senior title (Director/VP/Head-of-Product/EM and up) **and** a

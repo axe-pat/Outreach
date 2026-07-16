@@ -380,8 +380,10 @@ def test_account_campaign_plan_switches_channel_after_large_dead_linkedin_wave(t
     row = build_account_rows(tmp_path)[0]
 
     assert row.account_stage == "outreach_active"
-    assert row.campaign_action == "find_email_path"
-    assert row.campaign_channel == "email_research"
+    # Dead wave with no email and no unsent pool: map a fresh wave of people
+    # first (email path comes only after the mapping cap is reached).
+    assert row.campaign_action == "map_more_contacts"
+    assert "fresh wave" in row.campaign_reason
     assert row.lane_1_policy == "track_2_owns"
 
 
@@ -1290,3 +1292,92 @@ def test_high_leverage_flag_requires_title_and_warm_path(tmp_path: Path) -> None
     lane = plan["high_leverage_people"]
     assert lane and lane[0]["company"] == "Salesforce"
     assert lane[0]["contact_count"] == 1
+
+
+def _dead_wave_org(workbook: OutreachWorkbook, *, invited: int, mapped_extra: int = 0, org_id: str = "org-dead", name: str = "DeadWaveCo") -> None:
+    workbook.upsert_organization(
+        OrganizationRecord(
+            organization_id=org_id,
+            name=name,
+            organization_type=OrganizationType.STARTUP,
+            target_lists="yc;startup",
+            notes=(
+                "team_size=120 | tags=artificial-intelligence,data-platform,developer-tools | "
+                "description=AI developer data platform."
+            ),
+        )
+    )
+    for index in range(invited):
+        workbook.upsert_contact(
+            ContactRecord(
+                contact_id=f"ct-{org_id}-inv-{index}",
+                organization_id=org_id,
+                full_name=f"Invited Person {index}",
+                title=f"Product Manager at {name} {index}",
+                status="Invited",
+            )
+        )
+    for index in range(mapped_extra):
+        workbook.upsert_contact(
+            ContactRecord(
+                contact_id=f"ct-{org_id}-new-{index}",
+                organization_id=org_id,
+                full_name=f"Fresh Person {index}",
+                title=f"Product Manager at {name} fresh {index}",
+                status="Discovered",
+            )
+        )
+
+
+def test_dead_wave_with_unsent_pool_runs_second_wave(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    _dead_wave_org(workbook, invited=8, mapped_extra=5)
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.campaign_action == "expand_linkedin_wave"
+    assert "second wave" in row.campaign_reason
+
+
+def test_dead_wave_with_exhausted_pool_maps_fresh_people(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    _dead_wave_org(workbook, invited=9, mapped_extra=0)
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.campaign_action == "map_more_contacts"
+    assert "fresh wave" in row.campaign_reason
+
+
+def test_saturated_account_rests_and_leaves_the_queue(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    _dead_wave_org(workbook, invited=16, mapped_extra=3)
+
+    rows = build_account_rows(tmp_path)
+    row = rows[0]
+
+    assert row.campaign_action == "rest_account"
+    assert build_campaign_plan_rows(rows) == []
+
+
+def test_traction_overrides_saturation(tmp_path: Path) -> None:
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    _dead_wave_org(workbook, invited=16, org_id="org-warm", name="WarmWaveCo")
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-org-warm-accepted",
+            organization_id="org-warm",
+            full_name="Accepted Person",
+            title="Product Manager at WarmWaveCo",
+            status="Warm",
+            notes="passes=existing_connections | triggers=Existing Connection",
+        )
+    )
+
+    row = build_account_rows(tmp_path)[0]
+
+    assert row.campaign_action != "rest_account"

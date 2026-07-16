@@ -205,13 +205,15 @@ class NoteGenerator:
         annotated: list[dict] = []
         recent_notes: list[str] = []
         for index, candidate in enumerate(candidates):
-            generated = self.generate(
+            base_generated = self.generate(
                 candidate,
                 company=company,
                 company_mode=company_mode,
                 note_context=note_context,
             )
-            base_quality = self.quality_check(candidate, generated, recent_notes)
+            base_quality = self.quality_check(candidate, base_generated, recent_notes)
+            generated = base_generated
+            quality = base_quality
             ai_result = None
             if self.ai_messaging is not None and (
                 self.ai_message_limit <= 0 or index < self.ai_message_limit
@@ -221,12 +223,23 @@ class NoteGenerator:
                         candidate=candidate,
                         company=company,
                         company_mode=company_mode,
-                        generated=generated,
+                        generated=base_generated,
                         critique_flags=base_quality.flags,
                     )
                 )
-                generated = self._generated_from_ai(generated, candidate, ai_result.message)
-            quality = self.quality_check(candidate, generated, recent_notes)
+                ai_generated = self._generated_from_ai(
+                    base_generated, candidate, ai_result.message
+                )
+                ai_quality = self.quality_check(candidate, ai_generated, recent_notes)
+                if ai_quality.verdict == "send" or base_quality.verdict != "send":
+                    generated, quality = ai_generated, ai_quality
+                else:
+                    # A sendable candidate must never be lost because the AI
+                    # rewrite regressed below QC; the template note already
+                    # passed, so send that instead.
+                    quality.flags.append(
+                        "AI note failed QC; kept the sendable template note"
+                    )
             recipient_type = self._style_recipient_type(candidate, generated.family, candidate.get("role_bucket") or "Other")
             style_review = self.style_profile.review_message(generated.text, recipient_type)
             enriched = {
@@ -303,15 +316,24 @@ class NoteGenerator:
                     message=result.message,
                 )
                 qc = self.quality_check(candidate, polished_note, recent_polished)
-                enriched["polished_note"] = polished_note.text
-                enriched["polished_note_length"] = polished_note.length
-                enriched["polished_note_within_limit"] = polished_note.within_limit
-                enriched["polished_note_qc"] = asdict(qc)
-                enriched["polished_note_ai_messaging"] = {
-                    **result.as_dict(),
-                    "applied_message": polished_note.text,
-                }
-                recent_polished.append(polished_note.text)
+                base_verdict = str(
+                    (candidate.get("note_qc") or {}).get("verdict") or ""
+                )
+                if qc.verdict != "send" and base_verdict == "send":
+                    # Selection prefers polished_note_qc, so a regressed polish
+                    # would silently kill a sendable candidate. Keep the
+                    # original note and its passing QC instead.
+                    recent_polished.append(str(candidate["note"]))
+                else:
+                    enriched["polished_note"] = polished_note.text
+                    enriched["polished_note_length"] = polished_note.length
+                    enriched["polished_note_within_limit"] = polished_note.within_limit
+                    enriched["polished_note_qc"] = asdict(qc)
+                    enriched["polished_note_ai_messaging"] = {
+                        **result.as_dict(),
+                        "applied_message": polished_note.text,
+                    }
+                    recent_polished.append(polished_note.text)
             polished.append(enriched)
         return polished
 

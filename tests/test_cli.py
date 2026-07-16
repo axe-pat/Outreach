@@ -4172,7 +4172,8 @@ def test_select_invite_candidates_filters_existing_connections_and_blocked_notes
 
     selected = select_invite_candidates(candidates, limit=5)
 
-    assert [item["name"] for item in selected] == ["A"]
+    assert [item["name"] for item in selected] == ["A", "D"]
+    assert selected[1]["invite_score_fallback"] is True
 
 
 def test_manual_live_send_blocks_failed_julia_company_filter(
@@ -7068,3 +7069,72 @@ def test_build_resume_outreach_queue_applies_override_bias_and_company_cap() -> 
     assert queue[0].startup_bias == "high"
     assert queue[-1].company == "TikTok"
     assert queue[-1].startup_bias == "deprioritize"
+
+
+def test_select_invite_candidates_falls_back_to_best_available_below_bar() -> None:
+    candidates = [
+        {
+            "name": "Warm",
+            "linkedin_url": "https://www.linkedin.com/in/warm/",
+            "existing_connection": False,
+            "score": 82,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "MappedEng",
+            "linkedin_url": "https://www.linkedin.com/in/mapped/",
+            "existing_connection": False,
+            "score": 6,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "Blocked",
+            "linkedin_url": "https://www.linkedin.com/in/blocked/",
+            "existing_connection": False,
+            "score": 90,
+            "note_qc": {"verdict": "blocked"},
+        },
+        {
+            "name": "Junk",
+            "linkedin_url": "https://www.linkedin.com/in/junk/",
+            "existing_connection": False,
+            "score": -25,
+            "note_qc": {"verdict": "send"},
+        },
+    ]
+
+    selected = select_invite_candidates(candidates, min_score=35, limit=3)
+
+    assert [item["name"] for item in selected] == ["Warm", "MappedEng"]
+    assert selected[1]["invite_score_fallback"] is True
+
+
+def test_select_invite_candidates_prefers_bar_before_fallback_fill() -> None:
+    candidates = [
+        {
+            "name": "A",
+            "linkedin_url": "https://www.linkedin.com/in/a/",
+            "existing_connection": False,
+            "score": 50,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "B",
+            "linkedin_url": "https://www.linkedin.com/in/b/",
+            "existing_connection": False,
+            "score": 40,
+            "note_qc": {"verdict": "send"},
+        },
+        {
+            "name": "C",
+            "linkedin_url": "https://www.linkedin.com/in/c/",
+            "existing_connection": False,
+            "score": 8,
+            "note_qc": {"verdict": "send"},
+        },
+    ]
+
+    selected = select_invite_candidates(candidates, min_score=35, limit=2)
+
+    assert [item["name"] for item in selected] == ["A", "B"]
+    assert all(not item.get("invite_score_fallback") for item in selected)

@@ -96,7 +96,16 @@ def build_mapped_invite_candidates(
             runtime_settings.scoring,
         )
         lead_priority = _lead_priority(tags, contact.notes)
+        # Mapped workbook contacts were already accepted as relevant people at
+        # this company. Connection-degree penalties (especially 3rd) otherwise
+        # crush Product/Engineering/Founder scores to 2–8 and the invite gate
+        # throws them away. Floor them so they remain sendable when warm paths
+        # aren't present.
         score = scored.score + {"high": 8, "medium": 4}.get(lead_priority, 0)
+        if role_bucket in {"Product", "Engineering", "Founder", "Adjacent"}:
+            score = max(score, 25)
+        else:
+            score = max(score, 15)
         tier = (
             PriorityTier.HIGH.value
             if score >= 80

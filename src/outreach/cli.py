@@ -2427,37 +2427,85 @@ def select_invite_candidates(
     target_company: str = "",
     company_mode: str = "default",
     source_payload: dict | None = None,
+    fallback_min_score: int | None = 0,
 ) -> list[dict]:
+    """Pick sendable invite candidates, preferring the score bar then best-available.
+
+    Preferred path: QC-pass + score >= ``min_score``.
+    If that cannot fill ``limit``, fill remaining slots from QC-pass candidates
+    ranked by score down to ``fallback_min_score`` (default 0). Without this
+    fallback, whole companies go empty even when mapped Product/Engineering
+    people with sendable notes are sitting in the pipeline at scores 2–8.
+    """
     if invite_payload_company_filter_failed(source_payload):
         return []
-    eligible: list[dict] = []
-    for item in candidates:
+
+    def _base_eligible(item: dict) -> bool:
         if not candidate_is_send_safe_for_company(
             item,
             company=target_company,
             company_mode=company_mode,
             source_payload=source_payload,
         ):
-            continue
+            return False
         qc = item.get("polished_note_qc") or item.get("note_qc") or {}
         item_verdict = qc.get("verdict")
         if verdict and item_verdict != verdict:
-            continue
+            return False
         if item.get("existing_connection"):
-            continue
+            return False
         if not item.get("linkedin_url"):
-            continue
+            return False
+        return True
+
+    def _score_of(item: dict) -> int | None:
         try:
-            candidate_score = int(item.get("score"))
+            return int(item.get("score"))
         except (TypeError, ValueError):
-            candidate_score = None
+            return None
+
+    def _prepare(item: dict) -> dict:
+        prepared = dict(item)
+        if "polished_note" in prepared:
+            prepared["note"] = prepared["polished_note"]
+        return prepared
+
+    preferred: list[dict] = []
+    for item in candidates:
+        if not _base_eligible(item):
+            continue
+        candidate_score = _score_of(item)
         if min_score > -999 and (candidate_score is None or candidate_score < min_score):
             continue
-        item = dict(item)
-        if "polished_note" in item:
-            item["note"] = item["polished_note"]
-        eligible.append(item)
-    return eligible[start_at : start_at + limit]
+        preferred.append(_prepare(item))
+
+    selected = preferred[start_at : start_at + limit]
+    if fallback_min_score is None or len(selected) >= limit:
+        return selected
+
+    preferred_ids = {
+        str(item.get("linkedin_url") or item.get("mapped_contact_id") or item.get("name") or id(item))
+        for item in selected
+    }
+    fallback_pool: list[tuple[int, dict]] = []
+    for item in candidates:
+        if not _base_eligible(item):
+            continue
+        identity = str(
+            item.get("linkedin_url") or item.get("mapped_contact_id") or item.get("name") or id(item)
+        )
+        if identity in preferred_ids:
+            continue
+        candidate_score = _score_of(item)
+        if candidate_score is None or candidate_score < fallback_min_score:
+            continue
+        prepared = _prepare(item)
+        prepared["invite_score_fallback"] = True
+        fallback_pool.append((candidate_score, prepared))
+    fallback_pool.sort(key=lambda pair: pair[0], reverse=True)
+    needed = limit - len(selected)
+    selected.extend(item for _, item in fallback_pool[:needed])
+    return selected
 
 
 def select_invite_candidates_with_affinity_lift(
@@ -2491,6 +2539,7 @@ def select_invite_candidates_with_affinity_lift(
         target_company=target_company,
         company_mode=company_mode,
         source_payload=source_payload,
+        fallback_min_score=0,
     )
     base = eligible[:planned]
     lift_slots = max(0, effective - planned)

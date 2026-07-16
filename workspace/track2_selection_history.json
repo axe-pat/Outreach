@@ -1,0 +1,140 @@
+{
+ "org-bellagent": {
+  "company": "Bellagent",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-bot-auto": {
+  "company": "Bot Auto",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-checkr": {
+  "company": "Checkr",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|18"
+ },
+ "org-collectly": {
+  "company": "Collectly",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|1"
+ },
+ "org-commure": {
+  "company": "Commure",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|11"
+ },
+ "org-compa": {
+  "company": "Compa",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-crexi": {
+  "company": "Crexi",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-datadog": {
+  "company": "Datadog",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|19"
+ },
+ "org-flairx": {
+  "company": "FlairX",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "outreach_active|2|2"
+ },
+ "org-globalization-partners": {
+  "company": "Globalization Partners",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-gumgum": {
+  "company": "GumGum",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-heygen": {
+  "company": "HeyGen",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|7"
+ },
+ "org-hub": {
+  "company": "Hub",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-january": {
+  "company": "January",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "outreach_active|6|9"
+ },
+ "org-liftoff": {
+  "company": "Liftoff",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-parsec-automation": {
+  "company": "Parsec Automation",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-postman": {
+  "company": "Postman",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-recurly": {
+  "company": "Recurly",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|3"
+ },
+ "org-relay": {
+  "company": "Relay",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-ria-money-transfer-xml": {
+  "company": "Ria Money Transfer - XML",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-topsort": {
+  "company": "Topsort",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-workwhile": {
+  "company": "WorkWhile",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "outreach_active|13|13"
+ },
+ "org-writer": {
+  "company": "Writer",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-16",
+  "progress_marker": "people_mapped|0|1"
+ }
+}

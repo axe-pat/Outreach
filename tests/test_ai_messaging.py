@@ -68,8 +68,9 @@ def test_ai_composer_rewrites_generic_first_attempt_and_preserves_story_evidence
             ),
             _output(
                 (
-                    "Hi Maya, Airbyte's connector work maps directly to the systems I built at "
-                    "Hevo. Curious whether that background is useful on the product side?"
+                    "Hi Maya, Airbyte's connector work is close to the data movement systems I "
+                    "built at Hevo. I've been deep in product for a while now. Would be great "
+                    "to connect."
                 ),
                 story_source="story_fit_reason",
                 story_evidence=evidence,
@@ -240,7 +241,7 @@ def test_ai_composer_repairs_target_role_drift_and_unsupported_person_claims() -
 def test_ai_composer_allows_grounded_shared_employment_claim() -> None:
     evidence = "I worked at Hevo on data systems."
     message = (
-        "Hi Maya, your connector background makes the overlap kind of wild—we both worked "
+        "Hi Maya, your connector background makes the overlap kind of wild, we both worked "
         "at Hevo! I'm exploring product roles there. Open to connecting?"
     )
     client = _Client(
@@ -270,8 +271,7 @@ def test_ai_composer_allows_grounded_shared_employment_claim() -> None:
 
     assert result.used_ai is True
     assert result.attempts == 1
-    # Outbound punctuation is normalized: em dashes become plain dashes.
-    assert result.message == message.replace("\u2014", " - ")
+    assert result.message == message
     assert "\u2014" not in result.message
 
 

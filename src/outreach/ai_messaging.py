@@ -446,30 +446,54 @@ class AIMessagingService:
             "maximum_characters": request.max_chars or None,
         }
         institution_rule = self._institution_rule(request.institution_signals)
+        channel_rule = self._channel_rule(request)
         return (
             "You write outreach for Akshat. Work only on scenario understanding, story selection, "
             "message drafting, and critique. Never decide send/hold/reply state, cadence, caps, "
             "recipient classification, or scheduling; immutable_deterministic_context is context only.\n\n"
             "Process:\n"
             "1. Read the conversation in order and summarize the actual situation in one sentence.\n"
-            "2. If story evidence exists, select exactly one supplied key whose evidence best explains fit. "
-            "Copy that evidence verbatim into selected_story_evidence; do not invent a story.\n"
+            "2. If story evidence exists, select at most one supplied key whose evidence is genuinely "
+            "relevant to this company. Copy that evidence verbatim into selected_story_evidence. If none "
+            "is relevant, leave both story fields empty instead of forcing a weak match.\n"
             "3. Draft from the supplied facts and real style examples. The base message is a fallback, not a template.\n"
             "4. Critique the first draft for generic networking language, formality, unsupported claims, "
             "a vague ask, and whether it sounds like a bot.\n"
             "5. Return a final rewrite that fixes every critique item. Warmth, contractions, a little character, "
             "and a natural exclamation mark are welcome when earned; corporate polish is not.\n"
+            f"{channel_rule}\n"
             f"{institution_rule}\n"
             "Never invent employment, education, a mutual connection, product knowledge, or a recipient fact. "
             "Preserve any email address or URL in the base message. Keep the target role unchanged. "
-            "Obey the character limit when present. Never use em dashes or en dashes; "
-            "use ' - ', a comma, or a period instead.\n\n"
+            "Obey the character limit when present. Never use em dashes or en dashes. Use a comma or a "
+            "period instead. Akshat has already worked deeply in product, so never frame him as transitioning, "
+            "pivoting, moving toward, or trying to break into product.\n\n"
             "Return one JSON object only with exactly these fields:\n"
             '{"scenario_summary":"...","selected_story_source":"supplied key or empty",'
             '"selected_story_evidence":"exact supplied value or empty","first_draft":"...",'
             '"critique":["..."],"subject":"email subject or supplied subject",'
             '"final_message":"..."}\n\n'
             f"INPUT:\n{json.dumps(payload, ensure_ascii=False, default=str)}"
+        )
+
+    def _channel_rule(self, request: AIMessageRequest) -> str:
+        if request.channel != "linkedin_invite":
+            return (
+                "This is a post-acceptance message. State the concrete intent and give the recipient "
+                "one easy, specific next step."
+            )
+        if request.recipient_type == "recruiter":
+            return (
+                "This is a LinkedIn invite to a recruiter. Keep it concise; a direct question about "
+                "the relevant hiring path is allowed because hiring is their remit."
+            )
+        return (
+            "This is a LinkedIn invite, not the pitch. Its job is to earn the acceptance and plant one "
+            "memorable, true hook. Lead with shared identity or measured company interest, then use one "
+            "compact credibility line. End with a warm connection close. Do not ask for a referral, an "
+            "introduction, a hiring contact, a fit assessment, advice, or a call. Do not mention a fall "
+            "internship here. Save the actual intent for the follow-up. If a niche former employer appears "
+            "in evidence, explain the relevant work rather than assuming the employer name is familiar."
         )
 
     def _repair_prompt(
@@ -521,6 +545,28 @@ class AIMessagingService:
             first_name = request.recipient_name.split()[0].casefold()
             if first_name and first_name not in message_lower:
                 flags.append("recipient first name was dropped from the invite")
+        if "\u2014" in message or "\u2013" in message:
+            flags.append("final message contains an em dash or en dash")
+        if re.search(
+            r"\b(?:transition(?:ing)?|pivot(?:ing)?|moving toward|making the shift|"
+            r"break(?:ing)? into)\b[^.!?\n]{0,45}\bproduct\b",
+            message,
+            re.I,
+        ):
+            flags.append("final message frames Akshat as transitioning into product")
+        if request.channel == "linkedin_invite" and request.recipient_type != "recruiter":
+            if re.search(
+                r"\b(?:referr(?:al|ing)?|introduction|introduce me|hiring contact|"
+                r"right person|who (?:should|can) i (?:talk|speak)|open to (?:a )?"
+                r"(?:quick )?(?:call|chat)|does (?:that|my) background (?:fit|seem)|"
+                r"(?:curious|wondering) (?:if|whether)[^.?!]{0,60}"
+                r"(?:background|experience)[^.?!]{0,30}(?:fit|useful|relevant))\b",
+                message,
+                re.I,
+            ):
+                flags.append("invite contains a substantive ask that belongs in the follow-up")
+            if re.search(r"\bfall (?:product )?intern(?:ship)?\b", message, re.I):
+                flags.append("invite mentions the fall internship before acceptance")
 
         for value in re.findall(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", request.base_message, re.I):
             if value.casefold() not in message_lower:
@@ -537,7 +583,7 @@ class AIMessagingService:
         }
         selected_source = str(payload.get("selected_story_source") or "").strip()
         selected_evidence = str(payload.get("selected_story_evidence") or "").strip()
-        if supplied_evidence:
+        if supplied_evidence and (selected_source or selected_evidence):
             if selected_source not in supplied_evidence:
                 flags.append("selected_story_source is not one of the supplied evidence keys")
             elif selected_evidence != supplied_evidence[selected_source]:

@@ -20,7 +20,9 @@ def assert_contextual_note_quality(note_text: str, company: str) -> None:
     lower = note_text.lower()
     assert len(note_text) <= NOTE_CHAR_LIMIT
     assert company.lower() in note_text[:140].lower()
-    assert re.search(r"\b(marshall mba|usc marshall|fellow marshall|fellow trojan)\b", lower)
+    assert "deep in product for a while now" in lower
+    assert not re.search(r"\b(transition|pivot|moving toward|making the shift)\b", lower)
+    assert not re.search(r"\b(referral|hiring contact|right person)\b", lower)
     for pattern in BAD_CONTEXTUAL_NOTE_PATTERNS:
         assert not re.search(pattern, note_text, flags=re.I), pattern
 
@@ -256,7 +258,7 @@ def test_quality_check_flags_thapar_drop() -> None:
     assert "confirmed Thapar connection was dropped from the invite" in quality.flags
 
 
-def test_senior_product_note_uses_contribution_fit_ending() -> None:
+def test_senior_product_invite_is_warm_and_saves_the_ask_for_followup() -> None:
     generator = NoteGenerator()
     note = generator.generate(
         {
@@ -280,18 +282,14 @@ def test_senior_product_note_uses_contribution_fit_ending() -> None:
     assert note.family == "senior_product_contribution"
     assert note.within_limit is True
     assert note.length <= NOTE_CHAR_LIMIT
-    assert any(
-        phrase in note.text
-        for phrase in [
-            "exploring product roles",
-            "Open to connecting?",
-            "quick read on fit",
-        ]
-    )
+    assert "deep in product for a while now" in note.text
+    assert "Would be great to connect." in note.text
+    assert "referral" not in note.text.lower()
+    assert "quick read on fit" not in note.text.lower()
     assert "Deepgram" in note.text.split(".", 1)[0]
 
 
-def test_india_based_engineer_note_asks_for_referral_or_pointer() -> None:
+def test_india_based_engineer_invite_defers_referral_ask_to_followup() -> None:
     generator = NoteGenerator()
     note = generator.generate(
         {
@@ -314,11 +312,13 @@ def test_india_based_engineer_note_asks_for_referral_or_pointer() -> None:
     assert note.family == "engineering_referral"
     assert note.ask_style == "referral"
     assert note.within_limit is True
-    assert "referral" in note.text.lower()
-    assert any(phrase in note.text.lower() for phrase in ["pointer", "hiring-team", "hiring team"])
+    assert "referral" not in note.text.lower()
+    assert "hiring team" not in note.text.lower()
+    assert "deep in product for a while now" in note.text.lower()
+    assert "connect" in note.text.lower()
 
 
-def test_founder_note_uses_builder_fit_instead_of_generic_connection() -> None:
+def test_founder_note_uses_company_interest_and_product_credibility() -> None:
     generator = NoteGenerator()
     note = generator.generate(
         {
@@ -340,11 +340,13 @@ def test_founder_note_uses_builder_fit_instead_of_generic_connection() -> None:
 
     assert note.family == "founder_builder_fit"
     assert note.within_limit is True
-    assert any(phrase in note.text.lower() for phrase in ["builder", "operator", "useful", "team grows"])
+    assert "deep in product for a while now" in note.text.lower()
+    assert "connect" in note.text.lower()
+    assert "referral" not in note.text.lower()
     assert "Yondu" in note.text.split(".", 1)[0]
 
 
-def test_engineering_context_note_starts_with_identity_and_company() -> None:
+def test_engineering_context_note_starts_with_company_and_established_product_identity() -> None:
     generator = NoteGenerator()
     note = generator.generate(
         {
@@ -367,7 +369,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
     first_sentence = note.text.split(".", 1)[0]
     lower = note.text.lower()
     assert "WorkWhile" in first_sentence
-    assert "marshall mba" in lower or "usc marshall" in lower
+    assert "deep in product for a while now" in lower
     assert "your engineering work stood out" not in lower
     assert "ai product direction" not in lower
     assert "company direction" not in lower
@@ -393,7 +395,7 @@ def test_engineering_context_note_starts_with_identity_and_company() -> None:
         },
     ],
 )
-def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
+def test_airbyte_story_fit_context_uses_relevant_domain_without_unexplained_employer(
     story_context: dict,
 ) -> None:
     note = NoteGenerator().generate(
@@ -419,8 +421,9 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
     assert note.family == "engineering_product_bridge"
     assert note.within_limit is True
     assert note.length <= 270
-    assert "Airbyte's work on connectors and ETL" in note.text
-    assert "engineering work at Hevo" in note.text
+    assert "data/platform engineering" in note.text
+    assert "deep in product for a while now" in note.text
+    assert "Hevo" not in note.text
     assert "platform work connects with systems I've built before" not in note.text
 
 
@@ -442,7 +445,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
             },
             {"opportunity_titles": ["Product Owner Internship"]},
             "founder_builder_fit",
-            ["product work", "I'd value a connect"],
+            ["deep in product", "connect"],
         ),
         (
             "founder_with_specific_company_context",
@@ -462,7 +465,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
                 "description": "Strawberry picking robots, bed-level analytics, data pipeline integration, and robotics services.",
             },
             "founder_builder_fit",
-            ["Synphony's robotics + data pipeline", "connect"],
+            ["Synphony", "deep in product", "connect"],
         ),
         (
             "engineer_pointer",
@@ -482,7 +485,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
                 "description": "Labor platform helping businesses fill shifts and reduce no-shows.",
             },
             "engineering_product_bridge",
-            ["pointer", "technical PM candidates"],
+            ["deep in product", "connect"],
         ),
         (
             "india_engineer_referral",
@@ -503,7 +506,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
                 "description": "Developer-security platform for secure software delivery.",
             },
             "engineering_referral",
-            ["referral", "hiring team"],
+            ["deep in product", "connect"],
         ),
         (
             "senior_product_contribution",
@@ -524,7 +527,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
                 "opportunity_titles": ["Product Management Intern, Summer 2026"],
             },
             "senior_product_contribution",
-            ["product roles", "Deepgram"],
+            ["deep in product", "Deepgram", "connect"],
         ),
         (
             "operator_contribution",
@@ -541,7 +544,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
             },
             {"opportunity_titles": ["Product Owner Internship"]},
             "operator_contribution",
-            ["product/strategy", "quick read on fit"],
+            ["PM/product roles", "connect"],
         ),
         (
             "cloud_agent_workspace",
@@ -561,7 +564,7 @@ def test_airbyte_story_fit_context_uses_hevo_connector_scenario(
                 "description": "Desktop OS and cloud desktop workspace for humans and agents running in the cloud.",
             },
             "founder_builder_fit",
-            ["Endstack's cloud desktop/agent workspace", "Open to connecting"],
+            ["Endstack", "deep in product", "connect"],
         ),
     ],
 )
@@ -794,7 +797,7 @@ def test_quality_check_flags_em_dash() -> None:
     assert any("Em/en dash" in flag for flag in quality.flags)
 
 
-def test_quality_check_recognizes_ai_style_asks() -> None:
+def test_quality_check_accepts_warm_close_and_blocks_pitch_asks_in_invites() -> None:
     generator = NoteGenerator()
     candidate = {
         "name": "Zack Tanner",
@@ -803,19 +806,41 @@ def test_quality_check_recognizes_ai_style_asks() -> None:
         "title": "Product Manager",
     }
     note = generator.generate(candidate, company="Vercel", company_mode="default")
-    for text in [
-        "Hi Zack, fellow Trojan here - I'm exploring technical PM roles at Vercel "
-        "with a data platform background. Does that fit product work there? Any "
-        "recommendations on who I should talk to?",
-        "Hi Zack, I'm exploring technical product roles at Vercel from a backend "
-        "background. How do builders like you influence product decisions there? "
-        "Any one person I should talk to about that?",
-    ]:
-        note.text = text
-        note.length = len(text)
-        quality = generator.quality_check(candidate, note)
-        assert quality.verdict == "send", quality.flags
-        assert "Ask is not clear" not in quality.flags
+    warm = (
+        "Hi Zack, fellow Trojan here. I've been interested in Vercel for a while. "
+        "I've been deep in product for a while now. Would be great to connect. Fight On!"
+    )
+    note.text = warm
+    note.length = len(warm)
+    quality = generator.quality_check(candidate, note)
+    assert quality.verdict == "send", quality.flags
+
+    pitched = (
+        "Hi Zack, fellow Trojan here. I'm looking at product roles at Vercel. "
+        "Does my background fit, and who should I talk to? Fight On!"
+    )
+    note.text = pitched
+    note.length = len(pitched)
+    quality = generator.quality_check(candidate, note)
+    assert quality.verdict == "blocked"
+    assert "Substantive ask belongs in the follow-up" in quality.flags
+
+
+def test_quality_check_blocks_transition_language_and_premature_fall_ask() -> None:
+    generator = NoteGenerator()
+    candidate = {"name": "Alex Doe", "role_bucket": "Product", "title": "Product Manager"}
+    note = generator.generate(candidate, company="Acme")
+    note.text = (
+        "Hi Alex, I'm transitioning into product and looking for a fall product internship "
+        "at Acme. Would be great to connect."
+    )
+    note.length = len(note.text)
+
+    quality = generator.quality_check(candidate, note)
+
+    assert quality.verdict == "blocked"
+    assert "Frames Akshat as transitioning into product" in quality.flags
+    assert "Fall internship ask belongs in the follow-up" in quality.flags
 
 
 def test_generate_batch_keeps_template_note_when_ai_note_fails_qc() -> None:

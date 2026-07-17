@@ -89,7 +89,6 @@ class NoteGenerator:
         role_bucket = candidate.get("role_bucket") or "Other"
         ask_style = self._determine_ask_style(candidate, role_bucket, company_mode)
         context = self._note_context(candidate, note_context)
-        has_source_context = bool(context)
         target_role = infer_target_role_context(
             explicit_family=str(candidate.get("target_role_family") or ""),
             explicit_title=str(candidate.get("target_role_title") or ""),
@@ -104,78 +103,14 @@ class NoteGenerator:
         context["target_role_matched_rule"] = target_role.matched_rule
         context["target_role_is_concrete"] = target_role.is_concrete
 
-        use_contextual = (
-            not candidate.get("existing_connection")
-            and not candidate.get("usc_marshall")
-            and not candidate.get("usc")
-            and not candidate.get("shared_history")
-            and (
-                has_source_context
-                or role_bucket in {"Founder", "Adjacent"}
-                or (role_bucket == "Engineering" and self._is_india_based(candidate))
-            )
+        family, ask_style, variants = self._invite_variants(
+            first_name=first_name,
+            company=company_for_note,
+            candidate=candidate,
+            role_bucket=role_bucket,
+            ask_style=ask_style,
+            context=context,
         )
-        if use_contextual:
-            contextual = self._contextual_variants(
-                first_name=first_name,
-                company=company_for_note,
-                candidate=candidate,
-                role_bucket=role_bucket,
-                company_mode=company_mode,
-                context=context,
-            )
-            if contextual:
-                family, ask_style, variants = contextual
-                note = self._pick_variant(variants, candidate, company_for_note)
-                note = rewrite_message_for_target_role(note, target_role)
-                note = self._apply_style_profile(note, candidate, role_bucket)
-                note = self._tighten_to_limit(note)
-                return GeneratedNote(
-                    text=note,
-                    family=family,
-                    ask_style=ask_style,
-                    length=len(note),
-                    within_limit=len(note) <= NOTE_CHAR_LIMIT,
-                    target_role_family=target_role.family.value,
-                    target_role_label=target_role.label,
-                    target_role_source=target_role.source,
-                    target_role_matched_text=target_role.matched_text,
-                    target_role_matched_rule=target_role.matched_rule,
-                    target_role_is_concrete=target_role.is_concrete,
-                )
-
-        if self._has_thapar_shared_history(candidate):
-            # Thapar must not be buried under existing-connection or Trojan/USC
-            # templates. When LinkedIn or mapped evidence shows a Thapar overlap,
-            # name it explicitly — including for 1st-degree reconnects.
-            family = "shared_history"
-            variants = self._shared_history_variants(
-                first_name, company_for_note, ask_style, candidate
-            )
-        elif candidate.get("existing_connection"):
-            family = "existing_connection"
-            variants = self._existing_connection_variants(first_name, company_for_note, ask_style)
-        elif candidate.get("usc_marshall"):
-            family = "usc_marshall"
-            variants = self._usc_marshall_variants(first_name, company_for_note, ask_style)
-        elif candidate.get("usc"):
-            family = "usc"
-            variants = self._usc_variants(first_name, company_for_note, ask_style)
-        elif candidate.get("shared_history"):
-            family = "shared_history"
-            variants = self._shared_history_variants(first_name, company_for_note, ask_style, candidate)
-        elif role_bucket == "Product":
-            family = "product"
-            variants = self._product_variants(first_name, company_for_note, ask_style)
-        elif role_bucket == "Engineering":
-            family = "engineering"
-            variants = self._engineering_variants(first_name, company_for_note, ask_style)
-        elif role_bucket == "University Recruiting":
-            family = "university_recruiting"
-            variants = self._university_recruiting_variants(first_name, company_for_note, ask_style)
-        else:
-            family = "general"
-            variants = self._general_variants(first_name, company_for_note, ask_style)
 
         note = self._pick_variant(variants, candidate, company_for_note)
         note = rewrite_message_for_target_role(note, target_role)
@@ -194,6 +129,259 @@ class NoteGenerator:
             target_role_matched_rule=target_role.matched_rule,
             target_role_is_concrete=target_role.is_concrete,
         )
+
+    def _invite_variants(
+        self,
+        *,
+        first_name: str,
+        company: str,
+        candidate: dict,
+        role_bucket: str,
+        ask_style: str,
+        context: dict,
+    ) -> tuple[str, str, list[str]]:
+        """Build warm, accept-oriented invites while leaving the real ask to follow-up."""
+
+        credibility = self._credibility_line(context)
+        interest = self._company_interest_line(company, context)
+        role_interest = self._role_interest_line(context)
+        close = "Would be great to connect."
+        title = str(candidate.get("title") or "").lower()
+        is_recruiter = role_bucket in {"Recruiting", "University Recruiting"} or any(
+            signal in title for signal in ("recruiter", "talent acquisition", "campus recruiting")
+        )
+
+        if self._has_thapar_shared_history(candidate):
+            dual_usc = bool(candidate.get("usc_marshall") or candidate.get("usc"))
+            if dual_usc:
+                opening = f"Hi {first_name}, great coming across the rare Thapar + USC overlap at {company}."
+            else:
+                opening = f"Hi {first_name}, great coming across a fellow Thapar alum at {company}."
+            school_close = " Fight On!" if dual_usc else ""
+            return (
+                "shared_history",
+                "guidance",
+                [
+                    f"{opening} {credibility} {role_interest} {close}{school_close}",
+                    f"{opening} {credibility} {role_interest} It would be great to connect.{school_close}",
+                ],
+            )
+
+        if candidate.get("existing_connection"):
+            reconnect_interest = (
+                role_interest or f"I'm looking closely at product work at {company}."
+            )
+            return (
+                "existing_connection",
+                "direct_help",
+                [
+                    f"Hi {first_name}, great to reconnect here. {interest} {credibility} "
+                    f"{reconnect_interest} Would be good to stay in touch.",
+                    f"Hi {first_name}, nice to reconnect here. {credibility} "
+                    f"{reconnect_interest} Would be good to stay in touch.",
+                ],
+            )
+
+        if candidate.get("usc_marshall") or candidate.get("usc"):
+            family = "usc_marshall" if candidate.get("usc_marshall") else "usc"
+            school = "Marshall alum" if candidate.get("usc_marshall") else "Trojan"
+            return (
+                family,
+                "guidance",
+                [
+                    f"Hey {first_name}, fellow {school} here. {interest} {credibility} "
+                    f"{role_interest} {close} Fight On!",
+                    f"Hi {first_name}, great seeing a fellow {school} at {company}. "
+                    f"{credibility} {role_interest} {close} Fight On!",
+                ],
+            )
+
+        if candidate.get("shared_history"):
+            signal = self._shared_history_signal(candidate)
+            opening = (
+                f"Hi {first_name}, great coming across the {signal} overlap."
+                if signal
+                else f"Hi {first_name}, great coming across some overlap in our backgrounds."
+            )
+            return (
+                "shared_history",
+                "guidance",
+                [f"{opening} {interest} {credibility} {role_interest} {close}"],
+            )
+
+        if is_recruiter:
+            role = self._role_reference(context)
+            return (
+                "university_recruiting",
+                "direct_help",
+                [
+                    f"Hi {first_name}, I've been interested in {company} and am looking closely at "
+                    f"{role} there. {credibility} Are you the right person to ask about the hiring path?",
+                    f"Hi {first_name}, {company} is a company I've been following closely. "
+                    f"{credibility} I'm looking at {role}. Would be great to connect.",
+                ],
+            )
+
+        if role_bucket == "Founder" or self._is_founder_title(candidate):
+            founder_interest = role_interest or f"I'm especially interested in product work at {company}."
+            return (
+                "founder_builder_fit",
+                "builder_fit",
+                [
+                    f"Hi {first_name}, {interest} {credibility} {founder_interest} {close}",
+                    f"Hi {first_name}, I've been following what you're building at {company} and "
+                    f"really like the direction. {credibility} {founder_interest} {close}",
+                ],
+            )
+
+        if role_bucket == "Product":
+            family = (
+                "senior_product_contribution"
+                if self._is_senior_product_title(candidate)
+                else "product"
+            )
+            target_interest = role_interest or "I'm looking closely at product roles there."
+            return (
+                family,
+                "conversation",
+                [
+                    f"Hi {first_name}, {interest} {credibility} {target_interest} {close}",
+                    f"Hi {first_name}, {interest} {credibility} {target_interest} {close}",
+                ],
+            )
+
+        if role_bucket == "Engineering":
+            family = (
+                "engineering_referral"
+                if self._is_india_based(candidate)
+                else "engineering_product_bridge"
+            )
+            target_interest = role_interest or "I'm looking closely at product roles there."
+            return (
+                family,
+                "referral" if family == "engineering_referral" else "conversation",
+                [
+                    f"Hi {first_name}, {interest} {credibility} {target_interest} {close}",
+                    f"Hi {first_name}, I've been interested in {company} and thought I'd say hi "
+                    f"to someone on the engineering side. {credibility} {target_interest} {close}",
+                ],
+            )
+
+        if role_bucket == "Adjacent":
+            target_interest = (
+                role_interest or "I'm looking closely at product and operator roles there."
+            )
+            return (
+                "operator_contribution",
+                "conversation",
+                [
+                    f"Hi {first_name}, {interest} {credibility} {target_interest} {close}",
+                ],
+            )
+
+        return (
+            "general",
+            ask_style,
+            [f"Hi {first_name}, {interest} {credibility} {role_interest} {close}"],
+        )
+
+    def _role_interest_line(self, context: dict) -> str:
+        if not context.get("target_role_is_concrete"):
+            return ""
+        role = str(context.get("target_role_phrase") or "").strip()
+        if not role:
+            return ""
+        return f"I'm looking closely at {role} there."
+
+    def _credibility_anchor(self, context: dict) -> tuple[str, str]:
+        """Choose the strongest true candidate anchor for the company's problem space."""
+
+        text = " ".join(
+            [
+                self._story_fit_context_text(context),
+                self._context_text(context.get("description")),
+                self._context_text(context.get("fit_rationale")),
+                self._context_text(context.get("tags")),
+                self._context_text(context.get("opportunity_titles")),
+            ]
+        ).lower()
+        if any(signal in text for signal in ("billing", "subscription", "monetization")):
+            return (
+                "intuit_billing",
+                "I built billing systems at Intuit and have been deep in product for a while now.",
+            )
+        if any(
+            signal in text
+            for signal in ("observability", "monitoring", "data reliability", "incident")
+        ):
+            return (
+                "monitoring_reliability",
+                "I spent five years building monitoring and data platforms and have been deep in "
+                "product for a while now.",
+            )
+        if any(
+            signal in text
+            for signal in ("healthcare", "health tech", "care workflow", "clinical", "patient")
+        ) and "optum" in text:
+            return (
+                "optum_care_workflows",
+                "My background spans healthcare workflows and engineering, and I've been deep in "
+                "product for a while now.",
+            )
+        if any(
+            signal in text
+            for signal in ("recruiting", "hiring workflow", "interview", "candidate")
+        ) and "flairx" in text:
+            return (
+                "flairx_ai_recruiting",
+                "I've worked on AI recruiting products after several years in engineering and "
+                "have been deep in product for a while now.",
+            )
+        if any(signal in text for signal in ("marketplace", "commerce", "gig", "workforce")):
+            return (
+                "marketplace_platforms",
+                "I spent five years building marketplace and platform systems and have been deep "
+                "in product for a while now.",
+            )
+        if any(
+            signal in text
+            for signal in ("platform", "api", "infrastructure", "data", "developer", "etl", "connector")
+        ):
+            return (
+                "data_platforms",
+                "I spent five years in data/platform engineering and have been deep in product "
+                "for a while now.",
+            )
+        return (
+            "engineering_tenure",
+            "I spent five years as an engineer and have been deep in product for a while now.",
+        )
+
+    def _credibility_line(self, context: dict) -> str:
+        return self._credibility_anchor(context)[1]
+
+    def _company_interest_line(self, company: str, context: dict) -> str:
+        text = " ".join(
+            [
+                self._story_fit_context_text(context),
+                self._context_text(context.get("description")),
+                self._context_text(context.get("tags")),
+            ]
+        ).lower()
+        surfaces = (
+            (("billing", "subscription"), "subscription billing"),
+            (("observability", "monitoring", "data reliability"), "observability and reliability"),
+            (("developer security", "cybersecurity", "secure software"), "developer security"),
+            (("recruiting", "hiring workflow", "interview"), "recruiting workflows"),
+            (("healthcare", "clinical", "patient", "care workflow"), "healthcare workflows"),
+            (("marketplace", "workforce", "labor platform"), "marketplace operations"),
+            (("voice ai", "speech", "audio"), "voice AI"),
+            (("robotics", "automation"), "robotics"),
+        )
+        for signals, surface in surfaces:
+            if any(signal in text for signal in signals):
+                return f"I've been interested in {company}, especially its work in {surface}."
+        return f"I've been interested in {company} and the problems the team is solving."
 
     def generate_batch(
         self,
@@ -258,6 +446,11 @@ class NoteGenerator:
                 "note_qc": asdict(quality),
                 "style_recipient_type": recipient_type,
                 "style_review": style_review.model_dump(mode="json"),
+                "preferred_credibility_anchor": self._credibility_anchor(
+                    candidate.get("note_context")
+                    if isinstance(candidate.get("note_context"), dict)
+                    else {}
+                )[0],
             }
             if ai_result is not None:
                 enriched["ai_messaging"] = {
@@ -435,7 +628,43 @@ class NoteGenerator:
 
         if "\u2014" in note or "\u2013" in note:
             flags.append("Em/en dash in outbound message; Akshat never sends them")
-            score -= 15
+            score -= 30
+
+        transition_language = bool(
+            re.search(
+                r"\b(?:transition(?:ing)?|pivot(?:ing)?|moving toward|making the shift|"
+                r"break(?:ing)? into)\b[^.?!]{0,45}\bproduct\b",
+                note,
+                re.I,
+            )
+        )
+        if transition_language:
+            flags.append("Frames Akshat as transitioning into product")
+            score -= 30
+
+        is_recruiter = recipient_type == "recruiter"
+        substantive_invite_ask = bool(
+            not is_recruiter
+            and re.search(
+                r"\b(?:referr(?:al|ing)?|introduction|introduce me|hiring contact|"
+                r"right person|who (?:should|can) i (?:talk|speak)|open to (?:a )?"
+                r"(?:quick )?(?:call|chat)|does (?:that|my) background (?:fit|seem)|"
+                r"(?:curious|wondering) (?:if|whether)[^.?!]{0,60}"
+                r"(?:background|experience)[^.?!]{0,30}(?:fit|useful|relevant))\b",
+                note,
+                re.I,
+            )
+        )
+        if substantive_invite_ask:
+            flags.append("Substantive ask belongs in the follow-up")
+            score -= 25
+
+        premature_fall_ask = bool(
+            not is_recruiter and re.search(r"\bfall (?:product )?intern(?:ship)?\b", note, re.I)
+        )
+        if premature_fall_ask:
+            flags.append("Fall internship ask belongs in the follow-up")
+            score -= 25
 
         if any(
             phrase in lower
@@ -454,9 +683,8 @@ class NoteGenerator:
             ]
         ):
             strengths.append("Uses specific hook")
-        elif generated.family not in {"usc", "usc_marshall", "existing_connection"}:
-            flags.append("Missing specific hook")
-            score -= 10
+        else:
+            strengths.append("Uses an honest warm opening without forcing a personal claim")
 
         recent_notes = recent_notes or []
         if recent_notes:
@@ -475,6 +703,13 @@ class NoteGenerator:
 
         if "fight on" in lower:
             strengths.append("Uses USC-native close naturally")
+        fight_on_without_usc = bool(
+            "fight on" in lower
+            and not (candidate.get("usc") or candidate.get("usc_marshall"))
+        )
+        if fight_on_without_usc:
+            flags.append("Fight On used without a confirmed USC connection")
+            score -= 25
 
         score = max(0, min(100, score))
         hard_fail = (
@@ -483,6 +718,12 @@ class NoteGenerator:
             or not note.strip()
             or bool(style_review.banned_phrases)
             or bool(style_review.weak_example_labels)
+            or "\u2014" in note
+            or "\u2013" in note
+            or transition_language
+            or substantive_invite_ask
+            or premature_fall_ask
+            or fight_on_without_usc
         )
         verdict = "blocked" if hard_fail else "send"
         return NoteQualityCheck(score=score, verdict=verdict, flags=flags, strengths=strengths)
@@ -568,6 +809,13 @@ class NoteGenerator:
                 "ask_style": generated.ask_style,
                 "target_role_source": generated.target_role_source,
                 "target_role_is_concrete": generated.target_role_is_concrete,
+                "preferred_credibility_anchor": self._credibility_anchor(note_context)[0],
+                "preferred_credibility_line": self._credibility_line(note_context),
+                "company_interest_line": self._company_interest_line(company, note_context),
+                "invite_goal": (
+                    "earn the acceptance with warmth and one credible hook; "
+                    "leave the substantive role or referral ask for the follow-up"
+                ),
             },
             max_chars=NOTE_CHAR_LIMIT,
         )

@@ -9,9 +9,9 @@ banned_phrases:
 - product/company direction
 - AI product direction
 self_intro_variants:
-- I'm a Marshall MBA and former data/platform engineer exploring technical product roles.
-- I'm an MBA with Intuit/Gojek engineering experience, now targeting technical PM/product roles.
-- I'm building toward technical product roles where data, platforms, and operations meet.
+- I spent about five years building data and platform systems as an engineer, and I've been deep in product for a while now.
+- I'm a Marshall MBA with an engineering background and substantial product experience.
+- My background spans engineering, product, and the operating problems between them.
 approved_asks_by_recipient_type:
   founder:
   - Ask whether a technical MBA/product background fits anything useful there.

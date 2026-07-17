@@ -50,9 +50,12 @@ from outreach.services.linkedin import (
     LinkedInScraper,
 )
 from outreach.invite_reservations import (
+    UNRESOLVED_STATUSES,
+    _canonical_linkedin_profile,
     atomic_write_json,
     filter_candidates_blocked_by_reservations,
     finalize_invite_attempt,
+    invite_reservation_blocks_retry,
     load_invite_reservations,
     reconcile_invite_reservation,
     reservation_ledger_path,
@@ -86,7 +89,10 @@ from outreach.linkedin_affinity import (
     plan_high_affinity_expansion,
     recommend_affinity_send_cap,
 )
-from outreach.mapped_invites import augment_invite_source_with_mapped_contacts
+from outreach.mapped_invites import (
+    augment_invite_source_with_mapped_contacts,
+    build_mapped_invite_candidates,
+)
 from outreach.resume_jobs_bridge import (
     DEFAULT_INCLUDE_STATUSES,
     DEFAULT_COMPANY_OVERRIDES_FILENAME,
@@ -3968,6 +3974,23 @@ def infer_followup_audience(contact: ContactRecord, original_invite_note: str = 
         ]
     ):
         return "engineering"
+    if any(
+        token in profile_text
+        for token in [
+            "operations",
+            "ops",
+            "gtm",
+            "go-to-market",
+            "growth",
+            "strategy",
+            "program manager",
+            "chief of staff",
+            "bizops",
+            "business operations",
+            "revenue",
+        ]
+    ):
+        return "operator"
     return "general"
 
 
@@ -4137,9 +4160,18 @@ def _accepted_followup_draft_product(
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I'm exploring product roles where my engineering + MBA background "
-                f"can be useful. {context_sentence}Does that background fit anything useful at {company}? Any recs "
-                "on who I should talk to about that?"
+                f"Thanks for connecting, {name}. I've been deep in product for a while now, with an engineering "
+                f"background, so I can build, not just spec, and I'm focused on product roles. {context_sentence}Does "
+                f"that background fit anything useful at {company}? Any recs on who I should talk to about that?"
+            ),
+        )
+    if audience == "operator":
+        return (
+            "review",
+            (
+                f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from an "
+                f"engineering background, so I can jump in and actually build, not just spec. Is there room to "
+                f"contribute on the product or ops side at {company}, or who'd be the right person to talk to?"
             ),
         )
     if audience == "product":
@@ -4148,8 +4180,9 @@ def _accepted_followup_draft_product(
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I'm exploring product roles at {company} from an engineering + "
-                f"data/platform background. {context_sentence}Does that background seem relevant to product work there?"
+                f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from an "
+                f"engineering and data/platform background. {context_sentence}Does that background seem relevant "
+                "to product work there?"
             ),
         )
     if audience == "recruiter":
@@ -4185,11 +4218,115 @@ def _accepted_followup_draft_product(
     return (
         "safe_to_review",
         (
-            f"Thanks for connecting, {name}. I'm trying to move from data/platform engineering into PM work at "
-            f"{company}. From your side of the org, who is usually the best person for a technical PM candidate "
-            "to get on the radar of?"
+            f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from a "
+            f"data/platform engineering background, so I can build, not just spec. From your side of {company}, "
+            "who's usually the best person to talk to about product roles there?"
         ),
     )
+
+
+def _fall_intern_followup_draft_product(
+    *,
+    company: str,
+    contact: ContactRecord,
+    original_invite_note: str,
+    organization: OrganizationRecord | None = None,
+) -> tuple[str, str]:
+    """Fall-internship variant: the ask names a fall product/PM internship directly.
+
+    Only used when a contact is on the fall-internship campaign. Invites never mention the
+    internship (that guardrail lives in the note engine); the concrete ask lands here, after accept.
+    """
+    name = first_name(contact.full_name)
+    audience = infer_followup_audience(contact, original_invite_note)
+    if audience == "founder":
+        context_line = founder_context_line(company, organization)
+        context_sentence = f"{context_line} " if context_line else ""
+        return (
+            "review",
+            (
+                f"Thanks for connecting, {name}. I'll be straight with you: I'm after a fall product internship, and "
+                f"{company} is exactly the kind of team I'd want to build with. Former engineer plus an MBA, so I can "
+                f"ship, not just spec, and I'm happy to go deep on a real problem part-time this fall. {context_sentence}"
+                "Open to a quick chat about whether there's room?"
+            ),
+        )
+    if audience == "operator":
+        return (
+            "review",
+            (
+                f"Thanks for connecting, {name}. Quick context: I'm looking for a fall product or ops internship, and "
+                f"{company} is high on my list. Former engineer plus an MBA, so I can jump in and actually build. Is "
+                "there room for a fall intern on the product or ops side, or who'd be the right person to talk to?"
+            ),
+        )
+    if audience == "recruiter":
+        return (
+            "safe_to_review",
+            (
+                f"Thanks for connecting, {name}. Following up directly: I'd love to be considered for a fall product "
+                f"internship at {company}. Former engineer plus an MBA, so I can contribute fast part-time this fall. "
+                "Could you point me to the right process or person, or let me know if there's a fit?"
+            ),
+        )
+    if audience == "product":
+        context_line = product_context_line(contact, organization)
+        context_sentence = f"{context_line} " if context_line else ""
+        return (
+            "review",
+            (
+                f"Thanks, {name}! I'm after a fall product internship, and {company} is top of my list. Coming from "
+                f"engineering, I can go deep on real product problems fast. {context_sentence}Would you be open to 15 "
+                "minutes on whether the team takes fall interns, or a pointer to who'd know?"
+            ),
+        )
+    if audience in {"engineering", "referral_engineer"}:
+        return (
+            "safe_to_review",
+            (
+                f"Thanks for connecting, {name}! I'm looking for a fall product internship and {company} is one I'd "
+                "love to be at. From the engineering side, do you know if the team takes product interns, or who owns "
+                "that, and would you be open to referring me if the fit looks right? Appreciate any pointer."
+            ),
+        )
+    return (
+        "safe_to_review",
+        (
+            f"Thanks for connecting, {name}. I'm looking for a fall product internship where my data/platform "
+            f"engineering background helps, and {company} stands out. Former engineer plus an MBA, so I can build, "
+            "not just spec. If there's an intern or part-time path open, would you be open to a referral or a pointer "
+            "to the right hiring contact?"
+        ),
+    )
+
+
+def _followup_is_usc_warm(original_invite_note: str) -> bool:
+    """The invite led with the Trojan hook, so keep the shared identity warm in the follow-up."""
+    text = (original_invite_note or "").lower()
+    return "fight on" in text or "trojan" in text
+
+
+def _apply_usc_signoff(message: str, original_invite_note: str) -> str:
+    if not _followup_is_usc_warm(original_invite_note):
+        return message
+    if "fight on" in message.lower():
+        return message
+    return f"{message.rstrip()} Fight On!"
+
+
+def _strip_transition_framing(message: str) -> str:
+    """Defensive scrub: Akshat has already moved into product, never frame it as in-progress."""
+    replacements = [
+        (r"\btrying to move from ([^.]*?) into (?:pm|product)(?: work)?\b", "working in product, with a background in"),
+        (r"\btransition(?:ing)? (?:into|to) product\b", "deep in product"),
+        (r"\bmoving (?:toward|into) product\b", "deep in product"),
+        (r"\bbreaking into product\b", "deep in product"),
+        (r"\bpivot(?:ing)? (?:into|to) product\b", "deep in product"),
+    ]
+    scrubbed = message
+    for pattern, replacement in replacements:
+        scrubbed = re.sub(pattern, replacement, scrubbed, flags=re.I)
+    return scrubbed
 
 
 def accepted_followup_draft(
@@ -4199,16 +4336,28 @@ def accepted_followup_draft(
     original_invite_note: str,
     organization: OrganizationRecord | None = None,
     target_role: TargetRoleContext | None = None,
+    campaign: str = "",
 ) -> tuple[str, str]:
-    recommendation, message = _accepted_followup_draft_product(
-        company=company,
-        contact=contact,
-        original_invite_note=original_invite_note,
-        organization=organization,
-    )
+    is_fall_intern = campaign.strip().lower() in {"fall_intern", "fall-intern", "fall_internship", "fall"}
+    if is_fall_intern:
+        recommendation, message = _fall_intern_followup_draft_product(
+            company=company,
+            contact=contact,
+            original_invite_note=original_invite_note,
+            organization=organization,
+        )
+    else:
+        recommendation, message = _accepted_followup_draft_product(
+            company=company,
+            contact=contact,
+            original_invite_note=original_invite_note,
+            organization=organization,
+        )
     effective_target = target_role or infer_target_role_context(
         organization_notes=organization.notes if organization else ""
     )
+    message = _strip_transition_framing(message)
+    message = _apply_usc_signoff(message, original_invite_note)
     return recommendation, rewrite_message_for_target_role(message, effective_target)
 
 
@@ -4219,14 +4368,26 @@ def _reply_followup_draft_product(
     latest_message: str,
     message_window: list[dict[str, str]] | None = None,
     target_role: TargetRoleContext | None = None,
+    campaign: str = "",
 ) -> tuple[str, str, str]:
     name = first_name(contact.full_name)
     lower = latest_message.lower()
     emails = extract_email_addresses(latest_message)
+    is_fall = campaign.strip().lower() in {"fall_intern", "fall-intern", "fall_internship", "fall"}
     intent = classify_linkedin_reply_intent(latest_message=latest_message, message_window=message_window)
     if "let me know if" in lower and any(
         token in lower for token in ["opening", "opens", "role", "interested", "pm", "product"]
     ):
+        if is_fall:
+            return (
+                "conversation_reply",
+                "review",
+                (
+                    f"Thanks {name}. I'm after a fall product internship, so I'd really appreciate being considered "
+                    f"if something opens up at {company} this fall. Former engineer plus an MBA, so I can ship, not "
+                    "just spec. Happy to send a short fit summary."
+                ),
+            )
         return (
             "conversation_reply",
             "review",
@@ -4258,16 +4419,28 @@ def _reply_followup_draft_product(
                 ),
             )
         role = target_role.matched_text or target_role.label
-        return (
-            "conversation_reply",
-            "auto_send",
-            (
+        fit_intro = (
+            f"Thanks {name}. I found one concrete fit: {role}. Former engineer plus an MBA, so I can ship, not just "
+            "spec, and I'm keen to go deep on it part-time this fall. I can send the posting plus a tight resume/fit "
+            "blurb here if useful."
+            if is_fall
+            else (
                 f"Thanks {name}. I found one concrete fit: {role}. I spent 5 years building backend/data platforms "
-                "before Marshall, so the technical and cross-functional side lines up well. I can send the posting "
-                "plus a tight resume/fit blurb here if useful."
-            ),
+                "before Marshall, so I can build, not just spec. I can send the posting plus a tight resume/fit "
+                "blurb here if useful."
+            )
         )
+        return ("conversation_reply", "auto_send", fit_intro)
     if intent == "does_not_know":
+        if is_fall:
+            return (
+                "conversation_reply",
+                "review",
+                (
+                    f"Sure, thanks {name}. Is there a fall product internship path at {company}, even part-time? "
+                    "Any recs on who I should talk to about that?"
+                ),
+            )
         return (
             "conversation_reply",
             "review",
@@ -4303,40 +4476,59 @@ def _reply_followup_draft_product(
         )
     if emails and any(token in lower for token in ["resume", "cv", "profile"]):
         target = emails[0]
-        return (
-            "conversation_reply",
-            "review",
-            (
+        email_note = (
+            f"Thanks {name}, appreciate it. I'll email {target} my resume and a short note on the fall product "
+            f"internship I'm after at {company}, and where my engineering plus MBA background fits."
+            if is_fall
+            else (
                 f"Thanks {name}, appreciate it. I'll email {target} with my resume and a short note "
-                f"on where my engineering + MBA background could be useful for product work at {company}."
-            ),
+                f"on where my engineering + MBA background is useful for product work at {company}."
+            )
         )
+        return ("conversation_reply", "review", email_note)
     if "share your profile" in lower or "share your resume" in lower or "hr" in lower:
-        return (
-            "referral_offer_reply",
-            "review",
-            (
-                f"That would be amazing, thanks {name}. Short context if useful: MBA + 5 yrs backend/data "
-                "platform engineering, now targeting PM/product roles where technical depth helps. Happy to send "
-                "resume too if HR wants it."
-            ),
+        referral_context = (
+            f"That would be amazing, thanks {name}. Short context if useful: MBA plus 5 yrs backend/data platform "
+            "engineering, deep in product now, and I'm after a fall product internship where I can build, not just "
+            "spec. Happy to send resume too if HR wants it."
+            if is_fall
+            else (
+                f"That would be amazing, thanks {name}. Short context if useful: MBA plus 5 yrs backend/data "
+                "platform engineering, deep in product now and targeting product roles where I can build, not just "
+                "spec. Happy to send resume too if HR wants it."
+            )
         )
+        return ("referral_offer_reply", "review", referral_context)
     if any(token in lower for token in ["small team", "high-impact", "high ownership", "feedback loop"]):
-        return (
-            "conversation_reply",
-            "review",
-            (
+        small_team_ask = (
+            f"This is helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop at {company} is "
+            "exactly what I want. Is there a fall product internship path there, even part-time? Any recs on who I "
+            "should talk to about that?"
+            if is_fall
+            else (
                 f"This is helpful, thanks {name}. The small-team/high-ownership + customer-feedback loop "
                 f"at {company} is exactly what I'm looking for. Do you think there's a PM/product internship path "
                 "there? Any recs on who I should talk to about that?"
+            )
+        )
+        return ("conversation_reply", "review", small_team_ask)
+    if is_fall:
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"Thanks {name}. I've been deep in product for a while now, coming from engineering, so I can build, "
+                f"not just spec. I'm after a fall product internship and {company} really appeals. Is there a fall "
+                "intern or part-time product path there? Any recs on who I should talk to about that?"
             ),
         )
     return (
         "conversation_reply",
         "review",
         (
-            f"Thanks {name}. I'm exploring product roles where my engineering + MBA background "
-            f"could be useful. Does that fit anything at {company}? Any recs on who I should talk to about that?"
+            f"Thanks {name}. I've been deep in product for a while now, coming from engineering, so I can build, not "
+            f"just spec. Are there product roles at {company} where that background helps? Any recs on who I should "
+            "talk to about that?"
         ),
     )
 
@@ -4348,6 +4540,7 @@ def reply_followup_draft(
     latest_message: str,
     message_window: list[dict[str, str]] | None = None,
     target_role: TargetRoleContext | None = None,
+    campaign: str = "",
 ) -> tuple[str, str, str]:
     draft_kind, recommendation, message = _reply_followup_draft_product(
         company=company,
@@ -4355,12 +4548,13 @@ def reply_followup_draft(
         latest_message=latest_message,
         message_window=message_window,
         target_role=target_role,
+        campaign=campaign,
     )
     effective_target = target_role or infer_target_role_context()
     return (
         draft_kind,
         recommendation,
-        rewrite_message_for_target_role(message, effective_target),
+        rewrite_message_for_target_role(_strip_transition_framing(message), effective_target),
     )
 
 
@@ -4572,6 +4766,7 @@ def build_linkedin_followup_drafts(
                 original_invite_note=str(item.get("original_invite_note") or ""),
                 organization=organization,
                 target_role=target_role,
+                campaign=str(item.get("campaign") or ""),
             )
             draft_kind = "accepted_follow_up"
         elif status == "replied":
@@ -4585,6 +4780,7 @@ def build_linkedin_followup_drafts(
                     if isinstance(message, dict)
                 ],
                 target_role=target_role,
+                campaign=str(item.get("campaign") or ""),
             )
         else:
             continue
@@ -6462,6 +6658,161 @@ def _invite_backfill_queue(
         if len(queue) >= limit:
             break
     return queue
+
+
+def _unresolved_reservation_org_ids(
+    *,
+    reservations: Mapping[str, object] | None,
+    contacts: list[ContactRecord],
+) -> set[str]:
+    """Org ids for contacts that still own an unresolved invite reservation.
+
+    A stuck ``send_unknown_reserved`` slot blocks retry until a signed-in check
+    resolves it. Surfacing those companies lets the existing profile-reconcile
+    pass clear them even when the day's follow-up plan did not select them,
+    instead of leaving the slot frozen indefinitely.
+    """
+
+    ledger = (
+        reservations.get("reservations")
+        if isinstance(reservations, Mapping)
+        else None
+    )
+    if not isinstance(ledger, Mapping):
+        return set()
+    unresolved_profiles = {
+        _canonical_linkedin_profile(str(reservation.get("linkedin_url") or ""))
+        for reservation in ledger.values()
+        if isinstance(reservation, Mapping)
+        and invite_reservation_blocks_retry(reservation)
+        and str(reservation.get("status") or "").strip().casefold()
+        in UNRESOLVED_STATUSES
+    }
+    unresolved_profiles.discard("")
+    if not unresolved_profiles:
+        return set()
+    org_ids: set[str] = set()
+    for contact in contacts:
+        profile = _canonical_linkedin_profile(contact.linkedin_url)
+        if profile and profile in unresolved_profiles and contact.organization_id:
+            org_ids.add(contact.organization_id)
+    return org_ids
+
+
+def _mapped_backlog_invite_items(
+    *,
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    settings: OutreachSettings,
+    attempted_keys: set[str],
+    remaining_invites: int,
+    per_company_cap: int = 2,
+) -> list[dict]:
+    """Synthetic invite items for companies with reviewed, unsent mapped contacts.
+
+    The daily plan only surfaces a narrow slice of ``send_initial_invites``
+    companies, so reviewed workbook contacts that were mapped in earlier runs
+    (or mapped earlier in this run) never reach the invite phase and pile up as
+    ``queued`` contacts with drafted notes. This drains that backlog: any
+    company that still has send-eligible mapped contacts and has not been
+    attempted yet becomes an invite target, bounded by the remaining daily
+    invite budget. Candidate eligibility reuses the exact
+    ``build_mapped_invite_candidates`` gate that the invite phase applies, so a
+    drained company can only produce sends the normal path would also allow.
+    """
+
+    if remaining_invites <= 0 or per_company_cap <= 0:
+        return []
+
+    contacts_by_org: dict[str, list[ContactRecord]] = {}
+    for contact in contacts:
+        contacts_by_org.setdefault(contact.organization_id, []).append(contact)
+    touchpoints_by_org: dict[str, list[TouchpointRecord]] = {}
+    for touchpoint in touchpoints:
+        touchpoints_by_org.setdefault(touchpoint.organization_id, []).append(touchpoint)
+
+    # Founder-weighted fall-sprint ordering: leftover invite budget should go to
+    # priority/early-stage/founder-accessible companies, never get eaten by
+    # incidental megacorp contacts left over from broad discovery.
+    _PRIORITY_TAGS = {
+        "fall",
+        "fall_sprint",
+        "priority",
+        "core",
+        "target",
+        "dream",
+        "relationship",
+    }
+    _STARTUP_TYPES = {"startup", "accelerator", "incubator", "hacker_house"}
+
+    ranked: list[tuple[int, int, int, dict]] = []
+    for organization in organizations:
+        org_id = organization.organization_id
+        key = org_id or organization.name.casefold()
+        if not key or key in attempted_keys:
+            continue
+        org_contacts = contacts_by_org.get(org_id) or []
+        if not org_contacts:
+            continue
+        candidates = build_mapped_invite_candidates(
+            organization=organization,
+            contacts=org_contacts,
+            touchpoints=touchpoints_by_org.get(org_id) or [],
+            settings=settings,
+        )
+        if not candidates:
+            continue
+        try:
+            top_score = int(candidates[0].get("score") or 0)
+        except (TypeError, ValueError):
+            top_score = 0
+        tags = {
+            tag.strip().casefold()
+            for tag in re.split(r"[;,]", organization.target_lists or "")
+            if tag.strip()
+        }
+        priority_rank = 0
+        if tags.intersection(_PRIORITY_TAGS):
+            priority_rank += 2
+        if organization.organization_type.value in _STARTUP_TYPES:
+            priority_rank += 1
+        if any(
+            str(candidate.get("role_bucket") or "") == "Founder"
+            for candidate in candidates
+        ):
+            priority_rank += 1
+        ranked.append(
+            (
+                priority_rank,
+                top_score,
+                len(candidates),
+                {
+                    "company": organization.name,
+                    "organization_id": org_id,
+                    "expected_linkedin_invites": min(per_company_cap, len(candidates)),
+                    "target_role": "",
+                    "phase": "5_send_linkedin_invites",
+                    "source": "mapped_backlog_drain",
+                },
+            )
+        )
+
+    ranked.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+
+    items: list[dict] = []
+    budget_left = remaining_invites
+    for _priority, _score, _count, item in ranked:
+        if budget_left <= 0:
+            break
+        cap = min(int(item["expected_linkedin_invites"]), budget_left)
+        if cap <= 0:
+            continue
+        item = dict(item)
+        item["expected_linkedin_invites"] = cap
+        items.append(item)
+        budget_left -= cap
+    return items
 
 
 def _daily_plan_company_names(daily_plan: dict, *, phase_prefix: str | None = None) -> list[str]:
@@ -11824,7 +12175,14 @@ def run_track_2_daily_plan_cmd(
                 planned_followup_budget,
                 max(0, followup_budget - len(execution_results)),
             )
-            if remaining_profile_budget and followup_org_ids:
+            unresolved_reservation_org_ids = _unresolved_reservation_org_ids(
+                reservations=load_invite_reservations(
+                    reservation_ledger_path(settings.resolved_tracking_workspace_dir)
+                ),
+                contacts=workbook.list_contacts(),
+            )
+            reconcile_org_ids = set(followup_org_ids) | unresolved_reservation_org_ids
+            if remaining_profile_budget and reconcile_org_ids:
                 profile_candidates = [
                     item
                     for item in build_linkedin_reconcile_queue_items(
@@ -11835,7 +12193,7 @@ def run_track_2_daily_plan_cmd(
                         max_age_days=21,
                         min_age_hours=12,
                     )
-                    if str(item.get("organization_id") or "") in followup_org_ids
+                    if str(item.get("organization_id") or "") in reconcile_org_ids
                 ][:remaining_profile_budget]
                 if profile_candidates:
                     detected_profiles = [
@@ -12375,6 +12733,7 @@ def run_track_2_daily_plan_cmd(
             )
             work_index = 0
             backfill_queued = False
+            drain_queued = False
             while work_index < len(invite_work):
                 item, is_backfill = invite_work[work_index]
                 work_index += 1
@@ -12689,6 +13048,24 @@ def run_track_2_daily_plan_cmd(
                     )
                     invite_work.extend((item, True) for item in backfill_items)
                     backfill_queued = True
+                if (
+                    backfill_queued
+                    and not drain_queued
+                    and work_index >= len(invite_work)
+                    and remaining_invites > 0
+                ):
+                    drain_items = _mapped_backlog_invite_items(
+                        organizations=organizations,
+                        contacts=contacts,
+                        touchpoints=touchpoints,
+                        settings=settings,
+                        attempted_keys=attempted_invite_keys,
+                        remaining_invites=remaining_invites,
+                        per_company_cap=2,
+                    )
+                    invite_work.extend((item, True) for item in drain_items)
+                    invite_result["mapped_backlog_drain_company_count"] = len(drain_items)
+                    drain_queued = True
             invite_result["affinity_headroom_allocated"] = (
                 initial_affinity_headroom - affinity_headroom
             )

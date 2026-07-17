@@ -479,8 +479,12 @@ class AIMessagingService:
     def _channel_rule(self, request: AIMessageRequest) -> str:
         if request.channel != "linkedin_invite":
             return (
-                "This is a post-acceptance message. State the concrete intent and give the recipient "
-                "one easy, specific next step."
+                "This is a post-acceptance follow-up, the surface that actually earns replies. State the concrete "
+                "intent and give the recipient one easy, low-commitment next step (a pointer, a referral if the fit "
+                "looks right, or a short chat). Keep the credibility as 'former engineer plus an MBA, so I can build, "
+                "not just spec' rather than framing Akshat as still moving into product. Preserve the specific ask "
+                "already in the base message, including a fall product internship ask when it is present, and do not "
+                "downgrade it to a vague question."
             )
         if request.recipient_type == "recruiter":
             return (

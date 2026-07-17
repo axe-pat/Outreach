@@ -251,6 +251,22 @@ def test_followup_window_expires_instead_of_remaining_automatically_due() -> Non
     assert "review manually" in item.reason
 
 
+def test_first_followup_stays_due_within_grace_window_when_runs_slip() -> None:
+    # Ten days past acceptance (six days past the day-4 due date) is well inside
+    # the two-week grace window, so a first follow-up must stay auto-sendable
+    # instead of expiring to manual review when nightly runs fall behind.
+    item = recommendation(
+        build_cadence_plan(
+            linkedin_history(),
+            as_of=START + timedelta(days=10),
+        ),
+        "linkedin",
+    )
+
+    assert item.action == "linkedin_followup_1"
+    assert item.state == "due"
+
+
 def test_same_local_day_is_suppressed_across_a_utc_date_boundary() -> None:
     as_of = datetime(2026, 7, 2, 1, tzinfo=UTC)
     initial = touchpoint(

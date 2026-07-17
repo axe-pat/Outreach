@@ -35,6 +35,8 @@ from outreach.cli import (
     contact_status_from_invite_result,
     daily_plan_items_by_phase,
     detect_shared_history_signals,
+    _mapped_backlog_invite_items,
+    _unresolved_reservation_org_ids,
     draft_track_2_email,
     execute_invite_batch,
     extract_linkedin_conversation_action_items,
@@ -5397,6 +5399,198 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[6]["action_items"][0]["email"] == "Alessandra@beyondmedplans.com"
 
 
+def test_accepted_followup_uses_established_product_framing_not_transition() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-acme",
+            name="Acme",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-generic",
+            organization_id="org-acme",
+            full_name="Riley Generic",
+            title="Operations",
+            contact_type="Other",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-generic",
+                "organization_id": "org-acme",
+                "name": "Riley Generic",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    message = str(drafts[0]["draft_message"]).lower()
+    assert "deep in product" in message
+    assert "move from" not in message
+    assert "transition" not in message
+    assert "into pm" not in message
+
+
+def test_accepted_followup_fall_intern_campaign_names_the_internship() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-voker",
+            name="Voker",
+            organization_type=OrganizationType.STARTUP,
+            notes="description=Voker is the Agent Analytics Platform for monitoring and improving your AI agents.",
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-tyler",
+            organization_id="org-voker",
+            full_name="Tyler Postle",
+            title="CEO @ Voker (YC S24): AI Founder & Operator",
+            contact_type="Founder",
+        ),
+        ContactRecord(
+            contact_id="ct-regular",
+            organization_id="org-voker",
+            full_name="Casey Regular",
+            title="CEO @ Voker",
+            contact_type="Founder",
+        ),
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-tyler",
+                "organization_id": "org-voker",
+                "name": "Tyler Postle",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "campaign": "fall_intern",
+            },
+            {
+                "contact_id": "ct-regular",
+                "organization_id": "org-voker",
+                "name": "Casey Regular",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            },
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    fall_message = str(drafts[0]["draft_message"]).lower()
+    assert "fall product internship" in fall_message
+    assert "ship, not just spec" in fall_message
+    assert "—" not in str(drafts[0]["draft_message"])
+
+    regular_message = str(drafts[1]["draft_message"]).lower()
+    assert "fall product internship" not in regular_message
+
+
+def test_accepted_followup_operator_audience_uses_contribution_ask() -> None:
+    organizations = [OrganizationRecord(organization_id="org-acme", name="Acme")]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-op",
+            organization_id="org-acme",
+            full_name="Sam Ops",
+            title="Head of Operations",
+            contact_type="Other",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-op",
+                "organization_id": "org-acme",
+                "name": "Sam Ops",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert drafts[0]["followup_audience"] == "operator"
+    message = str(drafts[0]["draft_message"]).lower()
+    assert "build, not just spec" in message
+    assert "product or ops side" in message
+
+
+def test_accepted_followup_usc_warm_invite_adds_fight_on() -> None:
+    organizations = [OrganizationRecord(organization_id="org-acme", name="Acme")]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-usc",
+            organization_id="org-acme",
+            full_name="Trey Trojan",
+            title="Founder",
+            contact_type="Founder",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-usc",
+                "organization_id": "org-acme",
+                "name": "Trey Trojan",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Hey Trey, fellow Trojan here. Would love to connect. Fight On!",
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert str(drafts[0]["draft_message"]).strip().endswith("Fight On!")
+
+
+def test_fall_intern_reply_draft_names_internship() -> None:
+    organizations = [OrganizationRecord(organization_id="org-acme", name="Acme")]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-eng",
+            organization_id="org-acme",
+            full_name="Dev Engineer",
+            title="Software Engineer",
+            contact_type="Engineering",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-eng",
+                "organization_id": "org-acme",
+                "name": "Dev Engineer",
+                "normalized_status": "replied",
+                "last_sender": "Dev",
+                "latest_message": "Thanks for reaching out, happy to connect.",
+                "campaign": "fall_intern",
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    message = str(drafts[0]["draft_message"]).lower()
+    assert "fall product internship" in message
+    assert "build, not just spec" in message
+    assert "transition" not in message
+
+
 def test_followup_draft_holds_positive_ack_without_concrete_fit() -> None:
     organizations = [
         OrganizationRecord(
@@ -7138,3 +7332,131 @@ def test_select_invite_candidates_prefers_bar_before_fallback_fill() -> None:
 
     assert [item["name"] for item in selected] == ["A", "B"]
     assert all(not item.get("invite_score_fallback") for item in selected)
+
+
+def _drain_org(org_id, name, *, org_type=OrganizationType.COMPANY, tags=""):
+    return OrganizationRecord(
+        organization_id=org_id,
+        name=name,
+        organization_type=org_type,
+        target_lists=tags,
+    )
+
+
+def _drain_contact(contact_id, org_id, *, status="queued", url_slug=None, contact_type=""):
+    slug = url_slug or contact_id
+    return ContactRecord(
+        contact_id=contact_id,
+        organization_id=org_id,
+        full_name=f"Person {contact_id}",
+        status=status,
+        contact_type=contact_type,
+        linkedin_url=f"https://www.linkedin.com/in/{slug}/",
+    )
+
+
+def test_mapped_backlog_drain_surfaces_unsent_queued_contacts():
+    settings = OutreachSettings()
+    orgs = [
+        _drain_org("org-startup", "StartupCo", org_type=OrganizationType.STARTUP, tags="fall;priority"),
+        _drain_org("org-mega", "MegaCorp"),
+        _drain_org("org-attempted", "AttemptedCo"),
+        _drain_org("org-empty", "EmptyCo"),
+    ]
+    contacts = [
+        _drain_contact("ct-startup", "org-startup", contact_type="founder"),
+        _drain_contact("ct-mega", "org-mega"),
+        _drain_contact("ct-attempted", "org-attempted"),
+    ]
+    items = _mapped_backlog_invite_items(
+        organizations=orgs,
+        contacts=contacts,
+        touchpoints=[],
+        settings=settings,
+        attempted_keys={"org-attempted"},
+        remaining_invites=27,
+        per_company_cap=2,
+    )
+    companies = [item["company"] for item in items]
+    # Already-attempted and contactless companies never enter the drain.
+    assert "AttemptedCo" in [o.name for o in orgs] and "AttemptedCo" not in companies
+    assert "EmptyCo" not in companies
+    # Priority/startup/founder company outranks the incidental megacorp contact.
+    assert companies.index("StartupCo") < companies.index("MegaCorp")
+    assert all(item["source"] == "mapped_backlog_drain" for item in items)
+
+
+def test_mapped_backlog_drain_respects_remaining_budget():
+    settings = OutreachSettings()
+    orgs = [_drain_org(f"org-{i}", f"Co{i}", org_type=OrganizationType.STARTUP) for i in range(5)]
+    contacts = [_drain_contact(f"ct-{i}", f"org-{i}") for i in range(5)]
+    items = _mapped_backlog_invite_items(
+        organizations=orgs,
+        contacts=contacts,
+        touchpoints=[],
+        settings=settings,
+        attempted_keys=set(),
+        remaining_invites=3,
+        per_company_cap=2,
+    )
+    assert sum(item["expected_linkedin_invites"] for item in items) <= 3
+
+
+def test_unresolved_reservation_org_ids_surfaces_stuck_slots():
+    contacts = [
+        _drain_contact("ct-stuck", "org-stuck", url_slug="stuck-person"),
+        _drain_contact("ct-clean", "org-clean", url_slug="clean-person"),
+    ]
+    reservations = {
+        "reservations": {
+            "invite-stuck": {
+                "reservation_key": "invite-stuck",
+                "linkedin_url": "https://www.linkedin.com/in/stuck-person/",
+                "status": "send_unknown_reserved",
+                "reconciliation_required": True,
+            },
+            "invite-done": {
+                "reservation_key": "invite-done",
+                "linkedin_url": "https://www.linkedin.com/in/clean-person/",
+                "status": "sent",
+                "reconciliation_required": False,
+            },
+        }
+    }
+    org_ids = _unresolved_reservation_org_ids(reservations=reservations, contacts=contacts)
+    assert org_ids == {"org-stuck"}
+
+
+def test_unresolved_reservation_org_ids_empty_ledger():
+    assert _unresolved_reservation_org_ids(reservations=None, contacts=[]) == set()
+    assert (
+        _unresolved_reservation_org_ids(reservations={"reservations": {}}, contacts=[])
+        == set()
+    )
+
+
+def test_mapped_backlog_drain_skips_already_sent_contacts():
+    settings = OutreachSettings()
+    orgs = [_drain_org("org-sent", "SentCo", org_type=OrganizationType.STARTUP)]
+    contacts = [_drain_contact("ct-sent", "org-sent")]
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-sent",
+            organization_id="org-sent",
+            contact_id="ct-sent",
+            channel="linkedin",
+            status="sent",
+            message_kind="linkedin_invite",
+            message_text="Original invite note",
+        )
+    ]
+    items = _mapped_backlog_invite_items(
+        organizations=orgs,
+        contacts=contacts,
+        touchpoints=touchpoints,
+        settings=settings,
+        attempted_keys=set(),
+        remaining_invites=27,
+        per_company_cap=2,
+    )
+    assert items == []

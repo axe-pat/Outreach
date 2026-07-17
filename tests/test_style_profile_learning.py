@@ -446,9 +446,12 @@ def test_learned_positive_guides_followup_reply_and_email_drafts() -> None:
     )
 
     assert "Does that background fit product work there?" in accepted["draft_message"]
-    assert "Does that background fit anything at Acme?" in reply["draft_message"]
+    assert "Are there product roles at Acme where that background helps?" in reply["draft_message"]
     assert "I'm not trying to send" in email["body"]
     for draft in (accepted, reply, email):
         assert draft["style_example_labels"] == ["learned_gold_direct_fit"]
         assert "learned_gold_direct_fit" in draft["style_guidance"]
-        assert draft["style_transformations"]
+    # Accepted and email diverge from the learned phrasing, so they get concrete transforms;
+    # the reply is already on-style, so being guided without a rewrite is the correct outcome.
+    assert accepted["style_transformations"]
+    assert email["style_transformations"]

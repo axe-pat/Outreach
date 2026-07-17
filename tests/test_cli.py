@@ -36,6 +36,7 @@ from outreach.cli import (
     daily_plan_items_by_phase,
     detect_shared_history_signals,
     _mapped_backlog_invite_items,
+    _select_profile_reconcile_candidates,
     _unresolved_reservation_org_ids,
     draft_track_2_email,
     execute_invite_batch,
@@ -7433,6 +7434,105 @@ def test_unresolved_reservation_org_ids_empty_ledger():
         _unresolved_reservation_org_ids(reservations={"reservations": {}}, contacts=[])
         == set()
     )
+
+
+def test_profile_reconcile_skips_connected_and_dm_covered_contacts():
+    organization = OrganizationRecord(
+        organization_id="org-snyk",
+        name="Snyk",
+        organization_type=OrganizationType.COMPANY,
+    )
+    connected = ContactRecord(
+        contact_id="ct-connected",
+        organization_id="org-snyk",
+        full_name="Already Connected",
+        status="Connected",
+        linkedin_url="https://www.linkedin.com/in/connected/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+    replied = ContactRecord(
+        contact_id="ct-replied",
+        organization_id="org-snyk",
+        full_name="Already Replied",
+        status="Replied",
+        linkedin_url="https://www.linkedin.com/in/replied/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+    stale_invited = ContactRecord(
+        contact_id="ct-stale",
+        organization_id="org-snyk",
+        full_name="Stale Invite",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/stale/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+    dm_covered = ContactRecord(
+        contact_id="ct-dm",
+        organization_id="org-snyk",
+        full_name="Seen In DMs",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/dmcov/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+    other_org = ContactRecord(
+        contact_id="ct-other",
+        organization_id="org-other",
+        full_name="Other Org Invite",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/other/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+
+    items = _select_profile_reconcile_candidates(
+        organizations=[organization],
+        contacts=[connected, replied, stale_invited, dm_covered, other_org],
+        touchpoints=[],
+        organization_ids={"org-snyk"},
+        limit=10,
+        exclude_contact_ids={"ct-dm"},
+        now=datetime(2026, 6, 25, 12, 0, tzinfo=UTC),
+    )
+
+    assert [item["contact_id"] for item in items] == ["ct-stale"]
+    assert items[0]["reconcile_reason"] == "stale_invite"
+
+
+def test_profile_reconcile_prioritizes_unresolved_reservations():
+    organization = OrganizationRecord(
+        organization_id="org-vercel",
+        name="Vercel",
+        organization_type=OrganizationType.COMPANY,
+    )
+    connected_but_stuck = ContactRecord(
+        contact_id="ct-stuck",
+        organization_id="org-vercel",
+        full_name="Stuck Reservation",
+        status="Connected",
+        linkedin_url="https://www.linkedin.com/in/stuck/",
+        last_contacted_at="2026-01-01T08:00:00+00:00",
+    )
+    stale_invited = ContactRecord(
+        contact_id="ct-stale",
+        organization_id="org-vercel",
+        full_name="Stale Invite",
+        status="Invited",
+        linkedin_url="https://www.linkedin.com/in/stale-vercel/",
+        last_contacted_at="2026-06-20T08:00:00+00:00",
+    )
+
+    items = _select_profile_reconcile_candidates(
+        organizations=[organization],
+        contacts=[connected_but_stuck, stale_invited],
+        touchpoints=[],
+        organization_ids={"org-vercel"},
+        limit=2,
+        unresolved_reservation_profiles={"https://www.linkedin.com/in/stuck"},
+        now=datetime(2026, 6, 25, 12, 0, tzinfo=UTC),
+    )
+
+    assert [item["contact_id"] for item in items] == ["ct-stuck", "ct-stale"]
+    assert items[0]["reconcile_reason"] == "unresolved_reservation"
+    assert items[1]["reconcile_reason"] == "stale_invite"
 
 
 def test_mapped_backlog_drain_skips_already_sent_contacts():

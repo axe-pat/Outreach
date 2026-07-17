@@ -6699,6 +6699,117 @@ def _unresolved_reservation_org_ids(
     return org_ids
 
 
+def _select_profile_reconcile_candidates(
+    *,
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    organization_ids: set[str],
+    limit: int,
+    exclude_contact_ids: set[str] | None = None,
+    unresolved_reservation_profiles: set[str] | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
+    """Pick profile-check candidates for the Track 2 refresh lane.
+
+    Profile opens are expensive and noisy. Accepted/replied people should come
+    from DM/thread reconcile, not from re-opening their profiles. This selector
+    only walks:
+
+    - stale ``Invited`` / ``Invite uncertain`` contacts in today's org set
+    - contacts that still own an unresolved invite reservation (any status)
+
+    Contacts already covered by this run's message reconcile are skipped.
+    """
+
+    if limit <= 0 or not organization_ids:
+        return []
+
+    excluded = {item for item in (exclude_contact_ids or set()) if item}
+    unresolved_profiles = {
+        profile
+        for profile in (unresolved_reservation_profiles or set())
+        if profile
+    }
+    stale_queue = build_linkedin_reconcile_queue_items(
+        organizations=organizations,
+        contacts=contacts,
+        touchpoints=touchpoints,
+        include_statuses=("Invited", "Invite uncertain"),
+        max_age_days=21,
+        min_age_hours=12,
+        now=now,
+    )
+    stale_by_contact = {
+        str(item.get("contact_id") or ""): item
+        for item in stale_queue
+        if str(item.get("contact_id") or "")
+    }
+    organization_map = {item.organization_id: item for item in organizations}
+    selected: list[dict[str, object]] = []
+    seen_contacts: set[str] = set()
+
+    def _append(item: dict[str, object]) -> bool:
+        contact_id = str(item.get("contact_id") or "")
+        if not contact_id or contact_id in seen_contacts or contact_id in excluded:
+            return False
+        org_id = str(item.get("organization_id") or "")
+        if org_id not in organization_ids:
+            return False
+        if not str(item.get("linkedin_url") or "").strip():
+            return False
+        seen_contacts.add(contact_id)
+        selected.append(item)
+        return True
+
+    # Exception path first: unresolved reservations must clear even if the
+    # contact status is odd or the invite age is outside the stale window.
+    for contact in contacts:
+        if len(selected) >= limit:
+            break
+        profile = _canonical_linkedin_profile(contact.linkedin_url)
+        if not profile or profile not in unresolved_profiles:
+            continue
+        if contact.preferred_channel != OutreachChannel.LINKEDIN:
+            continue
+        queued = stale_by_contact.get(contact.contact_id)
+        if queued is not None:
+            _append({**queued, "reconcile_reason": "unresolved_reservation"})
+            continue
+        organization = organization_map.get(contact.organization_id)
+        _append(
+            {
+                "contact_id": contact.contact_id,
+                "organization_id": contact.organization_id,
+                "company": organization.name if organization else "",
+                "name": contact.full_name,
+                "title": contact.title,
+                "contact_type": contact.contact_type,
+                "status": contact.status,
+                "linkedin_url": contact.linkedin_url,
+                "last_contacted_at": contact.last_contacted_at,
+                "last_touch_at": contact.last_contacted_at or "",
+                "age_hours": None,
+                "original_invite_note": "",
+                "source_touchpoint_id": "",
+                "target_role_family": "",
+                "target_role_label": "",
+                "target_role_source": "",
+                "target_role_matched_text": "",
+                "target_role_matched_rule": "",
+                "target_role_is_concrete": "",
+                "reconcile_reason": "unresolved_reservation",
+            }
+        )
+
+    for item in stale_queue:
+        if len(selected) >= limit:
+            break
+        _append({**item, "reconcile_reason": "stale_invite"})
+
+    return selected[:limit]
+
+
 def _mapped_backlog_invite_items(
     *,
     organizations: list[OrganizationRecord],
@@ -12175,26 +12286,37 @@ def run_track_2_daily_plan_cmd(
                 planned_followup_budget,
                 max(0, followup_budget - len(execution_results)),
             )
+            reservation_ledger = load_invite_reservations(
+                reservation_ledger_path(settings.resolved_tracking_workspace_dir)
+            )
             unresolved_reservation_org_ids = _unresolved_reservation_org_ids(
-                reservations=load_invite_reservations(
-                    reservation_ledger_path(settings.resolved_tracking_workspace_dir)
-                ),
+                reservations=reservation_ledger,
                 contacts=workbook.list_contacts(),
             )
             reconcile_org_ids = set(followup_org_ids) | unresolved_reservation_org_ids
+            unresolved_reservation_profiles = {
+                _canonical_linkedin_profile(str(reservation.get("linkedin_url") or ""))
+                for reservation in (
+                    reservation_ledger.get("reservations") or {}
+                ).values()
+                if isinstance(reservation, Mapping)
+                and invite_reservation_blocks_retry(reservation)
+                and str(reservation.get("status") or "").strip().casefold()
+                in UNRESOLVED_STATUSES
+            }
+            unresolved_reservation_profiles.discard("")
             if remaining_profile_budget and reconcile_org_ids:
-                profile_candidates = [
-                    item
-                    for item in build_linkedin_reconcile_queue_items(
-                        organizations=workbook.list_organizations(),
-                        contacts=workbook.list_contacts(),
-                        touchpoints=workbook.list_touchpoints(),
-                        include_statuses=("Invited", "Connected", "Invite uncertain"),
-                        max_age_days=21,
-                        min_age_hours=12,
-                    )
-                    if str(item.get("organization_id") or "") in reconcile_org_ids
-                ][:remaining_profile_budget]
+                # Profile opens are for stuck/stale invites only. Connected and
+                # replied people are owned by the DM/thread reconcile above.
+                profile_candidates = _select_profile_reconcile_candidates(
+                    organizations=workbook.list_organizations(),
+                    contacts=workbook.list_contacts(),
+                    touchpoints=workbook.list_touchpoints(),
+                    organization_ids=reconcile_org_ids,
+                    limit=remaining_profile_budget,
+                    exclude_contact_ids=live_contact_ids,
+                    unresolved_reservation_profiles=unresolved_reservation_profiles,
+                )
                 if profile_candidates:
                     detected_profiles = [
                         item.__dict__

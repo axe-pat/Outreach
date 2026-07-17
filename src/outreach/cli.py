@@ -4010,6 +4010,33 @@ def classify_linkedin_reply_intent(
         return "soft_no"
     if any(
         token in lower
+        for token in [
+            "already exists",
+            "already applied",
+            "already referred",
+            "candidate already exists",
+            "already in the system",
+            "already in our system",
+        ]
+    ):
+        return "already_in_system"
+    if any(
+        token in lower
+        for token in [
+            "let me check",
+            "let me look",
+            "get back to you",
+            "i'll get back",
+            "ill get back",
+            "i will get back",
+            "i'll look into",
+            "ill look into",
+            "circle back",
+        ]
+    ):
+        return "waiting_on_them"
+    if any(
+        token in lower
         for token in ["no idea", "don't know", "dont know", "do not know", "not sure", "no clue"]
     ):
         return "does_not_know"
@@ -4042,7 +4069,17 @@ def classify_linkedin_reply_intent(
         return "permission_to_send_fit" if promised_specific_fit else "already_asked_wait"
     if "let me know" in lower:
         return "permission_to_send_fit"
-    if "hr" in lower or "recruiter" in lower or "hiring" in lower:
+    if any(
+        token in lower
+        for token in [
+            "reach out to",
+            "talk to",
+            "connect with",
+            "ping ",
+        ]
+    ) or re.search(r"@\w", latest_message):
+        return "routing_signal"
+    if "hr" in lower or "recruiter" in lower or re.search(r"\bhiring\b", lower):
         return "routing_signal"
     if any(token in lower for token in ["small team", "high ownership", "feedback loop"]):
         return "company_insight"
@@ -4283,6 +4320,22 @@ def _reply_followup_draft_product(
             (
                 f"Hold for now. {name} already acknowledged the ask; send a follow-up only when there is a specific "
                 f"{company} PM/product fit to share."
+            ),
+        )
+    if intent == "waiting_on_them":
+        return (
+            "already_asked_wait",
+            "wait_for_trigger",
+            (
+                f"Hold for now. {name} said they would check / get back; nothing to send until they reply."
+            ),
+        )
+    if intent == "already_in_system":
+        return (
+            "polite_close_reply",
+            "optional",
+            (
+                f"Thanks {name} — helpful to know I'm already in the system. Appreciate you checking."
             ),
         )
     if any(
@@ -4922,6 +4975,63 @@ def _followup_pending_identity(draft: dict) -> tuple[str, str]:
     )
 
 
+# Human-facing pending queue only. wait_for_trigger / cadence_hold belong in
+# cadence artifacts / daily-report system-hold sections, not this review file.
+PENDING_REVIEW_QUEUE_RECOMMENDATIONS = frozenset(
+    {
+        "review",
+        "human_review",
+        "human_review_required",
+        "rewrite_before_send",
+        "safe_to_review",
+    }
+)
+INBOX_RESOLVED_STATUSES = frozenset(
+    {
+        "manual_handled",
+        "auto_handled",
+        "done",
+        "resolved",
+        "not_actionable",
+        "snoozed",
+    }
+)
+
+
+def _inbox_resolved_contact_ids(workspace: Path) -> set[str]:
+    """Contacts the operator already closed in the inbox action ledger."""
+    statuses_by_contact: dict[str, set[str]] = {}
+    for action_row in _read_csv_rows(_inbox_action_path(workspace)):
+        contact_id = str(action_row.get("contact_id") or "").strip()
+        if not contact_id:
+            continue
+        statuses_by_contact.setdefault(contact_id, set()).add(
+            str(action_row.get("status") or "").casefold()
+        )
+    resolved: set[str] = set()
+    for contact_id, statuses in statuses_by_contact.items():
+        if "open" in statuses:
+            continue
+        if statuses & INBOX_RESOLVED_STATUSES:
+            resolved.add(contact_id)
+    return resolved
+
+
+def _pending_review_excluded_contact_ids(
+    workspace: Path,
+    *,
+    workbook: OutreachWorkbook | None = None,
+) -> set[str]:
+    """Contacts that must never stay in the human follow-up review queue."""
+    excluded = set(_inbox_resolved_contact_ids(workspace))
+    try:
+        book = workbook or OutreachWorkbook(workspace)
+        excluded.update(_current_manual_outbound_by_contact(workspace, book).keys())
+    except Exception:
+        pass
+    return excluded
+
+
 def update_linkedin_followup_pending_review(
     *,
     settings: OutreachSettings,
@@ -4930,6 +5040,7 @@ def update_linkedin_followup_pending_review(
     source_artifact: Path,
 ) -> Path:
     path = _followup_pending_review_path(settings)
+    workspace = settings.resolved_tracking_workspace_dir
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -4952,9 +5063,38 @@ def update_linkedin_followup_pending_review(
         }
     for draft in cleared_drafts:
         existing.pop(_followup_pending_key(draft), None)
-    for draft in pending_drafts:
+
+    human_pending = [
+        draft
+        for draft in pending_drafts
+        if str(draft.get("send_recommendation") or "").casefold()
+        in PENDING_REVIEW_QUEUE_RECOMMENDATIONS
+    ]
+    for draft in human_pending:
         existing[_followup_pending_key(draft)] = draft
-    results = list(existing.values())
+
+    excluded_contact_ids = _pending_review_excluded_contact_ids(workspace)
+    results = [
+        item
+        for item in existing.values()
+        if str(item.get("send_recommendation") or "").casefold()
+        in PENDING_REVIEW_QUEUE_RECOMMENDATIONS
+        and str(item.get("contact_id") or "") not in excluded_contact_ids
+    ]
+    # One row per contact — keep the newest snapshot if duplicates linger.
+    deduped: dict[str, dict] = {}
+    for item in results:
+        contact_id = str(item.get("contact_id") or "")
+        key = contact_id or _followup_pending_key(item)
+        prior = deduped.get(key)
+        if prior is None:
+            deduped[key] = item
+            continue
+        prior_at = str(prior.get("updated_at") or prior.get("last_seen_at") or "")
+        item_at = str(item.get("updated_at") or item.get("last_seen_at") or "")
+        if item_at >= prior_at:
+            deduped[key] = item
+    results = list(deduped.values())
     summary: dict[str, int] = {}
     for draft in results:
         recommendation = str(draft.get("send_recommendation") or "unknown")
@@ -6542,12 +6682,13 @@ def _linkedin_reply_is_unanswered(
             for item in inbound
             if normalize_dedupe_text(item.message_text) == evidence_key
         ]
-        if not matching_inbound:
-            return (
-                True,
-                "Current inbound LinkedIn evidence is not yet represented in the tracker.",
-            )
-        latest_inbound = matching_inbound[-1]
+        if matching_inbound:
+            latest_inbound = matching_inbound[-1]
+        else:
+            # Live scrape text often differs from tracker placeholders
+            # ("LinkedIn reply detected."). Do not force unanswered on mismatch —
+            # fall back to the latest inbound and still honor later outbound.
+            latest_inbound = inbound[-1]
     else:
         latest_inbound = inbound[-1]
     latest_inbound_at = event_at(latest_inbound)
@@ -9739,7 +9880,17 @@ def write_artifact_daily_report(
         contact_id
         for contact_id, statuses in inbox_statuses_by_contact.items()
         if "open" not in statuses
-        and bool(statuses & {"manual_handled", "auto_handled", "done", "resolved"})
+        and bool(
+            statuses
+            & {
+                "manual_handled",
+                "auto_handled",
+                "done",
+                "resolved",
+                "not_actionable",
+                "snoozed",
+            }
+        )
     }
     tracker_touchpoints = workbook.list_touchpoints()
 
@@ -9751,10 +9902,7 @@ def write_artifact_daily_report(
         stale_latest_message = str(
             item.get("latest_message") or item.get("last_message") or ""
         ).strip()
-        if (
-            contact_id in ledger_handled_contact_ids
-            and str(item.get("source_status") or "").casefold() == "replied"
-        ):
+        if contact_id in ledger_handled_contact_ids:
             cleared_item = dict(item)
             cleared_item["manual_source_artifact"] = str(_inbox_action_path(workspace))
             cleared_item["manual_clear_reason"] = "resolved_in_inbox_action_ledger"
@@ -9777,27 +9925,19 @@ def write_artifact_daily_report(
                 manually_cleared_items.append(cleared_item)
                 continue
         manual_outbound = manual_outbound_by_contact.get(contact_id)
-        manual_message = str((manual_outbound or {}).get("latest_message") or "").strip()
-        draft_message = str(item.get("draft_message") or "").strip()
-        should_clear_as_manual = bool(
-            manual_outbound
-            and manual_message
-            and _manual_outbound_is_newer_than_evidence(
-                manual_outbound,
-                evidence=item,
-            )
-            and (
-                normalize_dedupe_text(manual_message) == normalize_dedupe_text(draft_message)
-                or (
-                    stale_latest_message
-                    and normalize_dedupe_text(manual_message) != normalize_dedupe_text(stale_latest_message)
-                )
-            )
-        )
-        if should_clear_as_manual:
+        if manual_outbound:
+            # Durable LinkedIn message state says the latest thread message is ours.
+            # Clear ghost review rows even when the pending snapshot still shows old inbound.
             cleared_item = dict(item)
-            cleared_item["manual_latest_message"] = manual_message
-            cleared_item["manual_source_artifact"] = (manual_outbound or {}).get("artifact", "")
+            cleared_item["manual_latest_message"] = str(
+                manual_outbound.get("latest_message") or ""
+            )
+            cleared_item["manual_source_artifact"] = str(
+                manual_outbound.get("artifact") or ""
+            )
+            cleared_item["manual_clear_reason"] = (
+                "resolved_by_current_linkedin_outbound_state"
+            )
             manually_cleared_items.append(cleared_item)
             continue
         key = _review_identity_key(item)
@@ -9811,16 +9951,9 @@ def write_artifact_daily_report(
     deduped_held_items: list[dict[str, object]] = []
     for item in system_held_items:
         contact_id = str(item.get("contact_id") or "")
-        if (
-            contact_id in ledger_handled_contact_ids
-            and str(item.get("source_status") or "").casefold() == "replied"
-        ):
+        if contact_id in ledger_handled_contact_ids:
             continue
-        manual_outbound = manual_outbound_by_contact.get(contact_id)
-        if manual_outbound and _manual_outbound_is_newer_than_evidence(
-            manual_outbound,
-            evidence=item,
-        ):
+        if contact_id in manual_outbound_by_contact:
             continue
         if str(item.get("source_status") or "").casefold() == "replied":
             unanswered, reply_reason = _linkedin_reply_is_unanswered(
@@ -11980,13 +12113,11 @@ def run_track_2_daily_plan_cmd(
                 review_drafts = [
                     draft
                     for draft in cadence_allowed_drafts
-                    if str(draft.get("send_recommendation") or "") not in SAFE_FOLLOWUP_SEND_RECOMMENDATIONS
-                ] + [
-                    draft
-                    for draft in cadence_held_drafts
                     if str(draft.get("send_recommendation") or "").casefold()
-                    not in TERMINAL_DRAFT_RECOMMENDATIONS
+                    in PENDING_REVIEW_QUEUE_RECOMMENDATIONS
                 ]
+                # System holds (wait_for_trigger / cadence_hold / rewrite_hold) stay in
+                # cadence artifacts — they must not pollute the human review queue.
                 resolved_drafts = [
                     draft
                     for draft in cadence_held_drafts
@@ -11999,7 +12130,19 @@ def run_track_2_daily_plan_cmd(
                     if str(item.get("contact_id") or "")
                     and _linkedin_sender_is_self(item.get("last_sender"))
                 ]
-                cleared_drafts = [*resolved_drafts, *current_outbound_threads]
+                excluded_contact_ids = _pending_review_excluded_contact_ids(
+                    settings.resolved_tracking_workspace_dir,
+                    workbook=workbook,
+                )
+                excluded_clear_stubs = [
+                    {"contact_id": contact_id, "thread_id": "", "latest_message": ""}
+                    for contact_id in sorted(excluded_contact_ids)
+                ]
+                cleared_drafts = [
+                    *resolved_drafts,
+                    *current_outbound_threads,
+                    *excluded_clear_stubs,
+                ]
                 pending_path = update_linkedin_followup_pending_review(
                     settings=settings,
                     pending_drafts=review_drafts,

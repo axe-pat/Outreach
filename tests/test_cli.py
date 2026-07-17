@@ -1255,6 +1255,165 @@ def test_daily_report_marks_regenerated_include_seen_drafts_as_carryover(
     assert payload["run_outcome"]["carryover_messages_to_review"] == 1
 
 
+def test_update_linkedin_followup_pending_review_drops_holds_and_resolved(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    OutreachWorkbook(workspace).initialize()
+    pending_path = workspace / "linkedin_followup_pending_review.json"
+    pending_path.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "contact_id": "ct-review",
+                        "thread_id": "t1",
+                        "draft_kind": "conversation_reply",
+                        "latest_message": "Still open.",
+                        "send_recommendation": "review",
+                        "name": "Open Person",
+                    },
+                    {
+                        "contact_id": "ct-wait",
+                        "thread_id": "t2",
+                        "draft_kind": "already_asked_wait",
+                        "latest_message": "Absolutely",
+                        "send_recommendation": "wait_for_trigger",
+                        "name": "Wait Person",
+                    },
+                    {
+                        "contact_id": "ct-handled",
+                        "thread_id": "t3",
+                        "draft_kind": "conversation_reply",
+                        "latest_message": "Old inbound",
+                        "send_recommendation": "review",
+                        "name": "Handled Person",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    with (workspace / "linkedin_inbox_actions.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=["action_id", "status", "contact_id"]
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "action_id": "a1",
+                "status": "manual_handled",
+                "contact_id": "ct-handled",
+            }
+        )
+
+    settings = SimpleNamespace(resolved_tracking_workspace_dir=workspace)
+    update_linkedin_followup_pending_review(
+        settings=settings,
+        pending_drafts=[
+            {
+                "contact_id": "ct-new-hold",
+                "thread_id": "t4",
+                "draft_kind": "already_asked_wait",
+                "latest_message": "Sure",
+                "send_recommendation": "wait_for_trigger",
+            },
+            {
+                "contact_id": "ct-review",
+                "thread_id": "t1",
+                "draft_kind": "conversation_reply",
+                "latest_message": "Still open.",
+                "send_recommendation": "review",
+                "name": "Open Person",
+            },
+        ],
+        cleared_drafts=[],
+        source_artifact=tmp_path / "drafts.json",
+    )
+
+    payload = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert [row["contact_id"] for row in payload["results"]] == ["ct-review"]
+    assert payload["summary"] == {"review": 1}
+
+
+def test_classify_linkedin_reply_intent_waiting_and_already_in_system() -> None:
+    from outreach.cli import classify_linkedin_reply_intent
+
+    assert (
+        classify_linkedin_reply_intent(
+            latest_message="Let me check and get back to you"
+        )
+        == "waiting_on_them"
+    )
+    assert (
+        classify_linkedin_reply_intent(
+            latest_message="candidate already exists in the system"
+        )
+        == "already_in_system"
+    )
+    assert (
+        classify_linkedin_reply_intent(
+            latest_message="Please reach out to @Shashank Masurkar"
+        )
+        == "routing_signal"
+    )
+
+
+def test_linkedin_reply_is_unanswered_falls_back_when_evidence_mismatches(
+    tmp_path: Path,
+) -> None:
+    from outreach.cli import _linkedin_reply_is_unanswered
+
+    workbook = OutreachWorkbook(tmp_path)
+    workbook.initialize()
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-1", name="Acme")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-1",
+            organization_id="org-1",
+            full_name="Alex Friend",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-in",
+            organization_id="org-1",
+            contact_id="ct-1",
+            channel="linkedin",
+            status="received",
+            message_kind="linkedin_reply",
+            message_text="LinkedIn reply detected.",
+            sent_at="2026-07-10T12:00:00+00:00",
+            recorded_at="2026-07-10T12:00:00+00:00",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-out",
+            organization_id="org-1",
+            contact_id="ct-1",
+            channel="linkedin",
+            status="sent",
+            message_kind="linkedin_manual_message",
+            message_text="Thanks, already replied.",
+            sent_at="2026-07-11T12:00:00+00:00",
+            recorded_at="2026-07-11T12:00:00+00:00",
+        )
+    )
+    unanswered, reason = _linkedin_reply_is_unanswered(
+        workbook.list_touchpoints(),
+        contact_id="ct-1",
+        evidence_message="Let me check and get back to you",
+    )
+    assert unanswered is False
+    assert "later outbound" in reason.lower()
+
+
 def test_pending_followup_clear_removes_stale_versions_of_the_same_thread(
     tmp_path: Path,
 ) -> None:

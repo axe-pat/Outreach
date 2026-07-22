@@ -9,7 +9,7 @@ def test_load_style_profile_reads_approved_asks_and_examples() -> None:
     profile = load_style_profile(Path("workspace/communication_style_profile.yml"))
 
     assert profile.preferred_directness.startswith("direct")
-    assert "would love to connect" in profile.banned_phrases
+    assert "would be great to connect" in profile.banned_phrases
     assert profile.strong_messages[0].recipient_type == "engineer_india"
     assert any("hiring-team pointer" in ask for ask in profile.approved_asks_for("engineer_india"))
 

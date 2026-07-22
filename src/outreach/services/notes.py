@@ -145,7 +145,7 @@ class NoteGenerator:
         credibility = self._credibility_line(context)
         interest = self._company_interest_line(company, context)
         role_interest = self._role_interest_line(context)
-        close = "Would be great to connect."
+        close = "Would love to connect?"
         title = str(candidate.get("title") or "").lower()
         is_recruiter = role_bucket in {"Recruiting", "University Recruiting"} or any(
             signal in title for signal in ("recruiter", "talent acquisition", "campus recruiting")
@@ -163,7 +163,7 @@ class NoteGenerator:
                 "guidance",
                 [
                     f"{opening} {credibility} {role_interest} {close}{school_close}",
-                    f"{opening} {credibility} {role_interest} It would be great to connect.{school_close}",
+                    f"{opening} {credibility} {role_interest} Would love to connect?{school_close}",
                 ],
             )
 
@@ -218,7 +218,7 @@ class NoteGenerator:
                     f"Hi {first_name}, I've been interested in {company} and am looking closely at "
                     f"{role} there. {credibility} Are you the right person to ask about the hiring path?",
                     f"Hi {first_name}, {company} is a company I've been following closely. "
-                    f"{credibility} I'm looking at {role}. Would be great to connect.",
+                    f"{credibility} I'm looking at {role}. Would love to connect?",
                 ],
             )
 
@@ -875,8 +875,14 @@ class NoteGenerator:
             ("Would love your quick thoughts", "I'd value your quick thoughts"),
             ("Would love to stay in touch", "I'd value staying in touch"),
             ("Would love to keep in touch", "I'd value keeping in touch"),
-            ("would love to connect", "would value connecting"),
-            ("Would love to connect", "Would value connecting"),
+            # Prefer "Would love to connect?" as the warm invite close; rewrite
+            # only the older soft "would be great to connect" form.
+            ("It would be great to connect", "Would love to connect?"),
+            ("it would be great to connect", "Would love to connect?"),
+            ("Would be great to connect.", "Would love to connect?"),
+            ("would be great to connect.", "Would love to connect?"),
+            ("Would be great to connect", "Would love to connect?"),
+            ("would be great to connect", "Would love to connect?"),
             ("Your product journey stood out", "Your product path caught my eye"),
             ("Your path stood out", "Your path caught my eye"),
             ("Your product path stood out", "Your product path caught my eye"),

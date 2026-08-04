@@ -1,38 +1,170 @@
 {
+ "org-1password": {
+  "company": "1Password",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|7|8"
+ },
+ "org-adobe": {
+  "company": "Adobe",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|6|7"
+ },
+ "org-adyen": {
+  "company": "Adyen",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-airtable": {
+  "company": "Airtable",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|4|13"
+ },
+ "org-airwallex": {
+  "company": "Airwallex",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-alchemy": {
+  "company": "Alchemy",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-19",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-amazon": {
+  "company": "Amazon",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-17",
+  "progress_marker": "people_mapped|0|13"
+ },
+ "org-anthropic": {
+  "company": "Anthropic",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|10"
+ },
+ "org-anysphere": {
+  "company": "Anysphere",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-apple": {
+  "company": "Apple",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|5"
+ },
+ "org-assembled": {
+  "company": "Assembled",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|3|5"
+ },
+ "org-atlassian": {
+  "company": "Atlassian",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|3|5"
+ },
+ "org-automotivemastermind-inc": {
+  "company": "automotiveMastermind Inc.",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-30",
+  "progress_marker": "people_mapped|0|2"
+ },
+ "org-axle-health": {
+  "company": "Axle Health",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-29",
+  "progress_marker": "people_mapped|0|1"
+ },
  "org-bellagent": {
   "company": "Bellagent",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 11,
+  "last_selected": "2026-07-30",
   "progress_marker": "outreach_active|1|2"
+ },
+ "org-benchling": {
+  "company": "Benchling",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|6|9"
  },
  "org-bot-auto": {
   "company": "Bot Auto",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-brex": {
+  "company": "Brex",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|7|8"
+ },
+ "org-capital-one": {
+  "company": "Capital One",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|3"
+ },
+ "org-celonis": {
+  "company": "Celonis",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|11"
  },
  "org-checkr": {
   "company": "Checkr",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|18"
+  "last_selected": "2026-07-22",
+  "progress_marker": "outreach_active|4|18"
+ },
+ "org-cisco": {
+  "company": "Cisco",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|3"
+ },
+ "org-cloudflare": {
+  "company": "Cloudflare",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|3"
+ },
+ "org-codesignal": {
+  "company": "CodeSignal",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "people_mapped|0|1"
+ },
+ "org-cohere": {
+  "company": "Cohere",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
  },
  "org-collectly": {
   "company": "Collectly",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|1"
+  "consecutive_selections": 9,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|1|3"
  },
  "org-commure": {
   "company": "Commure",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-17",
   "progress_marker": "people_mapped|0|11"
  },
  "org-compa": {
   "company": "Compa",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 13,
+  "last_selected": "2026-08-04",
   "progress_marker": "priority_target|0|0"
  },
  "org-crexi": {
@@ -44,8 +176,74 @@
  "org-datadog": {
   "company": "Datadog",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|19"
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|6|25"
+ },
+ "org-deel": {
+  "company": "Deel",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-delinea": {
+  "company": "Delinea",
+  "consecutive_selections": 5,
+  "last_selected": "2026-07-25",
+  "progress_marker": "people_mapped|0|2"
+ },
+ "org-doodle-labs": {
+  "company": "Doodle Labs",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|5|5"
+ },
+ "org-doordash": {
+  "company": "DoorDash",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-19",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-doximity": {
+  "company": "Doximity",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|7"
+ },
+ "org-eightfold-ai": {
+  "company": "Eightfold.ai",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-eliseai": {
+  "company": "EliseAI",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|3|17"
+ },
+ "org-entrust": {
+  "company": "Entrust",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|2|4"
+ },
+ "org-equipifi": {
+  "company": "equipifi",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|4|4"
+ },
+ "org-faire": {
+  "company": "Faire",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|6|6"
+ },
+ "org-figma": {
+  "company": "Figma",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-18",
+  "progress_marker": "priority_target|0|0"
  },
  "org-flairx": {
   "company": "FlairX",
@@ -53,47 +251,275 @@
   "last_selected": "2026-07-16",
   "progress_marker": "outreach_active|2|2"
  },
+ "org-galaxy": {
+  "company": "Galaxy",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|2|6"
+ },
+ "org-genpact": {
+  "company": "Genpact",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|1|6"
+ },
+ "org-github": {
+  "company": "GitHub",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|14"
+ },
+ "org-glean": {
+  "company": "Glean",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|11|11"
+ },
  "org-globalization-partners": {
   "company": "Globalization Partners",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-google": {
+  "company": "Google",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|17"
+ },
+ "org-grab": {
+  "company": "Grab",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-18",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-graymatter-robotics": {
+  "company": "GrayMatter Robotics",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|3"
  },
  "org-gumgum": {
   "company": "GumGum",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-29",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-handshake-ai": {
+  "company": "Handshake AI",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "last_selected": "2026-08-04",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-hebbia": {
+  "company": "Hebbia",
+  "consecutive_selections": 9,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|7|8"
+ },
+ "org-hex": {
+  "company": "Hex",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|9|11"
  },
  "org-heygen": {
   "company": "HeyGen",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|7"
+  "consecutive_selections": 6,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|5|7"
  },
  "org-hub": {
   "company": "Hub",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-hubspot": {
+  "company": "HubSpot",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-hugging-face": {
+  "company": "Hugging Face",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-icarus": {
+  "company": "Icarus",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|7|9"
+ },
+ "org-identity-digital": {
+  "company": "Identity Digital",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-intuit": {
+  "company": "Intuit",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "people_mapped|0|2"
  },
  "org-january": {
   "company": "January",
+  "consecutive_selections": 3,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|10|10"
+ },
+ "org-keysight-technologies": {
+  "company": "Keysight Technologies",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "outreach_active|6|9"
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|5|6"
+ },
+ "org-klaviyo": {
+  "company": "Klaviyo",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|2|17"
  },
  "org-liftoff": {
   "company": "Liftoff",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-linear": {
+  "company": "Linear",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|2"
+ },
+ "org-linkedin": {
+  "company": "LinkedIn",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|3"
+ },
+ "org-logicmonitor": {
+  "company": "LogicMonitor",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|3"
+ },
+ "org-mercor": {
+  "company": "Mercor",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-merlin-ai": {
+  "company": "Merlin AI",
+  "consecutive_selections": 9,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-meta": {
+  "company": "Meta",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "people_mapped|0|11"
+ },
+ "org-metropolis-technologies": {
+  "company": "Metropolis Technologies",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-micro1": {
+  "company": "Micro1",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-microsoft": {
+  "company": "Microsoft",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|4"
+ },
+ "org-monday-com": {
+  "company": "Monday.com",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-mongodb": {
+  "company": "MongoDB",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-30",
+  "progress_marker": "people_mapped|0|12"
+ },
+ "org-motive": {
+  "company": "Motive",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|12"
+ },
+ "org-netapp": {
+  "company": "NetApp",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|2|4"
+ },
+ "org-netflix": {
+  "company": "Netflix",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|3|4"
+ },
+ "org-notion": {
+  "company": "Notion",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|3|8"
+ },
+ "org-nvidia": {
+  "company": "NVIDIA",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-okta": {
+  "company": "Okta",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|9"
+ },
+ "org-openai": {
+  "company": "OpenAI",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-18",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-operon": {
+  "company": "Operon",
+  "consecutive_selections": 8,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|4|4"
+ },
+ "org-pagerduty": {
+  "company": "PagerDuty",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-31",
   "progress_marker": "priority_target|0|0"
  },
  "org-parsec-automation": {
   "company": "Parsec Automation",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 13,
+  "last_selected": "2026-08-04",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-plaid": {
+  "company": "Plaid",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|14"
  },
  "org-postman": {
   "company": "Postman",
@@ -101,40 +527,202 @@
   "last_selected": "2026-07-16",
   "progress_marker": "priority_target|0|0"
  },
+ "org-ramp": {
+  "company": "Ramp",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|21"
+ },
  "org-recurly": {
   "company": "Recurly",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|3"
+  "last_selected": "2026-07-18",
+  "progress_marker": "outreach_active|1|3"
+ },
+ "org-redox": {
+  "company": "Redox",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|1"
  },
  "org-relay": {
   "company": "Relay",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-render": {
+  "company": "Render",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-retool": {
+  "company": "Retool",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "outreach_active|1|1"
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|2|19"
  },
  "org-ria-money-transfer-xml": {
   "company": "Ria Money Transfer - XML",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-rippling": {
+  "company": "Rippling",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "last_selected": "2026-07-18",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-runpod": {
+  "company": "Runpod",
+  "consecutive_selections": 11,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|4|4"
+ },
+ "org-salestrics": {
+  "company": "Salestrics",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "people_mapped|0|1"
+ },
+ "org-sentinelone": {
+  "company": "SentinelOne",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|1|8"
+ },
+ "org-servicenow": {
+  "company": "ServiceNow",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|3"
+ },
+ "org-shield-ai": {
+  "company": "Shield AI",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|4"
+ },
+ "org-shopify": {
+  "company": "Shopify",
+  "consecutive_selections": 2,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-snorkel-ai": {
+  "company": "Snorkel AI",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-snowflake": {
+  "company": "Snowflake",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|4"
+ },
+ "org-stripe": {
+  "company": "Stripe",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|6|8"
+ },
+ "org-toloka": {
+  "company": "Toloka",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
   "progress_marker": "priority_target|0|0"
  },
  "org-topsort": {
   "company": "Topsort",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 3,
+  "last_selected": "2026-07-28",
   "progress_marker": "priority_target|0|0"
+ },
+ "org-trimble-inc": {
+  "company": "Trimble Inc.",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-30",
+  "progress_marker": "people_mapped|0|4"
+ },
+ "org-trueml": {
+  "company": "TrueML",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-29",
+  "progress_marker": "people_mapped|0|1"
+ },
+ "org-twilio": {
+  "company": "Twilio",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|2|3"
+ },
+ "org-uber": {
+  "company": "Uber",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-28",
+  "progress_marker": "outreach_active|3|5"
+ },
+ "org-udemy": {
+  "company": "Udemy",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
+ },
+ "org-vercel": {
+  "company": "Vercel",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|14|15"
+ },
+ "org-waabi": {
+  "company": "Waabi",
+  "consecutive_selections": 1,
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-workday": {
+  "company": "Workday",
+  "consecutive_selections": 1,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|2|3"
  },
  "org-workwhile": {
   "company": "WorkWhile",
-  "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
+  "consecutive_selections": 8,
+  "last_selected": "2026-08-04",
   "progress_marker": "outreach_active|13|13"
  },
  "org-writer": {
   "company": "Writer",
+  "consecutive_selections": 10,
+  "last_selected": "2026-08-04",
+  "progress_marker": "outreach_active|1|2"
+ },
+ "org-xylem": {
+  "company": "Xylem",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-31",
+  "progress_marker": "outreach_active|1|1"
+ },
+ "org-you-com": {
+  "company": "You.com",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-29",
+  "progress_marker": "people_mapped|0|3"
+ },
+ "org-zapier": {
+  "company": "Zapier",
   "consecutive_selections": 1,
-  "last_selected": "2026-07-16",
-  "progress_marker": "people_mapped|0|1"
+  "last_selected": "2026-07-30",
+  "progress_marker": "outreach_active|2|5"
+ },
+ "org-zs": {
+  "company": "ZS",
+  "consecutive_selections": 2,
+  "last_selected": "2026-07-28",
+  "progress_marker": "priority_target|0|0"
  }
 }

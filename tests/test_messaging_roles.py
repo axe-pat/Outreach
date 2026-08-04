@@ -275,7 +275,7 @@ def test_non_product_target_does_not_rewrite_recipient_product_fact() -> None:
 
     message = str(drafts[0]["draft_message"])
     assert "Your developer-facing product work" in message
-    assert "relevant to business operations and strategy work" in message
+    assert "BizOps/Strategy roles" in message
 
 
 def test_review_csv_keeps_seniority_guidance_role_neutral(tmp_path) -> None:
@@ -418,9 +418,9 @@ def test_reply_draft_uses_role_context_from_invite_round_trip() -> None:
     )
 
     assert drafts[0]["target_role_family"] == "program_operations"
-    assert "Program / Operations" in str(drafts[0]["draft_message"])
+    # The reply names the team area rather than the internal role label.
+    assert "program or operations" in str(drafts[0]["draft_message"]).lower()
     assert "PM/product" not in str(drafts[0]["draft_message"])
-    assert "a Program / Operations internship path" in str(drafts[0]["draft_message"])
     assert "internship paths" not in str(drafts[0]["draft_message"])
 
 

@@ -1,17 +1,21 @@
-preferred_directness: direct, concrete, and oriented toward the reply we want
-preferred_casualness: warm and human, but not deferential or over-polished
+preferred_directness: answer their last beat first, then one short context beat, then one easy ask
+preferred_casualness: sounds like a person on LinkedIn, not a networking email. Short paragraphs. No polish for polish's sake.
 banned_phrases:
-- would love to connect
+- would be great to connect
 - pick your brain
 - quick coffee chat
 - your work stood out
 - learn from your experience
 - product/company direction
 - AI product direction
+- I can build, not just spec
+- I've been deep in product for a while now, coming from engineering
+- I've been deep in product for a while now, coming from a
+- so I can build, not just spec
 self_intro_variants:
-- I spent about five years building data and platform systems as an engineer, and I've been deep in product for a while now.
-- I'm a Marshall MBA with an engineering background and substantial product experience.
-- My background spans engineering, product, and the operating problems between them.
+- I'm at USC Marshall for my MBA, with about five years building data and platform systems before that.
+- 5 years building data/platform systems, then an MBA, now doing product.
+- I'm a Marshall MBA with an engineering background, now doing applied AI and data platform product work.
 approved_asks_by_recipient_type:
   founder:
   - Ask whether a technical MBA/product background fits anything useful there.
@@ -34,6 +38,26 @@ approved_asks_by_recipient_type:
   general:
   - Ask for one concrete pointer, routing suggestion, or next person to speak with.
 strong_messages:
+- label: operator_gold_jeffrey_entrust_20260730
+  recipient_type: general
+  message: "Thanks Jeffrey! Two things that would help most.\n\nOne, does Entrust take product interns right now, particularly anywhere near the developer security or identity side? Two, if so, who owns that hiring? Happy to go through the normal process, just want to land in front of the right person.\n\nContext: 5 years building data/platform systems, then an MBA, now doing product. The developer security work is what pulled me toward Entrust specifically."
+  notes: Operator-approved style gold. Opens on their offer, short beats, no dashes, specific ask, context last.
+  source: operator_approved_20260730
+- label: operator_gold_gautam_etched_20260730
+  recipient_type: engineer
+  message: "Thanks Gautam, appreciate you offering. I went through the openings. They're almost all silicon and hardware right now, and the TPM roles want tape out experience I don't have, so I don't want to waste your time forcing a fit.\n\nShort context: I'm at USC Marshall for my MBA, 5 years backend/data platform engineering before that, now doing applied AI product work. Mainly looking for product internships right now, and I had also looked at the GTM Intern path. Sending that resume for context. If anything opens on product or GTM/bizops intern, I'd really appreciate you flagging it."
+  notes: Operator-approved style gold. Reacts to their ask, honest about fit, specific next step.
+  source: operator_approved_20260730
+- label: operator_gold_suresh_optum_20260730
+  recipient_type: engineer
+  message: "Hey Suresh! Doing well, thanks.\n\nBig change since Optum. I'm at USC Marshall for my MBA now and moved over to product. Been doing applied AI and data platform PM work, so it's the same systems I used to build, just from the other side of the table now.\n\nI'm looking for product internships in the US right now (can't do FT yet). Optum keeps coming back to mind. Is there any internship / contract path on product these days, or is it mostly FT only? Would love your read."
+  notes: Operator-approved style gold. Answers their question first, then context, then ask.
+  source: operator_approved_20260730
+- label: operator_gold_afzal_optum_20260730
+  recipient_type: senior_product
+  message: "Ha, close. I was on the Eligibility team in Hyderabad, so we overlapped on the same releases. Good to hear from you either way!\n\nSince then I've been at USC Marshall for my MBA and moved into product. Applied AI and data platform work, which is basically the stuff we were wrangling back then.\n\nSaw you're a Product Lead now, congrats. I'm looking for product internships in the US (can't do FT yet). Is that even a thing on your side these days, or is hiring mostly FT / contractor? Any pointer on who runs product hiring would mean a lot."
+  notes: Operator-approved style gold. Corrects their memory lightly, then asks.
+  source: operator_approved_20260730
 - label: engineer_referral_pointer
   recipient_type: engineer_india
   message: Hi Mehak, thanks for connecting. I'm targeting technical PM/product roles where my data-platform background is useful. If Snyk has a relevant opening, would you be open to a referral or hiring-team pointer?
@@ -97,7 +121,37 @@ strong_messages:
   message: You sent an attachment
   notes: Learned gold example | manually sent LinkedIn message | company=Lila Sciences | recipient=Priyam Shah
   source: comms_learning/linkedin_examples.jsonl
+- label: learned_silver_a17d8eb3a5
+  recipient_type: adjacent
+  message: Thanks for connecting, Anshul. I've been deep in product for a while now, coming from a data/platform engineering background, so I can build, not just spec. From your side of Salesforce, who's usually the best person to talk to about product roles there? Fight On!
+  notes: Learned silver example | approved or automatic draft sent | company=Salesforce | recipient=Anshul Gupta
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_silver_fbaf1e74a4
+  recipient_type: recruiter
+  message: Thanks for connecting, Samuel. I'm a Marshall MBA + former data/platform engineer exploring PM/product internship paths at Alchemy. What's the best process for someone with my background to get on the team's radar?
+  notes: Learned silver example | approved or automatic draft sent | company=Alchemy | recipient=Samuel Pullman
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_silver_fd10ce79d0
+  recipient_type: engineer
+  message: Thanks for connecting, Arik. I'm trying to get on the radar at Delinea for PM/product roles where my data/platform engineering background helps. If there is a relevant opening, would you be open to a referral or pointing me to the right hiring contact?
+  notes: Learned silver example | approved or automatic draft sent | company=Delinea | recipient=Arik Waisman
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_silver_dce7ad3897
+  recipient_type: engineer
+  message: Thanks for connecting, Tom. I'm trying to get on the radar at Crexi for PM/product roles where my data/platform engineering background helps. If there is a relevant opening, would you be open to a referral or pointing me to the right hiring contact? Fight On!
+  notes: Learned silver example | approved or automatic draft sent | company=Crexi | recipient=Tom Gerken
+  source: comms_learning/linkedin_examples.jsonl
 weak_messages:
+- label: formulaic_routing_boilerplate
+  recipient_type: general
+  message: Thanks Name. I've been deep in product for a while now, coming from engineering, so I can build, not just spec. Are there product roles at Company where that background helps? Any recs on who I should talk to about that?
+  notes: Operator-rejected style. Same stock credibility line and dash-free but still template. Never reuse this shape.
+  source: operator_rejected_20260730
+- label: dash_punctuated_networking
+  recipient_type: general
+  message: Thanks Name — I've been deep in product for a while now. Short context if useful — MBA plus engineering.
+  notes: Operator-rejected style. Em dashes and clause dashes are banned.
+  source: operator_rejected_20260730
 - label: generic_connection
   recipient_type: general
   message: Hi Priya, your work stood out and I would love to connect and learn from your experience.
@@ -151,4 +205,19 @@ weak_messages:
   message: Thanks Austin. I'm exploring product roles where my engineering + MBA background could be useful. Does that fit anything at Salestrics? Any recs on who I should talk to about that?
   notes: Learned negative example | generated draft cleared after user-confirmed response | company=Salestrics | recipient=Austin Buhl
   source: comms_learning/linkedin_examples.jsonl
-notes: This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups.
+- label: learned_negative_bed3dba4e3
+  recipient_type: other
+  message: Thanks Pratik. I've been deep in product for a while now, coming from engineering, so I can build, not just spec. Are there product roles at SLAC National Accelerator Laboratory where that background helps? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=SLAC National Accelerator Laboratory | recipient=Pratik Manwani
+  source: comms_learning/linkedin_examples.jsonl
+- label: learned_negative_4f8ad01fea
+  recipient_type: founder
+  message: Thanks Austin. I've been deep in product for a while now, coming from engineering, so I can build, not just spec. Are there product roles at Salestrics where that background helps? Any recs on who I should talk to about that?
+  notes: Learned negative example | generated draft cleared after user-confirmed response | company=Salestrics | recipient=Austin Buhl
+  source: comms_learning/linkedin_examples.jsonl
+notes: |
+  Open by answering their last message. Use short paragraph beats. Never use em dashes or mid-clause " - " joins; prefer periods. Be specific to this thread. Avoid stock lines like "I can build, not just spec." End with one easy question.
+
+  Preferred invite close: "Would love to connect." (statement, not a question). Do not use "Would love to connect?" or "Would be great to connect."
+
+  This profile is intentionally local and reviewable. Generators should use it for asks, banned phrases, and examples before expanding automated follow-ups.

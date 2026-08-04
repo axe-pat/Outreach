@@ -80,9 +80,70 @@ class CommunicationStyleProfile(BaseModel):
                 matches.append(normalized)
         return matches
 
+    def prompt_guidance(
+        self,
+        recipient_type: str = "general",
+        *,
+        max_strong_examples: int = 2,
+        max_weak_examples: int = 2,
+        max_example_chars: int = 500,
+    ) -> str:
+        """Build bounded guidance using only matching or general examples."""
+
+        asks = self.approved_asks_for(recipient_type)
+        lines = [
+            f"Directness: {self.preferred_directness}",
+            f"Casualness: {self.preferred_casualness}",
+        ]
+        if self.notes.strip():
+            # First non-empty paragraph of notes is the style contract.
+            style_contract = next(
+                (
+                    paragraph.strip()
+                    for paragraph in re.split(r"\n\s*\n", self.notes)
+                    if paragraph.strip()
+                ),
+                "",
+            )
+            if style_contract:
+                lines.append(f"Style shape: {style_contract}")
+        if self.self_intro_variants:
+            lines.append("Approved self-intros: " + " | ".join(self.self_intro_variants))
+        if asks:
+            lines.append("Approved asks: " + " | ".join(asks))
+        if self.banned_phrases:
+            lines.append("Avoid phrases: " + " | ".join(self.banned_phrases))
+        strong = _recipient_relevant_examples(
+            self.strong_messages,
+            recipient_type,
+            limit=max(0, max_strong_examples),
+        )
+        weak = _recipient_relevant_examples(
+            self.weak_messages,
+            recipient_type,
+            limit=max(0, max_weak_examples),
+        )
+        if strong:
+            lines.append("Strong examples to emulate:")
+            lines.extend(
+                f"- [{item.label}] {_bounded_message(item.message, max_example_chars)}"
+                for item in strong
+            )
+        if weak:
+            lines.append("Weak examples to avoid:")
+            lines.extend(
+                f"- [{item.label}] {_bounded_message(item.message, max_example_chars)}"
+                for item in weak
+            )
+        return "\n".join(lines)
+
     def review_message(self, message: str, recipient_type: str = "general") -> StyleReview:
         banned = self.banned_phrases_in(message)
         flags = [f"Banned phrase: {phrase}" for phrase in banned]
+        if _has_dash_punctuation(message):
+            flags.append(
+                "Dash punctuation: rewrite with periods or short sentences instead of em/en dashes or mid-clause ' - '"
+            )
         weak_labels = self.weak_example_matches(message, recipient_type)
         flags.extend(f"Matches learned weak example: {label}" for label in weak_labels)
         return StyleReview(
@@ -120,51 +181,6 @@ class CommunicationStyleProfile(BaseModel):
             if similarity >= similarity_threshold:
                 matches.append(example.label)
         return matches
-
-    def prompt_guidance(
-        self,
-        recipient_type: str = "general",
-        *,
-        max_strong_examples: int = 2,
-        max_weak_examples: int = 2,
-        max_example_chars: int = 500,
-    ) -> str:
-        """Build bounded guidance using only matching or general examples."""
-
-        asks = self.approved_asks_for(recipient_type)
-        lines = [
-            f"Directness: {self.preferred_directness}",
-            f"Casualness: {self.preferred_casualness}",
-        ]
-        if self.self_intro_variants:
-            lines.append("Approved self-intros: " + " | ".join(self.self_intro_variants))
-        if asks:
-            lines.append("Approved asks: " + " | ".join(asks))
-        if self.banned_phrases:
-            lines.append("Avoid phrases: " + " | ".join(self.banned_phrases))
-        strong = _recipient_relevant_examples(
-            self.strong_messages,
-            recipient_type,
-            limit=max(0, max_strong_examples),
-        )
-        weak = _recipient_relevant_examples(
-            self.weak_messages,
-            recipient_type,
-            limit=max(0, max_weak_examples),
-        )
-        if strong:
-            lines.append("Strong examples to emulate:")
-            lines.extend(
-                f"- [{item.label}] {_bounded_message(item.message, max_example_chars)}"
-                for item in strong
-            )
-        if weak:
-            lines.append("Weak examples to avoid:")
-            lines.extend(
-                f"- [{item.label}] {_bounded_message(item.message, max_example_chars)}"
-                for item in weak
-            )
-        return "\n".join(lines)
 
     def guide_draft_from_examples(
         self,
@@ -220,6 +236,11 @@ class CommunicationStyleProfile(BaseModel):
             if updated != guided:
                 guided = updated
                 transformations.append("prefer_concise_routing_ask")
+        if _has_dash_punctuation(guided):
+            updated = _strip_dash_punctuation(guided)
+            if updated != guided:
+                guided = updated
+                transformations.append("strip_dash_punctuation")
 
         return GuidedStyleDraft(
             message=guided,
@@ -499,6 +520,55 @@ def _recipient_relevant_examples(
             general.append(item)
             seen.add(key)
     return (exact + general)[:limit]
+
+
+# A job title carries its own hyphen ("MBA Internship - AI Strategy & Operations").
+# Rewriting that to a period corrupts real data, so only strip joins we own.
+_HYPHEN_JOIN = re.compile(r"(\S+) - (\S+)")
+# "I" is a pronoun, not a proper noun, so it never signals a title.
+_TITLE_WORD = re.compile(r"^[\"'(]*[A-Z0-9]")
+
+
+def _is_title_hyphen(left: str, right: str) -> bool:
+    """A hyphen belongs to a name only when the words on both sides are capitalised."""
+
+    if right.rstrip(".,!?") == "I" or right.startswith("I "):
+        return False
+    return bool(_TITLE_WORD.match(left) and _TITLE_WORD.match(right))
+
+
+def _has_dash_punctuation(message: str) -> bool:
+    """True when the message uses dash punctuation the operator rejected.
+
+    Compound hyphens like "contract-to-hire" are fine, and neither are hyphens
+    inside role titles. Em/en dashes and prose clause joins are not.
+    """
+    text = message or ""
+    if re.search(r"[—–]", text):
+        return True
+    return any(
+        not _is_title_hyphen(match.group(1), match.group(2))
+        for match in _HYPHEN_JOIN.finditer(text)
+    )
+
+
+def _strip_dash_punctuation(message: str) -> str:
+    """Replace dash clause joins with periods so drafts match the approved voice."""
+    text = message or ""
+    text = re.sub(r"\s*[—–]\s*", ". ", text)
+    text = _HYPHEN_JOIN.sub(
+        lambda match: (
+            match.group(0)
+            if _is_title_hyphen(match.group(1), match.group(2))
+            else f"{match.group(1)}. {match.group(2)}"
+        ),
+        text,
+    )
+    text = re.sub(r"\.\s*\.", ".", text)
+    text = re.sub(r" +", " ", text)
+    # A dash join becomes a sentence boundary, so the next word has to read like one.
+    text = re.sub(r"(?<=\. )([a-z])", lambda match: match.group(1).upper(), text)
+    return text.strip()
 
 
 def _bounded_message(message: str, max_chars: int) -> str:

@@ -8,9 +8,9 @@ from outreach.style_profile import CommunicationStyleProfile, load_style_profile
 def test_load_style_profile_reads_approved_asks_and_examples() -> None:
     profile = load_style_profile(Path("workspace/communication_style_profile.yml"))
 
-    assert profile.preferred_directness.startswith("direct")
+    assert "one easy ask" in profile.preferred_directness
     assert "would be great to connect" in profile.banned_phrases
-    assert profile.strong_messages[0].recipient_type == "engineer_india"
+    assert any(item.recipient_type == "engineer_india" for item in profile.strong_messages)
     assert any("hiring-team pointer" in ask for ask in profile.approved_asks_for("engineer_india"))
 
 
@@ -65,3 +65,29 @@ def test_prompt_guidance_includes_local_style_controls() -> None:
     assert "I'm a Marshall MBA and former engineer." in guidance
     assert "Ask where this background could be useful." in guidance
     assert "coffee chat" in guidance
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        # Hyphens inside role titles are data; rewriting them corrupts the posting name.
+        ("One concrete fit: MBA Internship - AI Strategy & Operations", False),
+        ("Role: Product Manager - Growth is open", False),
+        ("contract-to-hire is fine", False),
+        ("coming from engineering - I can build things", True),
+        ("happy to chat - let me know", True),
+        ("deep in product now — coming from engineering", True),
+    ],
+)
+def test_dash_rule_separates_prose_joins_from_role_titles(text: str, flagged: bool) -> None:
+    from outreach.style_profile import _has_dash_punctuation, _strip_dash_punctuation
+
+    assert _has_dash_punctuation(text) is flagged
+    if not flagged:
+        assert _strip_dash_punctuation(text) == text
+
+
+def test_strip_dash_punctuation_capitalises_new_sentence() -> None:
+    from outreach.style_profile import _strip_dash_punctuation
+
+    assert _strip_dash_punctuation("happy to chat - let me know") == "happy to chat. Let me know"

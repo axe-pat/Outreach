@@ -445,13 +445,16 @@ def test_learned_positive_guides_followup_reply_and_email_drafts() -> None:
         style_profile=profile,
     )
 
-    assert "Does that background fit product work there?" in accepted["draft_message"]
-    assert "Are there product roles at Acme where that background helps?" in reply["draft_message"]
+    assert "hand a new PM" in accepted["draft_message"]
+    # The reply no longer uses the retired "Are there product roles..." boilerplate; it must
+    # still land a single concrete ask naming the company.
+    assert "Acme" in reply["draft_message"]
+    assert reply["draft_message"].count("?") == 1
     assert "I'm not trying to send" in email["body"]
     for draft in (accepted, reply, email):
         assert draft["style_example_labels"] == ["learned_gold_direct_fit"]
         assert "learned_gold_direct_fit" in draft["style_guidance"]
-    # Accepted and email diverge from the learned phrasing, so they get concrete transforms;
-    # the reply is already on-style, so being guided without a rewrite is the correct outcome.
-    assert accepted["style_transformations"]
+    # The email diverges from the learned phrasing, so it gets a concrete transform. The
+    # accepted and reply drafts are already on-style, so being guided without a rewrite is
+    # the correct outcome.
     assert email["style_transformations"]

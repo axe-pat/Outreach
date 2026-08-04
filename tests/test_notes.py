@@ -283,7 +283,8 @@ def test_senior_product_invite_is_warm_and_saves_the_ask_for_followup() -> None:
     assert note.within_limit is True
     assert note.length <= NOTE_CHAR_LIMIT
     assert "deep in product for a while now" in note.text
-    assert "Would love to connect?" in note.text
+    assert "Would love to connect." in note.text
+    assert "Would love to connect?" not in note.text
     assert "referral" not in note.text.lower()
     assert "quick read on fit" not in note.text.lower()
     assert "Deepgram" in note.text.split(".", 1)[0]
@@ -808,7 +809,7 @@ def test_quality_check_accepts_warm_close_and_blocks_pitch_asks_in_invites() -> 
     note = generator.generate(candidate, company="Vercel", company_mode="default")
     warm = (
         "Hi Zack, fellow Trojan here. I've been interested in Vercel for a while. "
-        "I've been deep in product for a while now. Would love to connect? Fight On!"
+        "I've been deep in product for a while now. Would love to connect. Fight On!"
     )
     note.text = warm
     note.length = len(warm)
@@ -832,7 +833,7 @@ def test_quality_check_blocks_transition_language_and_premature_fall_ask() -> No
     note = generator.generate(candidate, company="Acme")
     note.text = (
         "Hi Alex, I'm transitioning into product and looking for a fall product internship "
-        "at Acme. Would love to connect?"
+        "at Acme. Would love to connect."
     )
     note.length = len(note.text)
 

@@ -361,6 +361,7 @@ def rewrite_message_for_target_role(message: str, target: TargetRoleContext) -> 
         (r"\btechnical\s+product\s+paths?\b", path),
         (r"\btechnical/product\s+overlap\b", f"technical background + {target.label} fit"),
         (r"\bproduct\s+or\s+internship\s+path\b", role_or_internship),
+        (r"\bproduct\s+internships?\b", f"{singular} internship"),
         (r"\bproduct\s+opportunities\b", role),
         (r"\bproduct\s+roles?\b", role),
         (r"\bexploring\s+product\s+work\b", f"exploring {work}"),
@@ -370,11 +371,15 @@ def rewrite_message_for_target_role(message: str, target: TargetRoleContext) -> 
         (r"\bproduct\s+paths?\b", path),
         (r"\bproduct\s+fit\b", subject),
         (r"\btechnical\s+MBA\s+could be useful\b", "engineering + MBA background could be useful"),
+        # "a problem you'd hand a new PM" must not become "a new BizOps / Strategy".
+        (r"\ba\s+new\s+PM\b", f"someone new on {team}"),
+        (r"\bowns\s+product\s+at\b", f"owns {team} at"),
         (r"\bsomeone on product\b", f"someone in {team}"),
         (r"\bproduct, recruiting\b", f"{team}, recruiting"),
         (r"\bproduct team\b", f"{team} team"),
         (r"\bhow builders work with product there\b", f"how technical operators work with {team} there"),
-        (r"\bPM\b", singular),
+        # Word-boundary PM only — never mangling "PM'ing" / "APM" style tokens.
+        (r"\bPM\b(?!['’]ing\b)", singular),
     )
     rewritten = message
     for pattern, replacement in replacements:

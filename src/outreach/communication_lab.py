@@ -32,6 +32,8 @@ SLOP_PHRASES = [
     "3-line blurb",
     "route i should understand",
     "where my engineering + marshall background",
+    "i can build, not just spec",
+    "i've been deep in product for a while now, coming from engineering",
 ]
 
 HUMAN_MARKERS = [
@@ -298,6 +300,10 @@ def review_outreach_message(
     if normalized_channel == "linkedin_followup" and senior_title and tactical_referral_ask:
         flags.append("Seniority mismatch: tactical referral ask to senior/principal contact")
         score -= 18
+
+    if re.search(r"[—–]| - ", text):
+        flags.append("Dash punctuation: rewrite with periods or short sentences instead of em/en dashes or mid-clause ' - '")
+        score -= 14
 
     if "product/operator" in lower:
         flags.append("Blurry path framing: use product unless operator is the actual target")

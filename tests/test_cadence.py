@@ -64,22 +64,18 @@ def recommendation(items, channel: str):
     return next(item for item in items if item.channel == channel)
 
 
-def test_linkedin_first_followup_is_due_four_days_after_acceptance() -> None:
+def test_linkedin_first_followup_is_due_immediately_after_acceptance() -> None:
     history = linkedin_history()
 
-    early = recommendation(
-        build_cadence_plan(history, as_of=START + timedelta(days=3)),
-        "linkedin",
-    )
     due = recommendation(
-        build_cadence_plan(history, as_of=START + timedelta(days=4)),
+        build_cadence_plan(history, as_of=START),
         "linkedin",
     )
 
-    assert early.action == "linkedin_followup_1"
-    assert early.state == "upcoming"
+    assert due.action == "linkedin_followup_1"
     assert due.state == "due"
-    assert due.due_at == START + timedelta(days=4)
+    assert due.due_at == START
+    assert "immediately" in due.reason
 
 
 def test_second_linkedin_touch_is_due_four_to_five_days_later_and_must_be_distinct() -> None:

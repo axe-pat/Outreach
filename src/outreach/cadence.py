@@ -56,12 +56,12 @@ LINKEDIN_INVITE_KINDS = {"linkedin_invite", "invite", "connection_invite"}
 class CadencePolicy:
     """The agreed default cadence; callers can override it explicitly."""
 
-    linkedin_first_followup_days: int = 4
-    # Grace window for the first post-acceptance follow-up. A first useful
-    # follow-up stays worth sending well past its ideal day, so keep it
-    # auto-sendable for two weeks instead of dropping to manual review after one
-    # day. This recovers accepted-but-unworked contacts when nightly runs slip,
-    # while genuinely stale accepts (older than the window) still retire.
+    # Accept = hot. First follow-up is due immediately; waiting days just cools
+    # the connection for no gain.
+    linkedin_first_followup_days: int = 0
+    # Grace window for the first post-acceptance follow-up. Keep a late-but-first
+    # follow-up auto-sendable for two weeks so slipped runs still clear accepts,
+    # while genuinely stale ones (older than the window) retire to manual review.
     linkedin_first_followup_grace_days: int = 14
     linkedin_second_followup_min_days: int = 4
     linkedin_second_followup_max_days: int = 5
@@ -363,7 +363,7 @@ def _linkedin_recommendation(
         # (auto-sendable) rather than expiring to manual review after one day.
         due_by = due_at + timedelta(days=policy.linkedin_first_followup_grace_days)
         distinct = False
-        reason = "First useful follow-up is due four days after invite acceptance."
+        reason = "First follow-up is due immediately after invite acceptance."
     else:
         anchor = _event_at(followups[-1])
         due_at = anchor + timedelta(days=policy.linkedin_second_followup_min_days)

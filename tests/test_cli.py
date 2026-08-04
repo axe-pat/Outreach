@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 import csv
 import json
 from pathlib import Path
+import re
 import sys
 import time
 from types import SimpleNamespace
@@ -31,11 +32,14 @@ from outreach.cli import (
     candidate_has_target_company_evidence,
     candidate_mentions_company,
     classify_opportunity_action,
+    match_contact_for_message_thread,
+    classify_linkedin_reply_intent,
     company_search_aliases,
     contact_status_from_invite_result,
     daily_plan_items_by_phase,
     detect_shared_history_signals,
     _mapped_backlog_invite_items,
+    _same_run_mapped_invite_items,
     _select_profile_reconcile_candidates,
     _unresolved_reservation_org_ids,
     draft_track_2_email,
@@ -96,7 +100,16 @@ from outreach.services.email_finder import EmailFinderResult
 from outreach.resume_jobs_bridge import CompanyOverride, ResumeJob, build_resume_outreach_queue
 from outreach.services.linkedin import InviteSendResult, LinkedInFollowupSendResult
 from outreach.invite_reservations import load_invite_reservations, reservation_ledger_path
-from outreach.tracking import ContactRecord, OpportunityRecord, OrganizationRecord, OrganizationType, OutreachWorkbook, SourceKind, TouchpointRecord
+from outreach.tracking import (
+    ContactRecord,
+    OpportunityRecord,
+    OrganizationRecord,
+    OrganizationType,
+    OutreachChannel,
+    OutreachWorkbook,
+    SourceKind,
+    TouchpointRecord,
+)
 from outreach.style_profile import CommunicationStyleProfile
 
 REPORT_RUN_ID = "20260711-010000"
@@ -3521,6 +3534,162 @@ def test_track_2_invite_prefilters_ledger_blocked_candidates(
     assert invite_phase["remaining_budget"] == 1
 
 
+def test_track_2_invite_backfills_after_ledger_blocks_top_hit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Top reserved person must not zero the company when others are sendable."""
+
+    from outreach.invite_reservations import (
+        reservation_key,
+        utc_now_iso,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    OutreachWorkbook(workspace).initialize()
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.require_live_cdp_session",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "outreach.cli.LinkedInScraper.snapshot_message_threads",
+        lambda self, **_kwargs: [],
+    )
+    company = "Hebbia"
+    blocked_person = "Already Connected"
+    blocked_url = "https://www.linkedin.com/in/already-connected/"
+    next_person = "Next Available"
+    next_url = "https://www.linkedin.com/in/next-available/"
+    key = reservation_key(
+        linkedin_url=blocked_url, company=company, name=blocked_person
+    )
+    monkeypatch.setattr(
+        "outreach.cli.load_invite_reservations",
+        lambda _path: {
+            "schema_version": 1,
+            "updated_at": utc_now_iso(),
+            "reservations": {
+                key: {
+                    "reservation_key": key,
+                    "status": "already_connected",
+                    "reconciliation_required": False,
+                    "linkedin_url": blocked_url,
+                    "company": company,
+                    "name": blocked_person,
+                }
+            },
+        },
+    )
+    fake_plan = {
+        "selected_count": 1,
+        "budget": {"max_linkedin_invites": 1},
+        "used": {"linkedin_invites": 1},
+        "summary": {"send_initial_invites": 1},
+        "phase_summary": {"5_send_linkedin_invites": 1},
+        "selected": [
+            {
+                "organization_id": "org-hebbia",
+                "company": company,
+                "phase": "5_send_linkedin_invites",
+                "expected_linkedin_invites": 1,
+            }
+        ],
+        "skipped": [],
+        "invite_backfill": [],
+    }
+    monkeypatch.setattr(
+        "outreach.cli._build_daily_plan_for_workspace",
+        lambda **_kwargs: fake_plan,
+    )
+    pipeline = tmp_path / "hebbia.json"
+    pipeline.write_text(
+        json.dumps(
+            {
+                "company": company,
+                "company_mode": "default",
+                "results": [
+                    {
+                        "name": blocked_person,
+                        "title": "Software Engineer",
+                        "linkedin_url": blocked_url,
+                        "score": 82,
+                        "note": "Hello",
+                        "note_qc": {"verdict": "send"},
+                    },
+                    {
+                        "name": next_person,
+                        "title": "Product Manager",
+                        "linkedin_url": next_url,
+                        "score": 42,
+                        "note": "Hello",
+                        "note_qc": {"verdict": "send"},
+                    },
+                ],
+                "affinity_expansion": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "outreach.cli.execute_linkedin_company_run",
+        lambda **_kwargs: pipeline,
+    )
+    send_calls: list[dict] = []
+
+    def fake_execute_invite_batch(**kwargs):
+        send_calls.append(kwargs)
+        return (
+            tmp_path / "send.json",
+            tmp_path / "progress.json",
+            {"sent": 1},
+            1,
+            1,
+        )
+
+    monkeypatch.setattr(
+        "outreach.cli.execute_invite_batch",
+        fake_execute_invite_batch,
+    )
+    written: list[tuple[str, dict]] = []
+
+    def fake_write_artifact(_directory, kind, payload):
+        path = tmp_path / f"{len(written):02d}-{kind}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        written.append((kind, payload))
+        return path
+
+    monkeypatch.setattr("outreach.cli.write_artifact", fake_write_artifact)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-track-2-daily-plan",
+            "--workspace",
+            str(workspace),
+            "--execute",
+            "--live-linkedin",
+            "--send-linkedin",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(send_calls) == 1
+    sent_names = [c.get("name") for c in send_calls[0]["batch"]]
+    assert sent_names == [next_person]
+    run_payload = next(payload for kind, payload in written if kind == "track-2-daily-run")
+    invite_phase = next(
+        phase
+        for phase in run_payload["phase_results"]
+        if phase["phase"] == "5_send_linkedin_invites"
+    )
+    assert invite_phase["reservation_prefiltered_count"] == 1
+    assert invite_phase["runs"][0]["status"] in {
+        "send_completed",
+        "send_completed_with_protected_review",
+    }
+
+
 def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(
     tmp_path: Path,
     monkeypatch,
@@ -3548,8 +3717,8 @@ def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(
         def require_live_cdp_session(self) -> None:
             return None
 
-        def snapshot_message_threads(self, *, limit: int, deep: bool):
-            assert limit == 75
+        def snapshot_message_threads(self, *, limit: int, deep: bool, max_scrolls: int = 40):
+            assert limit == 300
             assert deep is True
             return []
 
@@ -3591,6 +3760,23 @@ def test_track_2_live_inbox_runs_when_planner_selects_zero_followups(
     assert followup["status"] == "completed_zero_actions"
 
 
+def test_track_2_followup_budget_is_uncapped_by_default():
+    """Follow-ups must not carry a cap.
+
+    Invites are capped because LinkedIn rate-limits them. Follow-ups go to people
+    who already accepted, so a cap only strands accepted connections. Regression:
+    a run with --max-linkedin-followups 10 left 74 of 104 connected contacts with
+    no follow-up at all.
+    """
+    import inspect
+
+    from outreach.cli import UNLIMITED_FOLLOWUP_BUDGET, run_track_2_daily_plan_cmd
+
+    signature = inspect.signature(run_track_2_daily_plan_cmd)
+    assert signature.parameters["max_linkedin_followups"].default == -1
+    assert UNLIMITED_FOLLOWUP_BUDGET > 10_000
+
+
 def test_track_2_unmatched_inbound_thread_surfaces_as_report_action(
     tmp_path: Path,
     monkeypatch,
@@ -3618,7 +3804,7 @@ def test_track_2_unmatched_inbound_thread_surfaces_as_report_action(
         def require_live_cdp_session(self) -> None:
             return None
 
-        def snapshot_message_threads(self, *, limit: int, deep: bool):
+        def snapshot_message_threads(self, *, limit: int, deep: bool, max_scrolls: int = 40):
             return [
                 SimpleNamespace(
                     thread_id="thread-mystery",
@@ -5376,7 +5562,7 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
         "accepted_follow_up",
         "conversation_reply",
     ]
-    assert "referral" in str(drafts[0]["draft_message"]).lower()
+    assert "who owns product" in str(drafts[0]["draft_message"]).lower()
     assert "short context" in str(drafts[1]["draft_message"]).lower()
     assert drafts[2]["send_recommendation"] == "optional"
     assert "thanks for letting me know" in str(drafts[2]["draft_message"]).lower()
@@ -5385,15 +5571,15 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[0]["communication_review"]["channel"] == "linkedin_followup"
     assert "communication_recommendation" in drafts[0]
     assert drafts[1]["latest_message"].startswith("I can share your profile")
-    assert "hiring contact" in str(drafts[3]["draft_message"])
+    assert "wait for a posting" in str(drafts[3]["draft_message"])
     assert drafts[4]["followup_audience"] == "product"
-    assert "does that background seem relevant to product work there" in str(drafts[4]["draft_message"]).lower()
+    assert "hand a new PM" in str(drafts[4]["draft_message"])
     assert "could translate to the product work there" not in str(drafts[4]["draft_message"])
     assert "product or recruiting person" not in str(drafts[4]["draft_message"]).lower()
     assert drafts[5]["followup_audience"] == "founder"
-    assert "AI agent analytics work" in str(drafts[5]["draft_message"])
-    assert "fit anything useful at Voker" in str(drafts[5]["draft_message"])
-    assert "any recs on who i should talk to" in str(drafts[5]["draft_message"]).lower()
+    assert "AI agents that do real work" in str(drafts[5]["draft_message"])
+    assert "product roles at Voker" in str(drafts[5]["draft_message"])
+    assert "took a crack at a problem" in str(drafts[5]["draft_message"]).lower()
     assert "happy to share more context if useful" not in str(drafts[5]["draft_message"])
     assert "Alessandra@beyondmedplans.com" in str(drafts[6]["draft_message"])
     assert drafts[6]["action_items"][0]["action_type"] == "email_resume"
@@ -5433,7 +5619,9 @@ def test_accepted_followup_uses_established_product_framing_not_transition() -> 
     )
 
     message = str(drafts[0]["draft_message"]).lower()
-    assert "deep in product" in message
+    assert "ai tool" in message or "ai interview" in message or "ai agents" in message
+    assert "build, not just spec" not in message
+    assert "deep in product" not in message
     assert "move from" not in message
     assert "transition" not in message
     assert "into pm" not in message
@@ -5489,11 +5677,14 @@ def test_accepted_followup_fall_intern_campaign_names_the_internship() -> None:
 
     fall_message = str(drafts[0]["draft_message"]).lower()
     assert "fall product internship" in fall_message
-    assert "ship, not just spec" in fall_message
+    assert "ai agents" in fall_message or "ai interviewer" in fall_message
+    assert "took a crack at a problem" in fall_message
+    assert "ship, not just spec" not in fall_message
     assert "—" not in str(drafts[0]["draft_message"])
 
     regular_message = str(drafts[1]["draft_message"]).lower()
     assert "fall product internship" not in regular_message
+    assert "took a crack at a problem" in regular_message
 
 
 def test_accepted_followup_operator_audience_uses_contribution_ask() -> None:
@@ -5524,8 +5715,10 @@ def test_accepted_followup_operator_audience_uses_contribution_ask() -> None:
 
     assert drafts[0]["followup_audience"] == "operator"
     message = str(drafts[0]["draft_message"]).lower()
-    assert "build, not just spec" in message
-    assert "product or ops side" in message
+    assert "ai tool" in message or "ai interview" in message
+    assert "build, not just spec" not in message
+    # Operators can champion a role, so they get the inverted problem ask.
+    assert "took a crack at a problem you'd hand a new pm" in message
 
 
 def test_accepted_followup_usc_warm_invite_adds_fight_on() -> None:
@@ -5587,8 +5780,12 @@ def test_fall_intern_reply_draft_names_internship() -> None:
     )
 
     message = str(drafts[0]["draft_message"]).lower()
-    assert "fall product internship" in message
-    assert "build, not just spec" in message
+    assert "fall" in message and "internship" in message
+    assert "product" in message
+    # "build, not just spec" was retired as slop; the draft must carry the background
+    # without that stock line.
+    assert "build, not just spec" not in message
+    assert "ai tool" in message or "ai interview" in message
     assert "transition" not in message
 
 
@@ -5690,7 +5887,8 @@ def test_followup_draft_auto_sends_promised_concrete_fit() -> None:
     )
 
     assert drafts[0]["reply_intent"] == "permission_to_send_fit"
-    assert drafts[0]["send_recommendation"] == "auto_send"
+    # Offers of help now go to review so the concrete ask can be sanity checked.
+    assert drafts[0]["send_recommendation"] == "review"
     assert "MBA Internship - AI Strategy & Operations" in str(drafts[0]["draft_message"])
 
 
@@ -6252,7 +6450,11 @@ def test_followup_draft_does_not_invent_positive_callback_when_contact_does_not_
     assert drafts[0]["reply_intent"] == "does_not_know"
     assert "small-team" not in str(drafts[0]["draft_message"]).lower()
     assert "customer-feedback" not in str(drafts[0]["draft_message"]).lower()
-    assert "Sure, thanks Bratee" in str(drafts[0]["draft_message"])
+    # The old "Sure, thanks X. Is there a PM/product internship path...?" reply re-asked
+    # what the contact just said they could not answer. It must not come back.
+    message = str(drafts[0]["draft_message"])
+    assert "Bratee" in message
+    assert "internship path at" not in message
 
 
 def test_accepted_followup_to_principal_engineer_uses_senior_ask() -> None:
@@ -6289,8 +6491,10 @@ def test_accepted_followup_to_principal_engineer_uses_senior_ask() -> None:
     )
 
     message = str(drafts[0]["draft_message"])
-    assert "Does that background fit product work there" in message
-    assert "Any recs on who I should talk to" in message
+    assert "Who owns product there?" in message
+    assert "wait for a posting" in message
+    assert "AI tool" in message or "AI interview" in message
+    assert "build, not just spec" not in message
     assert "does that angle make sense" not in message
     assert "route I should understand" not in message
     assert "tight resume + 3-line blurb" not in message
@@ -6332,8 +6536,10 @@ def test_story_fit_metadata_flows_into_senior_followup() -> None:
         contacts=contacts,
     )
 
-    assert "FlairX gives a direct recruiting workflow pitch" in str(drafts[0]["draft_message"])
-    assert "Does that background fit product work there" in str(drafts[0]["draft_message"])
+    message = str(drafts[0]["draft_message"])
+    # HR-tech orgs get the AI-interview domain proof; story_fit_reason is optional color.
+    assert "AI interview" in message or "recruiting workflow" in message
+    assert "Who owns product there?" in message
 
 
 def test_track_2_email_uses_story_fit_reason_before_generic_fit_line() -> None:
@@ -7387,6 +7593,82 @@ def test_mapped_backlog_drain_surfaces_unsent_queued_contacts():
     assert all(item["source"] == "mapped_backlog_drain" for item in items)
 
 
+def test_same_run_mapped_invite_items_queue_companies_imported_this_run():
+    settings = OutreachSettings()
+    orgs = [
+        _drain_org("org-mercor", "Mercor", org_type=OrganizationType.STARTUP, tags="fall_sprint"),
+        _drain_org("org-other", "OtherCo"),
+    ]
+    contacts = [
+        _drain_contact("ct-mercor-1", "org-mercor", contact_type="founder"),
+        _drain_contact("ct-mercor-2", "org-mercor", contact_type="Product"),
+    ]
+    # Prepared notes from mapping must not prevent same-night invite queuing.
+    touchpoints = [
+        TouchpointRecord(
+            touchpoint_id="tp-mercor-1",
+            organization_id="org-mercor",
+            contact_id="ct-mercor-1",
+            channel=OutreachChannel.LINKEDIN,
+            status="Prepared",
+            message_text="Hi there",
+        )
+    ]
+    items = _same_run_mapped_invite_items(
+        mapping_runs=[
+            {
+                "company": "Mercor",
+                "organization_id": "org-mercor",
+                "contacts_added": 2,
+                "candidate_count": 2,
+            },
+            {
+                "company": "OtherCo",
+                "organization_id": "org-other",
+                "contacts_added": 0,
+                "candidate_count": 0,
+            },
+        ],
+        organizations=orgs,
+        contacts=contacts,
+        touchpoints=touchpoints,
+        settings=settings,
+        attempted_keys=set(),
+        remaining_invites=10,
+        per_company_cap=3,
+    )
+    assert [item["company"] for item in items] == ["Mercor"]
+    assert items[0]["source"] == "same_run_mapped"
+    assert items[0]["expected_linkedin_invites"] == 2
+
+
+def test_same_run_mapped_invite_items_skip_already_attempted_and_respect_budget():
+    settings = OutreachSettings()
+    orgs = [
+        _drain_org("org-a", "Alpha", org_type=OrganizationType.STARTUP),
+        _drain_org("org-b", "Beta", org_type=OrganizationType.STARTUP),
+    ]
+    contacts = [
+        _drain_contact("ct-a", "org-a"),
+        _drain_contact("ct-b", "org-b"),
+    ]
+    items = _same_run_mapped_invite_items(
+        mapping_runs=[
+            {"company": "Alpha", "organization_id": "org-a", "contacts_added": 1},
+            {"company": "Beta", "organization_id": "org-b", "contacts_added": 1},
+        ],
+        organizations=orgs,
+        contacts=contacts,
+        touchpoints=[],
+        settings=settings,
+        attempted_keys={"org-a"},
+        remaining_invites=2,
+        per_company_cap=3,
+    )
+    assert [item["company"] for item in items] == ["Beta"]
+    assert items[0]["expected_linkedin_invites"] == 1
+
+
 def test_mapped_backlog_drain_respects_remaining_budget():
     settings = OutreachSettings()
     orgs = [_drain_org(f"org-{i}", f"Co{i}", org_type=OrganizationType.STARTUP) for i in range(5)]
@@ -7560,3 +7842,598 @@ def test_mapped_backlog_drain_skips_already_sent_contacts():
         per_company_cap=2,
     )
     assert items == []
+
+
+def test_match_contact_for_message_thread_rejects_first_name_collisions():
+    """A shared first name is not identity.
+
+    Regression: threads from "Reema Pathak" and "Jon Janco" were bound to the
+    unrelated contacts "Reema Doshi" and "Jon Wu", producing job-search drafts
+    aimed at the wrong people.
+    """
+    contacts = [
+        ContactRecord(
+            contact_id="ct-reema-doshi",
+            organization_id="org-stripe",
+            full_name="Reema Doshi",
+        ),
+        ContactRecord(
+            contact_id="ct-jon-wu",
+            organization_id="org-healthee",
+            full_name="Jon Wu",
+            linkedin_url="https://www.linkedin.com/in/jon-wu-mha/",
+        ),
+    ]
+
+    assert match_contact_for_message_thread({"name": "Reema Pathak"}, contacts) is None
+    assert match_contact_for_message_thread({"name": "Jon Janco"}, contacts) is None
+    assert match_contact_for_message_thread({"name": "Reema"}, contacts) is None
+
+    exact = match_contact_for_message_thread({"name": "Jon Wu"}, contacts)
+    assert exact is not None and exact.contact_id == "ct-jon-wu"
+
+    by_url = match_contact_for_message_thread(
+        {"name": "Renamed Profile", "linkedin_url": "https://www.linkedin.com/in/jon-wu-mha/"},
+        contacts,
+    )
+    assert by_url is not None and by_url.contact_id == "ct-jon-wu"
+
+
+def test_match_contact_for_message_thread_allows_abbreviated_surname():
+    contacts = [
+        ContactRecord(
+            contact_id="ct-shubhankit",
+            organization_id="org-d-matrix",
+            full_name="Shubhankit R.",
+        )
+    ]
+    matched = match_contact_for_message_thread({"name": "Shubhankit Rathore"}, contacts)
+    assert matched is not None and matched.contact_id == "ct-shubhankit"
+
+
+@pytest.mark.parametrize(
+    ("latest_message", "message_window", "expected"),
+    [
+        (
+            "Hi Akshat, we dont have any current openings, but we should have something "
+            "posted in the next few weeks. We always post them on our LinkedIn jobs page, "
+            "so keep an eye out!",
+            [],
+            "no_current_opening",
+        ),
+        ("InMail Opportunity", [], "non_message"),
+        ("Sponsored Position Your Business for Its Next Chapter.", [], "non_message"),
+        ("Pleasr reach out to @Shashank Masurkar or @Manu Monga", [], "routed_to_named_contacts"),
+        (
+            "Perfect",
+            [
+                {
+                    "sender": "Nagendra",
+                    "message": "I would like to chat with you over phone call and see who I can connect you to",
+                },
+                {"sender": "Nagendra", "message": "Perfect"},
+            ],
+            "call_arranged",
+        ),
+        ("How can I help you?", [], "needs_routing_ask"),
+    ],
+)
+def test_classify_linkedin_reply_intent_detects_terminal_states(
+    latest_message, message_window, expected
+):
+    assert (
+        classify_linkedin_reply_intent(
+            latest_message=latest_message, message_window=message_window
+        )
+        == expected
+    )
+
+
+def test_classify_linkedin_reply_intent_prefers_resume_ask_over_no_opening():
+    """"Check our open roles" plus "share your resume" is an active ask, not a close."""
+    assert (
+        classify_linkedin_reply_intent(
+            latest_message=(
+                "Hi Akshat, Thanks for your reaching out! Please check out open roles at "
+                "Etched and let me know that fits your profile. Please share your resume as well."
+            ),
+            message_window=[],
+        )
+        == "referral_offer"
+    )
+
+
+def _openings(*titles: str, url: str = "https://www.linkedin.com/jobs/view/123") -> object:
+    from outreach.cli import RELEVANT_OPENING_PATTERN, read_company_openings
+
+    return read_company_openings(
+        [
+            OpportunityRecord(
+                opportunity_id=f"op-{index}",
+                organization_id="org-acme",
+                title=title,
+                source_url=url if RELEVANT_OPENING_PATTERN.search(title) else "",
+            )
+            for index, title in enumerate(titles)
+        ]
+    )
+
+
+def test_openings_read_ignores_aggregator_placeholders() -> None:
+    """"Built In open roles" is a scraped link, not a posting we can cite."""
+    from outreach.cli import read_company_openings
+
+    assert _openings("Built In open roles").state == "unknown"
+    assert _openings("Senior Product Manager").state == "relevant_opening"
+    assert _openings("Warehouse Associate").state == "no_relevant_fit"
+    assert read_company_openings([]).state == "unknown"
+
+
+def test_openings_read_requires_url_and_skips_expired() -> None:
+    from outreach.cli import read_company_openings
+
+    no_url = read_company_openings(
+        [OpportunityRecord(opportunity_id="o1", organization_id="org-a", title="Product Manager Intern")]
+    )
+    assert no_url.state == "unknown"
+
+    expired = read_company_openings(
+        [
+            OpportunityRecord(
+                opportunity_id="o2",
+                organization_id="org-a",
+                title="Product Manager Intern",
+                status="expired",
+                source_url="https://www.linkedin.com/jobs/view/999/",
+            )
+        ]
+    )
+    assert expired.state == "unknown"
+
+
+def test_reply_draft_cites_real_opening_when_one_exists() -> None:
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Acme",
+        contact=ContactRecord(contact_id="ct-a", organization_id="org-acme", full_name="Rhea Nair"),
+        latest_message="Hey Akshat",
+        openings=_openings("Product Manager Intern"),
+    )
+    assert "Product Manager Intern" in message
+    assert "went through Acme's openings" in message
+    assert "https://www.linkedin.com/jobs/view/123" in message
+
+
+def test_reply_draft_self_disqualifies_when_no_fit() -> None:
+    """Conceding a bad fit is the trust move, so it must not turn into a generic ask."""
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Acme",
+        contact=ContactRecord(contact_id="ct-a", organization_id="org-acme", full_name="Rhea Nair"),
+        latest_message="Hey Akshat",
+        openings=_openings("Warehouse Associate"),
+    )
+    assert "don't want to force a fit" in message
+    assert "Warehouse Associate" in message
+
+
+def test_reply_draft_never_claims_homework_it_did_not_do() -> None:
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Acme",
+        contact=ContactRecord(contact_id="ct-a", organization_id="org-acme", full_name="Rhea Nair"),
+        latest_message="Hey Akshat",
+        openings=_openings(),
+    )
+    assert "went through" not in message
+
+
+def test_reply_draft_uses_friend_register_and_insider_ask() -> None:
+    from outreach.cli import reply_followup_draft
+
+    friend = ContactRecord(
+        contact_id="ct-f",
+        organization_id="org-acme",
+        full_name="Amritansh Gupta",
+        target_lists="existing_connection",
+    )
+    _, _, message = reply_followup_draft(
+        company="Acme",
+        contact=friend,
+        latest_message="Hey I'm good! How are you?",
+        openings=_openings(),
+    )
+    assert "bro" in message.lower()
+    # An insider is asked what a careers page cannot answer: who actually owns the call.
+    assert "hasn't been posted" in message or "owns product hiring" in message
+
+
+def test_reply_drafts_contain_no_dash_punctuation() -> None:
+    from outreach.cli import reply_followup_draft
+
+    for openings in (_openings(), _openings("Product Manager Intern"), _openings("Warehouse Associate")):
+        _, _, message = reply_followup_draft(
+            company="Acme",
+            contact=ContactRecord(contact_id="ct-a", organization_id="org-acme", full_name="Rhea Nair"),
+            latest_message="Hey Akshat",
+            openings=openings,
+        )
+        assert "—" not in message and "–" not in message
+
+
+def test_does_not_know_reply_never_repeats_the_question() -> None:
+    """They just said they cannot answer; asking again is the worst possible send."""
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Entrust",
+        contact=ContactRecord(contact_id="ct-j", organization_id="org-e", full_name="Jeffrey Costa"),
+        latest_message="I honestly do not know. I am on month 5 at Entrust.",
+    )
+    lowered = message.lower()
+    assert "is there a pm/product internship path" not in lowered
+    assert "recs on who i should talk to" not in lowered
+    assert "no worries" in lowered
+
+
+def test_does_not_know_with_routing_hint_asks_for_a_name() -> None:
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Actian",
+        contact=ContactRecord(contact_id="ct-k", organization_id="org-a", full_name="Kunal Sahni"),
+        latest_message="Im not sure. Probably reach out to someone from product at Actian.",
+    )
+    assert "by name" in message.lower()
+
+
+def test_meeting_offer_is_answered_not_ignored() -> None:
+    from outreach.cli import classify_linkedin_reply_intent, reply_followup_draft
+
+    latest = "Hey Akshat, I'd be happy to chat. Friday work for you?"
+    assert classify_linkedin_reply_intent(latest_message=latest, message_window=[]) == "meeting_offer"
+    _, _, message = reply_followup_draft(
+        company="SentiLink",
+        contact=ContactRecord(contact_id="ct-c", organization_id="org-s", full_name="Chris Salahub"),
+        latest_message=latest,
+    )
+    assert "friday" in message.lower()
+
+
+def test_happy_to_connect_is_not_a_meeting_offer() -> None:
+    """LinkedIn politeness must not be mistaken for a scheduling invitation."""
+    from outreach.cli import classify_linkedin_reply_intent
+
+    intent = classify_linkedin_reply_intent(
+        latest_message="Hi Akshat, thanks for reaching out! Happy to connect.",
+        message_window=[],
+    )
+    assert intent != "meeting_offer"
+
+
+def test_permission_to_return_later_holds_instead_of_reasking() -> None:
+    from outreach.cli import classify_linkedin_reply_intent
+
+    intent = classify_linkedin_reply_intent(
+        latest_message="Yes that will be great",
+        message_window=[
+            {
+                "sender": "You",
+                "message": (
+                    "I'll keep an eye on Sortly roles; if a PM/product opening comes up later, "
+                    "would it be okay if I reached back out with the specific link?"
+                ),
+            }
+        ],
+    )
+    assert intent == "already_asked_wait"
+
+
+def test_founder_is_asked_directly_not_routed_to_someone_else() -> None:
+    from outreach.cli import read_company_openings, reply_followup_draft
+
+    founder = ContactRecord(
+        contact_id="ct-a",
+        organization_id="org-s",
+        full_name="Austin Buhl",
+        title="Founder & CEO @ Salestrics",
+        contact_type="Founder",
+    )
+    _, _, message = reply_followup_draft(
+        company="Salestrics",
+        contact=founder,
+        latest_message="Hi Akshat, nice to meet you",
+        openings=read_company_openings(
+            [
+                OpportunityRecord(
+                    opportunity_id="o1",
+                    organization_id="org-s",
+                    title="Product Manager Intern",
+                    source_url="https://www.linkedin.com/jobs/view/123",
+                )
+            ]
+        ),
+    )
+    assert "who owns" not in message.lower()
+    assert "right person" not in message.lower()
+    assert "https://www.linkedin.com/jobs/view/123" in message
+
+
+def test_offer_to_help_reply_names_the_help_wanted() -> None:
+    """"Let me know how I can help" deserves a concrete ask, not a vague blurb offer."""
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="SentinelOne",
+        contact=ContactRecord(contact_id="ct-k", organization_id="org-s", full_name="Kirk Hanson"),
+        latest_message="Let me know how I can help",
+        openings=_openings("Product Management Intern"),
+    )
+    lowered = message.lower()
+    assert "referral" in lowered
+    assert "https://www.linkedin.com/jobs/view/123" in message
+    assert "build, not just spec" not in lowered
+
+
+def test_offer_to_help_without_live_role_still_asks_something() -> None:
+    """A dead careers page must downgrade the ask, never end the conversation."""
+    from outreach.cli import reply_followup_draft
+
+    draft_kind, recommendation, message = reply_followup_draft(
+        company="SentinelOne",
+        contact=ContactRecord(contact_id="ct-k", organization_id="org-s", full_name="Kirk Hanson"),
+        latest_message="Let me know how I can help",
+        openings=_openings(),
+    )
+    assert draft_kind == "conversation_reply"
+    assert recommendation == "review"
+    assert "?" in message
+    # The downgraded ask must still route somewhere, not ask whether a slot exists.
+    assert "who owns product" in message.lower()
+    assert "http" not in message
+
+
+def test_no_opening_reply_asks_the_human_question() -> None:
+    from outreach.cli import reply_followup_draft
+
+    _, _, message = reply_followup_draft(
+        company="Acme",
+        contact=ContactRecord(contact_id="ct-a", organization_id="org-acme", full_name="Rhea Nair"),
+        latest_message="Hey Akshat",
+        openings=_openings(),
+    )
+    lowered = message.lower()
+    assert "who owns product" in lowered
+    assert "?" in message
+
+
+EASY_NO_ASK_PATTERN = re.compile(
+    r"if there is a relevant opening"
+    r"|do you know if the team takes"
+    r"|is there room for"
+    r"|whether the team takes"
+    r"|does .{0,30}background seem relevant"
+    r"|does that fit product work"
+    r"|is there a fit"
+    r"|if there'?s an intern or part-time path"
+    r"|ever take .{0,20}interns"
+    r"|does .{0,20}ever create",
+    re.I,
+)
+
+
+@pytest.mark.parametrize(
+    ("title", "contact_type"),
+    [
+        ("Founder & CEO", "Founder"),
+        ("Head of Product", "Product"),
+        ("Director of Operations", "Operations"),
+        ("University Recruiter", "Recruiting"),
+        ("Staff Engineer", "Engineering"),
+        ("Software Engineer", "Engineering"),
+        ("Finance Partner", "Other"),
+    ],
+)
+def test_no_audience_gets_a_yes_no_ask_about_whether_a_role_exists(
+    title: str,
+    contact_type: str,
+) -> None:
+    """A yes/no about openings invites "not right now" and ends the thread.
+
+    Every lane has to make the recipient evaluate the candidate or route them onward.
+    """
+    organization = OrganizationRecord(organization_id="org-acme", name="Acme")
+    contact = ContactRecord(
+        contact_id="ct-x",
+        organization_id="org-acme",
+        full_name="Maya Person",
+        title=title,
+        contact_type=contact_type,
+    )
+    for campaign in (None, "fall_intern"):
+        drafts = build_linkedin_followup_drafts(
+            reconcile_results=[
+                {
+                    "contact_id": "ct-x",
+                    "normalized_status": "connected",
+                    "needs_follow_up": True,
+                    "campaign": campaign,
+                    "original_invite_note": "Hi Maya, open to connecting?",
+                }
+            ],
+            organizations=[organization],
+            contacts=[contact],
+            style_profile=CommunicationStyleProfile(),
+        )
+        message = str(drafts[0]["draft_message"])
+        assert not EASY_NO_ASK_PATTERN.search(message), (title, campaign, message)
+
+
+@pytest.mark.parametrize(
+    ("title", "contact_type", "company", "expected"),
+    [
+        (
+            "cultivating online communities for Deepgram - founder of NHCarrigan - senior software engineer",
+            "Founder",
+            "Deepgram",
+            "engineering",
+        ),
+        (
+            "Senior Software Engineer at Pebl | Co-Founder of Trybotics",
+            "Founder",
+            "Pebl",
+            "engineering",
+        ),
+        (
+            "Founder and CEO | SimplySabrina Essential Oil Body Care | Parrative AI - Marketing Specialist",
+            "Founder",
+            "Parrative AI",
+            "general",
+        ),
+        (
+            "CTO @ Tessera Labs | Prev. Co-Founder & CTO @ MagiCode (YC S24)",
+            "Founder",
+            "Tessera Labs",
+            "founder",
+        ),
+        (
+            "Engineering + Applied AI @ Hebbia | Former YC Founder",
+            "Founder",
+            "Hebbia",
+            "engineering",
+        ),
+        ("Co-founder at Monte Carlo", "Founder", "Monte Carlo", "founder"),
+        ("Founder", "Founder", "Mount", "founder"),
+    ],
+)
+def test_founder_audience_requires_affiliation_with_target_company(
+    title: str,
+    contact_type: str,
+    company: str,
+    expected: str,
+) -> None:
+    from outreach.cli import infer_followup_audience
+
+    contact = ContactRecord(
+        contact_id="ct-x",
+        organization_id="org-x",
+        full_name="Test Person",
+        title=title,
+        contact_type=contact_type,
+    )
+    assert infer_followup_audience(contact, "", company=company) == expected
+
+
+def test_side_project_founder_does_not_get_founder_problem_ask() -> None:
+    """A co-founder of another company must not receive the inverted founder ask."""
+    organization = OrganizationRecord(organization_id="org-pebl", name="Pebl")
+    contact = ContactRecord(
+        contact_id="ct-k",
+        organization_id="org-pebl",
+        full_name="Khushboo Kumari",
+        title="Senior Software Engineer at Pebl | Co-Founder of Trybotics",
+        contact_type="Founder",
+    )
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-k",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Hi Khushboo, open to connecting?",
+            }
+        ],
+        organizations=[organization],
+        contacts=[contact],
+        style_profile=CommunicationStyleProfile(),
+    )
+    message = str(drafts[0]["draft_message"])
+    assert drafts[0]["followup_audience"] == "engineering"
+    assert "hand a new PM" not in message
+    assert "Who owns product" in message or "wait for a posting" in message
+
+
+def test_fall_campaign_is_recovered_from_workbook_tags() -> None:
+    """The reconcile pipeline never emits `campaign`, so tags have to carry the lane."""
+    from outreach.cli import infer_followup_campaign
+
+    tagged_org = OrganizationRecord(
+        organization_id="org-voker",
+        name="Voker",
+        target_lists="track-2;fall_sprint",
+    )
+    plain_contact = ContactRecord(contact_id="ct-a", organization_id="org-voker", full_name="Tyler Postle")
+    assert infer_followup_campaign(plain_contact, tagged_org) == "fall_intern"
+
+    tagged_contact = ContactRecord(
+        contact_id="ct-b",
+        organization_id="org-acme",
+        full_name="Rhea Nair",
+        target_lists="linkedin;fall-intern",
+    )
+    assert infer_followup_campaign(tagged_contact, None) == "fall_intern"
+
+    # "broad_fallback" is a search pass name and must never trip the fall lane.
+    noisy = ContactRecord(
+        contact_id="ct-c",
+        organization_id="org-acme",
+        full_name="Sam Roe",
+        target_lists="linkedin;track-2",
+        notes="passes=broad_fallback | tier=Medium",
+    )
+    assert infer_followup_campaign(noisy, OrganizationRecord(organization_id="org-acme", name="Acme")) == ""
+
+
+def test_fall_campaign_tag_reaches_the_draft() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-voker",
+            name="Voker",
+            target_lists="track-2;fall_sprint",
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-eng",
+            organization_id="org-voker",
+            full_name="Dev Engineer",
+            title="Software Engineer",
+            contact_type="Engineering",
+        )
+    ]
+
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-eng",
+                "organization_id": "org-voker",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            }
+        ],
+        organizations=organizations,
+        contacts=contacts,
+    )
+
+    assert "fall product internship" in str(drafts[0]["draft_message"]).lower()
+
+
+def test_emoji_ack_is_not_permission_to_pitch() -> None:
+    from outreach.cli import classify_linkedin_reply_intent
+
+    intent = classify_linkedin_reply_intent(
+        latest_message="👍",
+        message_window=[
+            {
+                "sender": "You",
+                "message": (
+                    "Hi Dr., I'm exploring PM roles at Keysight Technologies, and I'd love to "
+                    "connect and learn from your experience building there."
+                ),
+            }
+        ],
+    )
+    assert intent == "needs_routing_ask"

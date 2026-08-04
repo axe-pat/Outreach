@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Mapping
@@ -236,7 +237,12 @@ def resolve_pass_definitions(
     return pass_definitions
 
 
-def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> str:
+def infer_role_bucket(
+    title: str,
+    raw_text: str,
+    settings: OutreachSettings,
+    company: str = "",
+) -> str:
     title_lower = title.lower()
     raw_text_lower = raw_text.lower()
 
@@ -274,7 +280,18 @@ def infer_role_bucket(title: str, raw_text: str, settings: OutreachSettings) -> 
     if any(keyword in title_lower for keyword in executive_office_keywords):
         return "Adjacent"
 
-    if any(keyword in title_lower for keyword in founder_keywords):
+    # Founder only when the claim is about THIS company. "Co-Founder of Trybotics |
+    # Engineer at Pebl" is Engineering at Pebl, not Founder.
+    if company:
+        if title_claims_executive_at_company(title, company):
+            return "Founder"
+        if title_claims_founder_elsewhere(title, company) or title_has_non_exec_role_at_company(
+            title, company
+        ):
+            pass  # fall through to the real current-role keywords
+        elif any(keyword in title_lower for keyword in founder_keywords) and _is_bare_founder_title(title):
+            return "Founder"
+    elif any(keyword in title_lower for keyword in founder_keywords):
         return "Founder"
 
     if any(keyword in title_lower for keyword in adjacent_override_keywords):
@@ -783,7 +800,7 @@ def apply_raw_candidate(
 ) -> bool:
     title = raw.title or ""
     raw_text = raw.raw_text or ""
-    role_bucket = infer_role_bucket(title, raw_text, settings)
+    role_bucket = infer_role_bucket(title, raw_text, settings, company=company)
     if not pass_relevance(pass_name, role_bucket, title, raw_text, company_mode=company_mode):
         return False
 
@@ -2816,6 +2833,36 @@ def _run_invite_candidate_worker(
             )
         if proc.returncode != 0:
             diagnostic = " ".join((stderr or stdout or "").split())[-600:]
+            diagnostic_lower = diagnostic.casefold()
+            # Preflight/CDP failures never click Send. Mark retryable instead of
+            # freezing the durable reservation as send_unknown_reserved.
+            if any(
+                marker in diagnostic_lower
+                for marker in (
+                    "preflight failed",
+                    "chrome-error://",
+                    "could not attach to chrome",
+                    "nothing is listening",
+                    "authwall",
+                    "login page",
+                )
+            ) or (
+                output_path.exists()
+                and "preflight_failed"
+                in output_path.read_text(encoding="utf-8", errors="ignore")
+            ):
+                return InviteSendResult(
+                    name=str(candidate.get("name") or "Unknown"),
+                    linkedin_url=str(candidate.get("linkedin_url") or ""),
+                    status="preflight_failed",
+                    detail=(
+                        "Invite preflight failed before send (retryable)."
+                        + (f" Worker output: {diagnostic}" if diagnostic else "")
+                    ),
+                    note=str(candidate.get("note") or ""),
+                    screenshot_path=None,
+                    reservation_reused=False,
+                )
             return _unknown_reserved_result(
                 candidate,
                 (
@@ -2858,6 +2905,9 @@ def _run_invite_candidate_worker(
             "unavailable",
             "navigation_error",
             "skipped",
+            # Worker JSON preflight failures never click Send; keep them
+            # retryable instead of freezing send_unknown_reserved slots.
+            "preflight_failed",
         }
         if result.status not in known_statuses:
             return _unknown_reserved_result(
@@ -3630,27 +3680,69 @@ def first_name_key(value: str) -> str:
     return normalize_person_name(value).split(" ", maxsplit=1)[0]
 
 
+def linkedin_profile_key(value: str) -> str:
+    """Reduce a LinkedIn profile URL to its /in/<slug> identity, or "" if absent."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"/in/([^/?#]+)", raw)
+    if not match:
+        return ""
+    return match.group(1).strip().casefold()
+
+
 def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]) -> ContactRecord | None:
+    """Bind an inbox thread to a workbook contact only on verifiable identity.
+
+    A shared first name is not identity. Matching on it silently attached
+    unrelated threads (personal contacts, different people) to targeted
+    contacts and produced outreach drafts aimed at the wrong human.
+    """
+
+    thread_url = linkedin_profile_key(str(thread.get("linkedin_url") or ""))
+    if thread_url:
+        for contact in contacts:
+            if linkedin_profile_key(contact.linkedin_url) == thread_url:
+                return contact
+
     thread_name = normalize_person_name(str(thread.get("name") or ""))
     if not thread_name:
         return None
+
     for contact in contacts:
         if normalize_person_name(contact.full_name) == thread_name:
             return contact
+
+    # Beyond an exact match, the surnames must agree. LinkedIn often abbreviates
+    # one side ("Shubhankit R." for "Shubhankit Rathore"), so an initial counts as
+    # agreement, but two different surnames never do.
+    thread_tokens = [token for token in thread_name.split(" ") if token]
+    if len(thread_tokens) < 2:
+        return None
     for contact in contacts:
         contact_name = normalize_person_name(contact.full_name)
-        if contact_name and (thread_name in contact_name or contact_name in thread_name):
+        contact_tokens = [token for token in contact_name.split(" ") if token]
+        if len(contact_tokens) < 2:
+            continue
+        if thread_tokens[0] != contact_tokens[0]:
+            continue
+        if thread_name in contact_name or contact_name in thread_name:
             return contact
-    thread_first = first_name_key(thread_name)
-    if thread_first:
-        first_name_matches = [
-            contact
-            for contact in contacts
-            if first_name_key(contact.full_name) == thread_first
-        ]
-        if len(first_name_matches) == 1:
-            return first_name_matches[0]
+        if _surnames_agree(thread_tokens[-1], contact_tokens[-1]):
+            return contact
     return None
+
+
+def _surnames_agree(left: str, right: str) -> bool:
+    left = left.strip(". ")
+    right = right.strip(". ")
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if len(left) == 1 or len(right) == 1:
+        return left[0] == right[0]
+    return False
 
 
 def latest_invite_note_for_contact(contact_id: str, touchpoints: list[TouchpointRecord]) -> str:
@@ -3942,16 +4034,225 @@ def build_persisted_inbound_reconcile_results(
     return results
 
 
+# Titles people put in their LinkedIn name field. Greeting someone "Thanks Dr." is worse
+# than getting the name wrong, so skip past them to the actual first name.
+NAME_HONORIFICS = {
+    "dr",
+    "dr.",
+    "mr",
+    "mr.",
+    "mrs",
+    "mrs.",
+    "ms",
+    "ms.",
+    "miss",
+    "prof",
+    "prof.",
+    "professor",
+    "sir",
+}
+
+
 def first_name(value: str) -> str:
-    return (value or "there").strip().split()[0]
+    parts = [part for part in (value or "").strip().split() if part]
+    for part in parts:
+        if part.casefold().strip(".,") in {token.strip(".") for token in NAME_HONORIFICS}:
+            continue
+        return part.strip(",")
+    return parts[0].strip(",") if parts else "there"
 
 
-def infer_followup_audience(contact: ContactRecord, original_invite_note: str = "") -> str:
+_PREVIOUS_ROLE_MARKER = re.compile(
+    r"\b(?:prev\.?|previous(?:ly)?|former(?:ly)?)\b|\bex-",
+    re.I,
+)
+_EXEC_ROLE_PATTERN = (
+    r"(?:co[-\s]?)?founder|ceo|cto|coo|cpo|chief executive(?: officer)?|"
+    r"chief\s+[a-z]+|owner|president"
+)
+_EXEC_WITH_ORG_PATTERN = re.compile(
+    rf"\b({_EXEC_ROLE_PATTERN})\b"
+    rf"(?:\s*(?:and|&)\s*(?:{_EXEC_ROLE_PATTERN}))*"
+    rf"\s*(?:of|at|@|/)\s*([^|,;\n]+)",
+    re.I,
+)
+_NON_EXEC_ROLE_PATTERN = re.compile(
+    r"\b("
+    r"senior\s+software\s+engineer|software\s+engineer|engineer|developer|engineering|"
+    r"community\s+manager|marketing\s+specialist|marketing|specialist|intern(?:ship)?|"
+    r"analyst|recruiter|designer|scientist|researcher|educator|program\s+manager|"
+    r"account\s+executive|solutions?\s+engineer"
+    r")\b",
+    re.I,
+)
+_BARE_FOUNDER_TITLE_PATTERN = re.compile(
+    r"^\s*(?:co[-\s]?)?founder"
+    r"(?:\s*(?:and|&|,)\s*(?:ceo|cto|co[-\s]?founder|chief executive(?: officer)?))*"
+    r"\s*$",
+    re.I,
+)
+
+
+def _normalize_org_name(value: str) -> str:
+    text = (value or "").casefold()
+    text = re.sub(r"[^\w\s.+]", " ", text)
+    text = re.sub(
+        r"\b(inc|llc|ltd|corp|corporation|company|the|ai|labs?|technologies|technology)\b",
+        " ",
+        text,
+    )
+    return " ".join(text.split())
+
+
+def _org_matches_company(org: str, company: str) -> bool:
+    org_n = _normalize_org_name(org)
+    company_n = _normalize_org_name(company)
+    if not org_n or not company_n:
+        return False
+    if org_n == company_n or org_n in company_n or company_n in org_n:
+        return True
+    org_tokens = org_n.split()
+    company_tokens = company_n.split()
+    if (
+        org_tokens
+        and company_tokens
+        and org_tokens[0] == company_tokens[0]
+        and len(org_tokens[0]) >= 4
+    ):
+        return True
+    return False
+
+
+def _strip_org_noise(org: str) -> str:
+    cleaned = re.split(r"\(|\bYC\b|\b[WSP]\d{2}\b", org or "", maxsplit=1, flags=re.I)[0]
+    return cleaned.strip(" .,-–—")
+
+
+def title_claims_executive_at_company(title: str, company: str) -> bool:
+    """True only when the title claims founder/C-level at THIS company.
+
+    LinkedIn headlines often say "Co-Founder of OtherCo | Engineer at TargetCo".
+    A substring match on "founder" falsely treats those people as founders of TargetCo.
+    """
+
+    title = (title or "").strip()
+    company = (company or "").strip()
+    if not title or not company:
+        return False
+
+    for segment in re.split(r"[|•\n]", title):
+        seg = segment.strip()
+        if not seg:
+            continue
+        for match in _EXEC_WITH_ORG_PATTERN.finditer(seg):
+            prefix = seg[: match.start()]
+            if _PREVIOUS_ROLE_MARKER.search(prefix) or _PREVIOUS_ROLE_MARKER.search(
+                match.group(0)
+            ):
+                continue
+            if _org_matches_company(_strip_org_noise(match.group(2)), company):
+                return True
+    return False
+
+
+def title_claims_founder_elsewhere(title: str, company: str) -> bool:
+    """True when the title claims founder/CEO of a company that is not the target."""
+
+    title = (title or "").strip()
+    company = (company or "").strip()
+    if not title or not company:
+        return False
+    for match in _EXEC_WITH_ORG_PATTERN.finditer(title):
+        role = match.group(1)
+        if not re.search(r"founder|ceo|chief executive", role, re.I):
+            continue
+        org = _strip_org_noise(match.group(2))
+        if org and not _org_matches_company(org, company):
+            return True
+    return False
+
+
+def title_has_non_exec_role_at_company(title: str, company: str) -> bool:
+    """True when the title names a non-executive role at the target company."""
+
+    title = (title or "").strip()
+    company = (company or "").strip()
+    if not title or not company:
+        return False
+    for segment in re.split(r"[|•\n]", title):
+        seg = segment.strip()
+        if not seg or not _NON_EXEC_ROLE_PATTERN.search(seg):
+            continue
+        # "Senior Software Engineer at Pebl"
+        at_match = re.search(r"\b(?:at|@)\s+([^|,;\n]+)", seg, re.I)
+        if at_match and _org_matches_company(_strip_org_noise(at_match.group(1)), company):
+            return True
+        # "Parrative AI - Marketing Specialist" / "for Deepgram"
+        company_n = _normalize_org_name(company)
+        seg_n = _normalize_org_name(seg)
+        if company_n and company_n in seg_n:
+            return True
+        for alias_token in company_n.split():
+            if len(alias_token) >= 4 and re.search(rf"\b{re.escape(alias_token)}\b", seg, re.I):
+                if re.search(r"\b(?:for|at|@|–|-|—)\b", seg, re.I) or company_n in seg_n:
+                    return True
+    return False
+
+
+def _is_bare_founder_title(title: str) -> bool:
+    """YC-style headlines that are only 'Founder' / 'Founder and CEO' with no org."""
+
+    compact = re.sub(r"\s*[|•].*$", "", (title or "").strip())
+    return bool(_BARE_FOUNDER_TITLE_PATTERN.match(compact))
+
+
+def contact_is_founder_at_company(contact: ContactRecord, company: str = "") -> bool:
+    """Founder/C-level of the company we are messaging, not of a side project."""
+
+    title = str(contact.title or "")
+    company = (company or "").strip()
+    if company:
+        if title_claims_executive_at_company(title, company):
+            return True
+        # An IC role at this company, or founder-of-elsewhere, always wins over a
+        # stale contact_type=Founder imported from a headline substring match.
+        if title_has_non_exec_role_at_company(title, company):
+            return False
+        if title_claims_founder_elsewhere(title, company):
+            return False
+        if _is_bare_founder_title(title) and str(contact.contact_type or "").strip().casefold() == "founder":
+            # Keep YC "Founder" titles, but not truncated headlines that only kept
+            # the founder half of "Founder and CEO | OtherCo | TargetCo - Role".
+            return True
+        return False
+    # No company context: keep legacy behavior for callers that have not been updated.
+    profile_text = " ".join([contact.contact_type or "", title]).casefold()
+    return any(token in profile_text for token in ["founder", "co-founder", "cofounder", "ceo", "chief executive"])
+
+
+def infer_followup_audience(
+    contact: ContactRecord,
+    original_invite_note: str = "",
+    company: str = "",
+) -> str:
     invite_text = original_invite_note.lower()
-    profile_text = " ".join([contact.contact_type, contact.title]).lower()
+    # When we know the company, ignore a misleading contact_type=Founder that was
+    # stamped from "founder of OtherCo" in the LinkedIn headline.
+    if company and (
+        title_claims_founder_elsewhere(contact.title or "", company)
+        or title_has_non_exec_role_at_company(contact.title or "", company)
+    ):
+        type_for_profile = ""
+    elif company:
+        type_for_profile = contact.contact_type if contact_is_founder_at_company(contact, company) else (
+            "" if str(contact.contact_type or "").strip().casefold() == "founder" else contact.contact_type
+        )
+    else:
+        type_for_profile = contact.contact_type
+    profile_text = " ".join([type_for_profile or "", contact.title or ""]).lower()
     if "referral" in invite_text:
         return "referral_engineer"
-    if any(token in profile_text for token in ["founder", "co-founder", "ceo", "chief executive"]):
+    if contact_is_founder_at_company(contact, company):
         return "founder"
     if any(token in profile_text for token in ["recruiter", "talent", "university recruiting", "campus"]):
         return "recruiter"
@@ -3994,8 +4295,23 @@ def infer_followup_audience(contact: ContactRecord, original_invite_note: str = 
     return "general"
 
 
-def infer_contact_seniority(contact: ContactRecord) -> str:
-    text = " ".join([contact.contact_type, contact.title]).lower()
+def infer_contact_seniority(contact: ContactRecord, company: str = "") -> str:
+    if company and contact_is_founder_at_company(contact, company):
+        return "founder_exec"
+    type_bit = contact.contact_type or ""
+    title_bit = contact.title or ""
+    if company and not contact_is_founder_at_company(contact, company):
+        # Stale contact_type=Founder from a side-project headline must not mint founder_exec.
+        if str(type_bit).strip().casefold() == "founder":
+            type_bit = ""
+        if not title_claims_executive_at_company(title_bit, company):
+            title_bit = re.sub(
+                r"\b(?:co[-\s]?)?founder\b|\bceo\b|\bchief executive(?: officer)?\b",
+                " ",
+                title_bit,
+                flags=re.I,
+            )
+    text = " ".join([type_bit, title_bit]).lower()
     if any(token in text for token in ["founder", "co-founder", "cofounder", "ceo", "cto", "chief "]):
         return "founder_exec"
     if any(
@@ -4020,6 +4336,32 @@ def infer_contact_seniority(contact: ContactRecord) -> str:
     return "mid"
 
 
+LINKEDIN_NON_MESSAGE_FRAGMENTS = (
+    "inmail opportunity",
+    "sponsored",
+    "sent an attachment",
+    "you are now connected",
+    "is now a connection",
+    "accepted your invitation",
+    "accepted your invite",
+    "sent an invitation",
+    "view profile",
+    "promoted",
+)
+
+
+def linkedin_message_is_non_message(latest_message: str) -> bool:
+    """Detect LinkedIn UI chrome that the inbox scraper captured as message text.
+
+    Labels like "InMail Opportunity" or "Sponsored ..." are not something a human
+    said, so they must never be treated as a reply worth answering.
+    """
+    lower = " ".join(str(latest_message or "").split()).casefold()
+    if not lower:
+        return False
+    return any(fragment in lower for fragment in LINKEDIN_NON_MESSAGE_FRAGMENTS)
+
+
 def classify_linkedin_reply_intent(
     *,
     latest_message: str,
@@ -4029,7 +4371,77 @@ def classify_linkedin_reply_intent(
     context = compact_context_text(message_window or []).lower()
     if not lower:
         return "unknown"
-    if any(token in lower for token in ["won't be able to help", "wont be able to help", "can't help", "cannot help", "unable to help", "not able to help"]):
+    if linkedin_message_is_non_message(lower):
+        return "non_message"
+    if any(
+        token in lower
+        for token in [
+            "no current opening",
+            "no current openings",
+            "no openings",
+            "no open roles",
+            "dont have any current opening",
+            "don't have any current opening",
+            "dont have any openings",
+            "don't have any openings",
+            "not hiring",
+            "no fte position",
+            "no fte positions",
+            "keep an eye out",
+            "check on the website",
+            "posted publicly",
+            "careers page",
+            "check out open roles",
+        ]
+    ):
+        # "Share your resume" outranks a no-opening note: it is still an active ask.
+        if not re.search(r"\b(share|send) (?:me )?your (resume|cv|profile)\b", lower):
+            return "no_current_opening"
+    if re.search(r"\b(reach out to|connect with|talk to|ping)\b.*@?\w+\s+(and|or)\s+@?\w+", lower) or re.search(
+        r"\bplease\s+reach\s*out\s+to\b", lower
+    ):
+        return "routed_to_named_contacts"
+    if re.search(
+        r"\b(phone call|hop on a call|jump on a call|schedule a call|chat over (?:the )?phone|"
+        r"call you|set up (?:a )?call)\b",
+        context,
+    ) and re.search(r"\b(connect you to|introduce you|put you in touch|see who i can connect)\b", context):
+        return "call_arranged"
+    # An offer to talk is the strongest signal in the thread. Ignoring it to ask a
+    # generic routing question is the rudest failure mode we had.
+    # "Happy to connect" is LinkedIn politeness, not an invitation. Only treat this
+    # as a meeting when they actually propose scheduling.
+    proposes_time = bool(
+        re.search(
+            r"\b(work for you|works for you|what time|when (?:are|works|would)|"
+            r"(?:mon|tues|wednes|thurs|fri|satur|sun)day|next week|this week|"
+            r"send (?:me )?(?:a )?(?:calendar|invite|link)|grab (?:some )?time)\b",
+            lower,
+        )
+    )
+    offers_conversation = bool(
+        re.search(
+            r"\b(happy to (?:chat|talk|hop on)|glad to (?:chat|talk)|let'?s (?:chat|talk|set up)|"
+            r"free to (?:chat|talk)|open to (?:a )?(?:chat|call)|jump on a call|hop on a call)\b",
+            lower,
+        )
+    )
+    if proposes_time and (offers_conversation or "?" in lower):
+        return "meeting_offer"
+    if any(
+        token in lower
+        for token in [
+            "won't be able to help",
+            "wont be able to help",
+            "can't help",
+            "cannot help",
+            "unable to help",
+            "not able to help",
+            "not sure i would be able to help",
+            "didn't work with anyone",
+            "did not work with anyone",
+        ]
+    ):
         return "soft_no"
     if any(
         token in lower
@@ -4057,10 +4469,28 @@ def classify_linkedin_reply_intent(
             context,
         )
     )
+    # We asked "can I come back when a specific role opens?" and they said yes.
+    # That is permission for a future trigger, not an invitation to ask again now.
+    granted_future_trigger = bool(
+        re.search(
+            r"\b(reach(?:ed)? back out|reach back|keep an eye on|come back|"
+            r"with the specific link|when .{0,30}open(?:ing|s)? comes up)\b",
+            context,
+        )
+    )
+    is_short_affirmative = bool(
+        re.match(r"^(yes|yeah|yep|sure|absolutely|of course|sounds good|ok|okay)\b", compact_lower)
+        and len(compact_lower.split()) <= 8
+    )
+    if granted_future_trigger and (is_short_affirmative or compact_lower in ack_tokens):
+        return "already_asked_wait"
     if compact_lower in ack_tokens or any(emoji in lower for emoji in ["👍", "👏", "😊"]):
+        if granted_future_trigger:
+            return "already_asked_wait"
         if promised_specific_fit:
             return "permission_to_send_fit"
-        return "already_asked_wait" if asked_already else "permission_to_send_fit"
+        # A bare 👍 / "sure" after a connect note is warmth, not permission to pitch a role.
+        return "already_asked_wait" if asked_already else "needs_routing_ask"
     if "let me know" in lower and asked_already:
         return "permission_to_send_fit" if promised_specific_fit else "already_asked_wait"
     if "let me know" in lower:
@@ -4109,10 +4539,102 @@ def email_story_fit_line(organization: OrganizationRecord) -> str:
     return ""
 
 
+HR_TECH_PROOF_PATTERN = re.compile(
+    r"\b(?:recruit(?:ing)?|hiring|interview|ats|talent|hr[-_ ]?tech|expert[-_ ]network|"
+    r"data[-_ ]label(?:ing)?|candidate|workforce|people.?ops)\b",
+    re.I,
+)
+
+
+def _organization_is_hr_tech(organization: OrganizationRecord | None) -> bool:
+    if organization is None:
+        return False
+    metadata = _story_fit_metadata(organization)
+    haystack = " ".join(
+        [
+            organization.target_lists or "",
+            organization.notes or "",
+            metadata.get("tags", ""),
+            metadata.get("story_cluster", ""),
+            metadata.get("story_fit_reason", ""),
+            organization.name or "",
+        ]
+    )
+    return bool(HR_TECH_PROOF_PATTERN.search(haystack))
+
+
+def proof_signal_line(organization: OrganizationRecord | None = None) -> str:
+    """One concrete proof beat. Never a stock claim like 'build, not just spec'.
+
+    Lead with domain, not employer name. Wording avoids bare ``PM`` so role-rewrite
+    cannot mangle it into BizOps'ing.
+    """
+
+    if _organization_is_hr_tech(organization):
+        return (
+            "I'm leading product on an AI interview tool right now, so candidate eval and the "
+            "human-in-the-loop boundary are what I work on daily."
+        )
+    return (
+        "I'm leading product on an AI tool right now, after 5 years building data and "
+        "platform systems."
+    )
+
+
+def founder_builder_proof_line() -> str:
+    """Founder/CEO proof: show you ship agents, not that you want an internship."""
+
+    return (
+        "I build AI agents that do real work: an AI interviewer at my current gig, and one "
+        "running my whole job search. Before the MBA, 5 years on data and platform systems."
+    )
+
+
+def founder_problem_ask() -> str:
+    """Inverted ask: they spend a line, you do the work. Softened so it doesn't read as a demand."""
+
+    return (
+        "Rather than pitch myself, would it be alright if I took a crack at a problem you'd "
+        "hand a new PM? Send one over if so, and I'll come back with a short written take."
+    )
+
+
+def _reply_proof_line(contact: ContactRecord, company: str = "") -> str:
+    """Proof for the reply lane, which does not carry an organization record.
+
+    Decision makers get the builder proof; they respond to evidence of shipped work
+    rather than to a background summary.
+    """
+
+    if _contact_is_decision_maker(contact, company):
+        return founder_builder_proof_line()
+    return proof_signal_line(None)
+
+
+def routing_ask_without_easy_no(
+    company: str,
+    role_area: str = "product",
+    intro: str | None = None,
+) -> str:
+    """Routing ask for people who cannot create a role.
+
+    Never asks whether a slot exists. A yes/no about openings invites "not right now",
+    which ends the thread. Ask who owns the decision instead, and offer work up front.
+    """
+
+    area = role_area or "product"
+    # The intro names the target explicitly so role-family rewriting can retarget non-product asks.
+    lead = intro or f"I'm going after product roles at {company}."
+    return (
+        f"{lead} Who owns {area} there? I'd rather get in front of them with something concrete "
+        "than wait for a posting. Happy to write up a take on a problem they care about if "
+        "that's a useful way in."
+    )
+
+
 def founder_context_line(company: str, organization: OrganizationRecord | None) -> str:
-    story_line = linkedin_story_fit_line(company, organization)
-    if story_line:
-        return story_line
+    # Prefer a short company-specific hook when we have one; otherwise stay quiet.
+    # The proof line carries the "why me" beat separately.
     organization_text = " ".join(
         [
             organization.notes if organization else "",
@@ -4120,19 +4642,30 @@ def founder_context_line(company: str, organization: OrganizationRecord | None) 
         ]
     ).lower()
     if "agent analytics" in organization_text or "ai agents" in organization_text:
-        return f"{company}'s AI agent analytics work maps well to my data/platform + applied AI experience."
+        return f"{company}'s AI agent analytics work maps well to what I'm doing now"
+    metadata = _story_fit_metadata(organization)
+    reason = " ".join(str(metadata.get("story_fit_reason") or "").split()).strip()
+    # Reject tag dumps ("AI/ML; agent AI; data platform") and one-word fragments.
+    if (
+        reason
+        and ";" not in reason
+        and "," not in reason[:40]
+        and len(reason.split()) >= 8
+        and len(reason) <= 140
+    ):
+        return reason.rstrip(".")
     return ""
 
 
 def product_context_line(contact: ContactRecord, organization: OrganizationRecord | None = None) -> str:
-    story_line = linkedin_story_fit_line(organization.name if organization else "", organization)
-    if story_line:
-        return story_line
-    title = contact.title.lower()
+    story = founder_context_line(organization.name if organization else "", organization)
+    if story:
+        return story
+    title = (contact.title or "").lower()
     if "ai" in title or "data infrastructure" in title:
-        return "Your AI/data infrastructure work feels close to problems I've worked around."
+        return "Your AI/data infrastructure work feels close to problems I've worked around"
     if "security" in title or "developer" in title:
-        return "Your developer-facing product work feels close to problems I've worked around."
+        return "Your developer-facing product work feels close to problems I've worked around"
     return ""
 
 
@@ -4144,83 +4677,49 @@ def _accepted_followup_draft_product(
     organization: OrganizationRecord | None = None,
 ) -> tuple[str, str]:
     name = first_name(contact.full_name)
-    audience = infer_followup_audience(contact, original_invite_note)
-    if audience == "referral_engineer":
-        return (
-            "safe_to_review",
-            (
-                f"Thanks for connecting, {name}. I'm targeting PM/product roles at {company} where my backend/data "
-                "engineering background is useful. If there is a relevant opening, would you be open to a referral "
-                "or pointing me to the right hiring contact?"
-            ),
-        )
-    if audience == "founder":
-        context_line = founder_context_line(company, organization)
-        context_sentence = f"{context_line} " if context_line else ""
+    audience = infer_followup_audience(contact, original_invite_note, company=company)
+    proof = proof_signal_line(organization)
+    # People who can create or champion a role get the inverted problem ask.
+    # Everyone else gets a routing ask that never offers a yes/no about openings.
+    if audience in {"founder", "operator", "product"}:
+        context = product_context_line(contact, organization)
+        context_bit = f" {context}." if context else ""
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I've been deep in product for a while now, with an engineering "
-                f"background, so I can build, not just spec, and I'm focused on product roles. {context_sentence}Does "
-                f"that background fit anything useful at {company}? Any recs on who I should talk to about that?"
-            ),
-        )
-    if audience == "operator":
-        return (
-            "review",
-            (
-                f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from an "
-                f"engineering background, so I can jump in and actually build, not just spec. Is there room to "
-                f"contribute on the product or ops side at {company}, or who'd be the right person to talk to?"
-            ),
-        )
-    if audience == "product":
-        context_line = product_context_line(contact, organization)
-        context_sentence = f"{context_line} " if context_line else ""
-        return (
-            "review",
-            (
-                f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from an "
-                f"engineering and data/platform background. {context_sentence}Does that background seem relevant "
-                "to product work there?"
+                f"Thanks for connecting, {name}.{context_bit} {founder_builder_proof_line()} "
+                f"I'm looking at product roles at {company}. {founder_problem_ask()}"
             ),
         )
     if audience == "recruiter":
         return (
             "safe_to_review",
             (
-                f"Thanks for connecting, {name}. I'm a Marshall MBA + former data/platform engineer exploring "
-                f"PM/product internship paths at {company}. What's the best process for someone with my background "
-                "to get on the team's radar?"
+                f"Thanks for connecting, {name}. {proof} I'm going after PM/product roles at "
+                f"{company}. What's the fastest way to get in front of the product team? Happy to "
+                "send a written take on a real problem rather than just a resume."
             ),
         )
-    if audience == "engineering":
-        seniority = infer_contact_seniority(contact)
-        story_line = linkedin_story_fit_line(company, organization)
+    if audience in {"engineering", "referral_engineer"}:
+        seniority = infer_contact_seniority(contact, company=company)
         if seniority in {"senior", "founder_exec"}:
-            context_sentence = f" {story_line}" if story_line else ""
             return (
                 "review",
                 (
-                    f"Thanks for connecting, {name}. I'm exploring technical PM/product paths at {company} from a "
-                    f"backend/data engineering background.{context_sentence} Does that background fit product work "
-                    "there? Any recs on who I should talk to about that?"
+                    f"Thanks for connecting, {name}. {founder_builder_proof_line()} "
+                    f"{routing_ask_without_easy_no(company)}"
                 ),
             )
         return (
             "safe_to_review",
             (
-                f"Thanks for connecting, {name}. I'm trying to get on the radar at {company} for PM/product roles "
-                "where my data/platform engineering background helps. If there is a relevant opening, would you be "
-                "open to a referral or pointing me to the right hiring contact?"
+                f"Thanks for connecting, {name}. {proof} {routing_ask_without_easy_no(company)}"
             ),
         )
     return (
         "safe_to_review",
         (
-            f"Thanks for connecting, {name}. I've been deep in product for a while now, coming from a "
-            f"data/platform engineering background, so I can build, not just spec. From your side of {company}, "
-            "who's usually the best person to talk to about product roles there?"
+            f"Thanks for connecting, {name}. {proof} {routing_ask_without_easy_no(company)}"
         ),
     )
 
@@ -4238,66 +4737,72 @@ def _fall_intern_followup_draft_product(
     internship (that guardrail lives in the note engine); the concrete ask lands here, after accept.
     """
     name = first_name(contact.full_name)
-    audience = infer_followup_audience(contact, original_invite_note)
-    if audience == "founder":
-        context_line = founder_context_line(company, organization)
-        context_sentence = f"{context_line} " if context_line else ""
+    audience = infer_followup_audience(contact, original_invite_note, company=company)
+    proof = proof_signal_line(organization)
+    fall_intro = f"I'm after a fall product internship at {company}."
+    if audience in {"founder", "operator", "product"}:
+        context = product_context_line(contact, organization)
+        context_bit = f" {context}." if context else ""
         return (
             "review",
             (
-                f"Thanks for connecting, {name}. I'll be straight with you: I'm after a fall product internship, and "
-                f"{company} is exactly the kind of team I'd want to build with. Former engineer plus an MBA, so I can "
-                f"ship, not just spec, and I'm happy to go deep on a real problem part-time this fall. {context_sentence}"
-                "Open to a quick chat about whether there's room?"
-            ),
-        )
-    if audience == "operator":
-        return (
-            "review",
-            (
-                f"Thanks for connecting, {name}. Quick context: I'm looking for a fall product or ops internship, and "
-                f"{company} is high on my list. Former engineer plus an MBA, so I can jump in and actually build. Is "
-                "there room for a fall intern on the product or ops side, or who'd be the right person to talk to?"
+                f"Thanks for connecting, {name}.{context_bit} {founder_builder_proof_line()} "
+                f"I'm after a fall product internship somewhere like {company}. "
+                f"{founder_problem_ask()}"
             ),
         )
     if audience == "recruiter":
         return (
             "safe_to_review",
             (
-                f"Thanks for connecting, {name}. Following up directly: I'd love to be considered for a fall product "
-                f"internship at {company}. Former engineer plus an MBA, so I can contribute fast part-time this fall. "
-                "Could you point me to the right process or person, or let me know if there's a fit?"
-            ),
-        )
-    if audience == "product":
-        context_line = product_context_line(contact, organization)
-        context_sentence = f"{context_line} " if context_line else ""
-        return (
-            "review",
-            (
-                f"Thanks, {name}! I'm after a fall product internship, and {company} is top of my list. Coming from "
-                f"engineering, I can go deep on real product problems fast. {context_sentence}Would you be open to 15 "
-                "minutes on whether the team takes fall interns, or a pointer to who'd know?"
+                f"Thanks for connecting, {name}. {proof} I'm after a fall product internship at "
+                f"{company}. What's the fastest way to get in front of the product team? Happy to "
+                "send a written take on a real problem rather than just a resume."
             ),
         )
     if audience in {"engineering", "referral_engineer"}:
+        seniority = infer_contact_seniority(contact, company=company)
+        lead = founder_builder_proof_line() if seniority in {"senior", "founder_exec"} else proof
         return (
             "safe_to_review",
             (
-                f"Thanks for connecting, {name}! I'm looking for a fall product internship and {company} is one I'd "
-                "love to be at. From the engineering side, do you know if the team takes product interns, or who owns "
-                "that, and would you be open to referring me if the fit looks right? Appreciate any pointer."
+                f"Thanks for connecting, {name}. {lead} "
+                f"{routing_ask_without_easy_no(company, intro=fall_intro)}"
             ),
         )
     return (
         "safe_to_review",
         (
-            f"Thanks for connecting, {name}. I'm looking for a fall product internship where my data/platform "
-            f"engineering background helps, and {company} stands out. Former engineer plus an MBA, so I can build, "
-            "not just spec. If there's an intern or part-time path open, would you be open to a referral or a pointer "
-            "to the right hiring contact?"
+            f"Thanks for connecting, {name}. {proof} "
+            f"{routing_ask_without_easy_no(company, intro=fall_intro)}"
         ),
     )
+
+
+# "broad_fallback" is a search pass name, so the boundary after "fall" matters here.
+FALL_CAMPAIGN_TAG_PATTERN = re.compile(r"\bfall(?:[_ -](?:sprint|intern|internship))?\b", re.I)
+
+
+def infer_followup_campaign(
+    contact: ContactRecord,
+    organization: OrganizationRecord | None = None,
+) -> str:
+    """Recover the campaign from workbook tags when the reconcile row does not carry it.
+
+    The reconcile pipeline never emitted a ``campaign`` field, so the fall-internship
+    drafts were unreachable outside tests. Tagging a company or contact ``fall_sprint``
+    is the durable signal, so read it here instead of waiting for a field nobody sets.
+    """
+
+    haystack = " ".join(
+        [
+            contact.target_lists or "",
+            contact.notes or "",
+            (organization.target_lists if organization else "") or "",
+            (organization.notes if organization else "") or "",
+        ]
+    )
+    return "fall_intern" if FALL_CAMPAIGN_TAG_PATTERN.search(haystack) else ""
 
 
 def _followup_is_usc_warm(original_invite_note: str) -> bool:
@@ -4318,15 +4823,21 @@ def _strip_transition_framing(message: str) -> str:
     """Defensive scrub: Akshat has already moved into product, never frame it as in-progress."""
     replacements = [
         (r"\btrying to move from ([^.]*?) into (?:pm|product)(?: work)?\b", "working in product, with a background in"),
-        (r"\btransition(?:ing)? (?:into|to) product\b", "deep in product"),
-        (r"\bmoving (?:toward|into) product\b", "deep in product"),
-        (r"\bbreaking into product\b", "deep in product"),
-        (r"\bpivot(?:ing)? (?:into|to) product\b", "deep in product"),
+        (r"\btransition(?:ing)? (?:into|to) product\b", "working in product"),
+        (r"\bmoving (?:toward|into) product\b", "working in product"),
+        (r"\bbreaking into product\b", "working in product"),
+        (r"\bpivot(?:ing)? (?:into|to) product\b", "working in product"),
+        # Retired stock lines that kept leaking into drafts.
+        (r",?\s*so I can (?:build|ship), not just spec\.?", "."),
+        (r"\bI can (?:build|ship), not just spec\.?\s*", ""),
+        (r"\bI've been deep in product for a while now,?\s*", ""),
     ]
     scrubbed = message
     for pattern, replacement in replacements:
         scrubbed = re.sub(pattern, replacement, scrubbed, flags=re.I)
-    return scrubbed
+    scrubbed = re.sub(r"\s{2,}", " ", scrubbed)
+    scrubbed = re.sub(r"\.\s*\.", ".", scrubbed)
+    return scrubbed.strip()
 
 
 def accepted_followup_draft(
@@ -4369,12 +4880,50 @@ def _reply_followup_draft_product(
     message_window: list[dict[str, str]] | None = None,
     target_role: TargetRoleContext | None = None,
     campaign: str = "",
+    openings: CompanyOpeningsRead | None = None,
 ) -> tuple[str, str, str]:
     name = first_name(contact.full_name)
     lower = latest_message.lower()
     emails = extract_email_addresses(latest_message)
     is_fall = campaign.strip().lower() in {"fall_intern", "fall-intern", "fall_internship", "fall"}
     intent = classify_linkedin_reply_intent(latest_message=latest_message, message_window=message_window)
+    opener = _reply_opener(name=name, contact=contact, latest_message=latest_message)
+    if intent == "non_message":
+        return (
+            "no_action",
+            "suppress",
+            (
+                f"No reply needed. The captured text for {name} is a LinkedIn interface label "
+                "(InMail/sponsored/attachment notice), not a message from them."
+            ),
+        )
+    if intent == "call_arranged":
+        return (
+            "no_action",
+            "suppress",
+            (
+                f"No reply needed. {name} already offered a call and to route you onward, and that was "
+                "acknowledged. The next move is scheduling, not another LinkedIn ask."
+            ),
+        )
+    if intent == "no_current_opening":
+        return (
+            "already_asked_wait",
+            "wait_for_trigger",
+            (
+                f"Hold. {name} said there is nothing open at {company} right now and to watch their postings. "
+                f"Re-engage only when a specific {company} role appears, referencing that posting."
+            ),
+        )
+    if intent == "routed_to_named_contacts":
+        return (
+            "already_asked_wait",
+            "wait_for_trigger",
+            (
+                f"Hold. {name} routed you to specific people instead of answering directly. The next action is "
+                "reaching those named contacts, not replying here."
+            ),
+        )
     if "let me know if" in lower and any(
         token in lower for token in ["opening", "opens", "role", "interested", "pm", "product"]
     ):
@@ -4398,6 +4947,10 @@ def _reply_followup_draft_product(
             ),
         )
     if intent == "permission_to_send_fit":
+        # Only pitch a role we can prove is still cited with a live link. Stale workbook
+        # titles without a URL (or with an expired URL) must not reach review.
+        verified = openings if openings and openings.state == "relevant_opening" and openings.headline_url else None
+        season = "this fall" if is_fall else "right now"
         concrete_role_sources = {
             "explicit_title",
             "note_context.target_role_title",
@@ -4405,48 +4958,72 @@ def _reply_followup_draft_product(
             "note_context.opportunity_title",
             "note_context.latest_opportunity_title",
         }
-        if (
-            target_role is None
-            or not target_role.is_concrete
-            or target_role.source not in concrete_role_sources
-        ):
-            return (
-                "already_asked_wait",
-                "wait_for_trigger",
-                (
-                    f"Hold for now. {name} is open to the next step, but there is no concrete {company} "
-                    "role/fit to send yet."
-                ),
-            )
-        role = target_role.matched_text or target_role.label
-        fit_intro = (
-            f"Thanks {name}. I found one concrete fit: {role}. Former engineer plus an MBA, so I can ship, not just "
-            "spec, and I'm keen to go deep on it part-time this fall. I can send the posting plus a tight resume/fit "
-            "blurb here if useful."
-            if is_fall
-            else (
-                f"Thanks {name}. I found one concrete fit: {role}. I spent 5 years building backend/data platforms "
-                "before Marshall, so I can build, not just spec. I can send the posting plus a tight resume/fit "
-                "blurb here if useful."
-            )
+        has_concrete_role = bool(
+            target_role
+            and target_role.is_concrete
+            and target_role.source in concrete_role_sources
         )
-        return ("conversation_reply", "auto_send", fit_intro)
-    if intent == "does_not_know":
-        if is_fall:
+        if verified is None and not has_concrete_role:
+            # No live posting is not a reason to go quiet on someone who offered help.
+            # Spend their offer on what a careers page cannot answer.
             return (
                 "conversation_reply",
                 "review",
                 (
-                    f"Sure, thanks {name}. Is there a fall product internship path at {company}, even part-time? "
-                    "Any recs on who I should talk to about that?"
+                    f"Thanks {name}, that's kind of you.\n\n"
+                    f"Nothing on {company}'s careers page lines up right now, so I won't send you a link to chase. "
+                    f"I'm at USC Marshall for my MBA with 5 years on data and platform systems before that, and "
+                    f"product internships are what I'm after {season}.\n\n"
+                    f"{_no_live_opening_ask(company=company, role_area='product', contact=contact)}"
+                ),
+            )
+        if verified is not None:
+            role = verified.headline_title
+            role_line = f"The {role} opening looks like the closest fit: {verified.headline_url}"
+        else:
+            role = target_role.matched_text or target_role.label
+            role_line = f"The {role} opening looks like the closest fit."
+        # They offered help, so name the help wanted. "I can send a blurb" is not
+        # an ask, it just puts the work back on them to guess.
+        fit_intro = (
+            f"Thanks {name}, that's kind of you.\n\n"
+            f"{role_line}\n\n"
+            f"I'm at USC Marshall for my MBA with 5 years on "
+            f"data and platform systems before that, and product internships are what I'm after {season}.\n\n"
+            "Most useful would be a referral, or a pointer to whoever owns that hiring. Happy to send my resume "
+            "if that's easier."
+        )
+        return ("conversation_reply", "review", fit_intro)
+    if intent == "does_not_know":
+        # They just told us they cannot answer this. Repeating the question is the
+        # single worst thing to send, so ask only for one name, and make it easy
+        # to decline.
+        if re.search(r"\b(someone|somebody|reach out to|talk to)\b.{0,40}\b(product|pm)\b", lower):
+            return (
+                "conversation_reply",
+                "review",
+                (
+                    f"That's fair, thanks {name}. Do you know anyone on product there by name I could reach out to? "
+                    "Even a first name helps and I'll take it from there. If not, no worries at all."
                 ),
             )
         return (
             "conversation_reply",
             "review",
             (
-                f"Sure, thanks {name}. Is there a PM/product internship path at {company}? Any recs on who "
-                "I should talk to about that?"
+                f"No worries at all {name}, that's fair this early in.\n\n"
+                f"If you do end up crossing paths with someone on product at {company}, I'd appreciate a name. "
+                "Otherwise happy to just stay connected."
+            ),
+        )
+    if intent == "meeting_offer":
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"Yes, would love that {name}. Friday works on my end. Happy to work around whatever time suits you.\n\n"
+                "For context so it's a useful call: I'm at USC Marshall for my MBA, 5 years on data and platform "
+                f"systems before that, and I'm looking at product roles. Mostly want your read on how product works at {company}."
             ),
         )
     if intent == "already_asked_wait":
@@ -4487,16 +5064,11 @@ def _reply_followup_draft_product(
         )
         return ("conversation_reply", "review", email_note)
     if "share your profile" in lower or "share your resume" in lower or "hr" in lower:
+        proof = _reply_proof_line(contact, company)
         referral_context = (
-            f"That would be amazing, thanks {name}. Short context if useful: MBA plus 5 yrs backend/data platform "
-            "engineering, deep in product now, and I'm after a fall product internship where I can build, not just "
-            "spec. Happy to send resume too if HR wants it."
-            if is_fall
-            else (
-                f"That would be amazing, thanks {name}. Short context if useful: MBA plus 5 yrs backend/data "
-                "platform engineering, deep in product now and targeting product roles where I can build, not just "
-                "spec. Happy to send resume too if HR wants it."
-            )
+            f"That would be amazing, thanks {name}. Short context if useful: {proof} "
+            f"{'After a fall product internship' if is_fall else 'Targeting product roles'}. "
+            "Happy to send resume too if HR wants it."
         )
         return ("referral_offer_reply", "review", referral_context)
     if any(token in lower for token in ["small team", "high-impact", "high ownership", "feedback loop"]):
@@ -4512,25 +5084,361 @@ def _reply_followup_draft_product(
             )
         )
         return ("conversation_reply", "review", small_team_ask)
-    if is_fall:
+    read = openings or CompanyOpeningsRead("unknown")
+    homework = _openings_homework_line(company, read)
+    # At a founder-led company the person we are talking to is the hiring process.
+    # Asking them who owns hiring reads as if we did not look them up.
+    is_decision_maker = _contact_is_decision_maker(contact, company)
+    # The ask must name the role family we are actually chasing for this contact,
+    # not default everyone to product.
+    base_role_phrase = (target_role.role_phrase if target_role else "") or "product roles"
+    role_phrase = _fall_internship_phrase(base_role_phrase) if is_fall else base_role_phrase
+    role_area = (target_role.team_area if target_role else "") or "product"
+    relationship = _contact_relationship(contact)
+
+    if relationship == "friend":
+        # An insider can answer what the job page cannot, so spend the ask there
+        # rather than on "are there openings".
+        if read.state == "relevant_opening":
+            insider_ask = (
+                f"Is the {read.headline_title} one actually open, or already earmarked? "
+                "And is there anything on product that hasn't been posted yet?"
+            )
+        else:
+            insider_ask = (
+                f"Who owns {role_area} hiring at {company}? I'd rather get in front of them with "
+                "something concrete than wait for a posting."
+            )
         return (
             "conversation_reply",
             "review",
             (
-                f"Thanks {name}. I've been deep in product for a while now, coming from engineering, so I can build, "
-                f"not just spec. I'm after a fall product internship and {company} really appeals. Is there a fall "
-                "intern or part-time product path there? Any recs on who I should talk to about that?"
+                f"{opener}\n\n"
+                f"I'm going after {role_phrase} and {company}'s high on my list. "
+                f"{homework or 'I had a look through careers but the page only tells you so much.'}\n\n"
+                f"{insider_ask} Happy to send my resume if it's easier to just forward."
             ),
         )
+
+    if read.state == "relevant_opening":
+        if is_decision_maker:
+            # Decision makers can create a role, so show the work rather than ask them to
+            # judge a resume, which is the easier thing for them to decline.
+            closing_ask = (
+                "Is that one still open? And rather than send a resume, would it be alright if I "
+                "took a crack at a problem you'd hand a new PM? I'll come back with a short "
+                "written take."
+            )
+        else:
+            closing_ask = (
+                "Is that one actually live, and would you be open to referring me or pointing me to "
+                "whoever owns it? Happy to go through the normal process either way."
+            )
+        proof = _reply_proof_line(contact, company)
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"{opener}\n\n"
+                f"{homework} {proof} I'm looking for {role_phrase}.\n\n{closing_ask}"
+            ),
+        )
+
+    if read.state == "no_relevant_fit":
+        # Conceding the bad fit is the trust move, but the thread still needs an ask.
+        proof = _reply_proof_line(contact, company)
+        return (
+            "conversation_reply",
+            "review",
+            (
+                f"{opener}\n\n"
+                f"{homework} {proof} I'm after {role_phrase}.\n\n"
+                f"{_no_live_opening_ask(company=company, role_area=role_area, contact=contact)}"
+            ),
+        )
+
+    proof = _reply_proof_line(contact, company)
     return (
         "conversation_reply",
         "review",
         (
-            f"Thanks {name}. I've been deep in product for a while now, coming from engineering, so I can build, not "
-            f"just spec. Are there product roles at {company} where that background helps? Any recs on who I should "
-            "talk to about that?"
+            f"{opener}\n\n"
+            f"{proof} I'm looking for {role_phrase}.\n\n"
+            f"{_no_live_opening_ask(company=company, role_area=role_area, contact=contact)}"
         ),
     )
+
+
+# Aggregator rows ("Built In open roles") are placeholders, not real postings.
+# Treating them as openings would make us claim homework we never did.
+PLACEHOLDER_OPENING_PATTERNS = (
+    r"^built in\b",
+    r"^open roles\b",
+    r"\bopen roles$",
+    r"^careers\b",
+    r"^jobs\b",
+    r"^see all\b",
+)
+
+RELEVANT_OPENING_PATTERN = re.compile(
+    r"\b(product|pm|bizops|biz ops|business operations|strategy|operations|"
+    r"program manage|technical program|growth|gtm|go.to.market)\b",
+    re.I,
+)
+
+
+# Workbook rows we must never cite as a live opening in a draft.
+OPENING_STATUS_NOT_CITABLE = {
+    "expired",
+    "closed",
+    "filled",
+    "withdrawn",
+    "cancelled",
+    "canceled",
+    "archived",
+    "removed",
+}
+
+
+@dataclass(frozen=True)
+class CompanyOpeningsRead:
+    """What we actually know about a company's postings, for homework-first replies.
+
+    ``state`` is one of:
+      relevant_opening  - a named posting worth citing by title + URL
+      no_relevant_fit   - postings exist, none match; say so and disqualify honestly
+      unknown           - no reliable posting data; never fake having looked
+    """
+
+    state: str
+    relevant_titles: tuple[str, ...] = ()
+    other_titles: tuple[str, ...] = ()
+    relevant_urls: tuple[str, ...] = ()
+
+    @property
+    def headline_title(self) -> str:
+        return self.relevant_titles[0] if self.relevant_titles else ""
+
+    @property
+    def headline_url(self) -> str:
+        return self.relevant_urls[0] if self.relevant_urls else ""
+
+
+def linkedin_job_url_is_live(url: str, *, timeout_s: float = 8.0) -> bool | None:
+    """Return False when LinkedIn redirects an expired job; True if still on /jobs/view/; None if unverifiable."""
+
+    cleaned = " ".join(str(url or "").split()).strip()
+    if not cleaned:
+        return None
+    try:
+        import urllib.request
+
+        request = urllib.request.Request(
+            cleaned,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; OutreachBot/1.0)"},
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+            final_url = str(getattr(response, "geturl", lambda: cleaned)() or cleaned)
+    except Exception:
+        return None
+    final_lower = final_url.casefold()
+    if "expired_jd_redirect" in final_lower:
+        return False
+    if "/jobs/view/" in final_lower:
+        return True
+    # LinkedIn often bounces expired postings onto generic search pages.
+    if "/jobs/" in final_lower and "/jobs/view/" not in final_lower:
+        return False
+    return None
+
+
+def read_company_openings(
+    opportunities: list[OpportunityRecord] | None,
+    *,
+    verify_live: bool = False,
+) -> CompanyOpeningsRead:
+    """Classify a company's known postings so drafts can cite real evidence.
+
+    A posting is only ``relevant_opening`` when it has a source URL. When
+    ``verify_live`` is set, LinkedIn job URLs are checked and expired redirects
+    are dropped so stale workbook rows never reach review.
+    """
+
+    relevant: list[str] = []
+    relevant_urls: list[str] = []
+    other: list[str] = []
+    for opportunity in opportunities or []:
+        title = " ".join(str(opportunity.title or "").split()).strip()
+        if not title:
+            continue
+        status = " ".join(str(opportunity.status or "").split()).casefold()
+        if status in OPENING_STATUS_NOT_CITABLE:
+            continue
+        lowered = title.casefold()
+        if any(re.search(pattern, lowered) for pattern in PLACEHOLDER_OPENING_PATTERNS):
+            continue
+        source_url = " ".join(str(opportunity.source_url or "").split()).strip()
+        if RELEVANT_OPENING_PATTERN.search(title):
+            # Never claim a named opening without a link the recipient can open.
+            if not source_url:
+                continue
+            if verify_live and "linkedin.com/jobs" in source_url.casefold():
+                live = linkedin_job_url_is_live(source_url)
+                if live is False:
+                    continue
+            relevant.append(title)
+            relevant_urls.append(source_url)
+        else:
+            other.append(title)
+
+    if relevant:
+        return CompanyOpeningsRead(
+            "relevant_opening",
+            tuple(relevant),
+            tuple(other),
+            tuple(relevant_urls),
+        )
+    if other:
+        return CompanyOpeningsRead("no_relevant_fit", (), tuple(other))
+    return CompanyOpeningsRead("unknown")
+
+
+GREETING_ONLY_PATTERN = re.compile(
+    r"^(hey|hi|hello)[,!. ]*(akshat)?[,!. ]*$|^(good to hear from you)\b", re.I
+)
+
+
+def _reply_opener(*, name: str, contact: ContactRecord, latest_message: str) -> str:
+    """Open by reacting to what they actually said, in a register that fits them.
+
+    The old drafts opened "Thanks {name}." for everyone regardless of whether the
+    person greeted, offered help, or asked a question.
+    """
+
+    text = " ".join(str(latest_message or "").split())
+    lowered = text.casefold()
+    relationship = _contact_relationship(contact)
+
+    if GREETING_ONLY_PATTERN.match(text):
+        if relationship == "friend":
+            return f"Hey {name}! All good here, just grinding through recruiting."
+        return f"Hey {name}! Thanks for getting back."
+    if "?" in text:
+        if relationship == "friend":
+            return f"All good bro, just grinding through recruiting."
+        return f"Hey {name}! Doing well, thanks for asking."
+    if any(token in lowered for token in ("happy to", "let me know", "that will be great", "sure")):
+        return f"Appreciate it {name}, thank you."
+    if relationship == "friend":
+        return f"All good bro."
+    return f"Thanks {name}."
+
+
+DECISION_MAKER_TITLE_PATTERN = re.compile(
+    r"\b(founder|co-?founder|ceo|cto|coo|chief|owner|president|managing director)\b", re.I
+)
+
+
+def _contact_is_decision_maker(contact: ContactRecord, company: str = "") -> bool:
+    """True when this person is the hiring decision at the company we are messaging."""
+
+    if company:
+        return contact_is_founder_at_company(contact, company)
+    if str(contact.contact_type or "").strip().casefold() == "founder":
+        return True
+    return bool(DECISION_MAKER_TITLE_PATTERN.search(str(contact.title or "")))
+
+
+def _fall_internship_phrase(role_phrase: str) -> str:
+    """Turn a role phrase like "product roles" into "a fall product internship"."""
+
+    core = re.sub(r"\b(roles?|positions?|jobs?|opportunities)\b", "", role_phrase, flags=re.I)
+    core = " ".join(core.split()).strip()
+    if not core:
+        return "a fall internship"
+    if "internship" in core.casefold():
+        return f"a fall {core}"
+    return f"a fall {core} internship"
+
+
+def _contact_relationship(contact: ContactRecord) -> str:
+    """Classify closeness so the register matches the relationship."""
+
+    haystack = " ".join(
+        [contact.target_lists or "", contact.notes or "", contact.contact_type or ""]
+    ).casefold()
+    if "existing_connection" in haystack or "existing connection" in haystack:
+        return "friend"
+    if "shared_history" in haystack or "ex-colleague" in haystack or "former colleague" in haystack:
+        return "ex_colleague"
+    return "stranger"
+
+
+def _no_live_opening_ask(*, company: str, role_area: str, contact: ContactRecord) -> str:
+    """The ask to use when nothing is posted.
+
+    A dead careers page is not a reason to end the thread. It just means the ask
+    moves from "refer me to this posting" to the things only a person inside can
+    answer: whether roles like this get created at all, and who decides.
+    """
+
+    area = role_area or "product"
+    # Never ask a yes/no about whether a slot exists; that invites "not right now"
+    # and ends the thread. Ask them to evaluate the person instead.
+    if _contact_is_decision_maker(contact, company):
+        return (
+            f"Rather than pitch myself, would it be alright if I took a crack at a problem you'd "
+            "hand a new PM? Send one over if so, and I'll come back with a short written take."
+        )
+    if _contact_relationship(contact) == "friend":
+        return (
+            f"Who owns {area} at {company}, and could you put me in front of them? Happy to come "
+            "with a written take on something they care about rather than just a resume."
+        )
+    return (
+        f"Who owns {area} at {company}? I'd rather get in front of them with something concrete "
+        "than wait for a posting. Happy to write up a take on a problem they care about if "
+        "that's a useful way in."
+    )
+
+
+def _clean_job_url(url: str | None) -> str:
+    """Strip search/tracking query strings so a pasted link stays readable in a DM.
+
+    Job boards hand back the whole search state on the URL; only the path identifies
+    the posting. Drops the link entirely if stripping leaves nothing addressable.
+    """
+
+    candidate = (url or "").strip()
+    if not candidate:
+        return ""
+    base = candidate.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if not re.search(r"/[^/]+$", base.split("://", 1)[-1]):
+        return ""
+    return base
+
+
+def _openings_homework_line(company: str, openings: CompanyOpeningsRead) -> str:
+    """The 'I already looked' beat, or empty when we genuinely have not looked."""
+
+    if openings.state == "relevant_opening":
+        title = openings.headline_title
+        url = _clean_job_url(openings.headline_url)
+        if url:
+            return (
+                f"I went through {company}'s openings and the {title} one looks closest to me: {url}"
+            )
+        # URL-less titles are not citable; read_company_openings should have filtered these.
+        return ""
+    if openings.state == "no_relevant_fit":
+        sample = ", ".join(openings.other_titles[:2])
+        tail = f" (mostly {sample})" if sample else ""
+        return (
+            f"I went through {company}'s openings and nothing on product really lines up right now{tail}, "
+            "so I don't want to force a fit."
+        )
+    return ""
 
 
 def reply_followup_draft(
@@ -4541,6 +5449,7 @@ def reply_followup_draft(
     message_window: list[dict[str, str]] | None = None,
     target_role: TargetRoleContext | None = None,
     campaign: str = "",
+    openings: CompanyOpeningsRead | None = None,
 ) -> tuple[str, str, str]:
     draft_kind, recommendation, message = _reply_followup_draft_product(
         company=company,
@@ -4549,6 +5458,7 @@ def reply_followup_draft(
         message_window=message_window,
         target_role=target_role,
         campaign=campaign,
+        openings=openings,
     )
     effective_target = target_role or infer_target_role_context()
     return (
@@ -4758,6 +5668,7 @@ def build_linkedin_followup_drafts(
             organization_notes=organization.notes if organization else "",
         )
         item_with_company = {**item, "company": company}
+        campaign = str(item.get("campaign") or "") or infer_followup_campaign(contact, organization)
         status = str(item.get("normalized_status") or item.get("status") or "")
         if status == "connected" and item.get("needs_follow_up"):
             recommendation, draft = accepted_followup_draft(
@@ -4766,7 +5677,7 @@ def build_linkedin_followup_drafts(
                 original_invite_note=str(item.get("original_invite_note") or ""),
                 organization=organization,
                 target_role=target_role,
-                campaign=str(item.get("campaign") or ""),
+                campaign=campaign,
             )
             draft_kind = "accepted_follow_up"
         elif status == "replied":
@@ -4780,7 +5691,11 @@ def build_linkedin_followup_drafts(
                     if isinstance(message, dict)
                 ],
                 target_role=target_role,
-                campaign=str(item.get("campaign") or ""),
+                campaign=campaign,
+                openings=read_company_openings(
+                    organization_opportunities,
+                    verify_live=True,
+                ),
             )
         else:
             continue
@@ -4825,7 +5740,7 @@ def build_linkedin_followup_drafts(
             else ""
         )
         ai_result = None
-        if ai_messaging is not None and recommendation != "wait_for_trigger":
+        if ai_messaging is not None and recommendation not in {"wait_for_trigger", "suppress"}:
             organization_metadata = _story_fit_metadata(organization)
             institution_text = " ".join(
                 [
@@ -4879,10 +5794,10 @@ def build_linkedin_followup_drafts(
             style_profile=profile,
             grounding_context=grounding_context,
         )
-        if recommendation == "wait_for_trigger":
+        if recommendation in {"wait_for_trigger", "suppress"}:
             communication_review.score = min(communication_review.score, 60)
             communication_review.verdict = "needs_rewrite"
-            communication_review.recommended_action = "wait_for_trigger"
+            communication_review.recommended_action = recommendation
             communication_review.flags.append("Hold: prior context indicates this would repeat an ask")
         draft_payload: dict[str, object] = {
                 "contact_id": contact.contact_id,
@@ -4901,6 +5816,7 @@ def build_linkedin_followup_drafts(
                 "followup_audience": infer_followup_audience(
                     contact,
                     str(item.get("original_invite_note") or ""),
+                    company=company,
                 ),
                 "linkedin_url": contact.linkedin_url,
                 "draft_kind": draft_kind,
@@ -5693,7 +6609,10 @@ def build_track_2_daily_plan_cmd(
     max_total_actions: Annotated[int, typer.Option(help="Maximum total Track 2 actions today")] = 24,
     max_companies: Annotated[int, typer.Option(help="Maximum distinct companies to touch today")] = 18,
     max_linkedin_invites: Annotated[int, typer.Option(help="Maximum new LinkedIn invites today")] = 12,
-    max_linkedin_followups: Annotated[int, typer.Option(help="Maximum LinkedIn follow-up/reply messages today")] = 8,
+    max_linkedin_followups: Annotated[
+        int,
+        typer.Option(help="Maximum LinkedIn follow-up/reply messages today (-1 = uncapped, 0 = none)"),
+    ] = -1,
     max_company_mapping: Annotated[int, typer.Option(help="Maximum companies to map contacts for today")] = 5,
     max_email_research: Annotated[int, typer.Option(help="Maximum email/contact-info research tasks today")] = 5,
     max_context_enrichment: Annotated[int, typer.Option(help="Maximum company enrichment tasks today")] = 8,
@@ -6660,6 +7579,87 @@ def _invite_backfill_queue(
     return queue
 
 
+def _same_run_mapped_invite_items(
+    *,
+    mapping_runs: list[dict],
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+    touchpoints: list[TouchpointRecord],
+    settings: OutreachSettings,
+    attempted_keys: set[str],
+    remaining_invites: int,
+    per_company_cap: int = 3,
+) -> list[dict]:
+    """Invite items for companies that gained workbook contacts earlier in this run.
+
+    Mapping writes contacts to disk, then the daily runner reloads them before the
+    invite phase. This queue turns those freshly imported people into invite
+    targets ahead of generic megacorp backfill, so map→invite works same night.
+    """
+
+    if remaining_invites <= 0 or per_company_cap <= 0 or not mapping_runs:
+        return []
+
+    org_by_id = {org.organization_id: org for org in organizations if org.organization_id}
+    org_by_name = {org.name.casefold(): org for org in organizations if org.name}
+    contacts_by_org: dict[str, list[ContactRecord]] = {}
+    for contact in contacts:
+        contacts_by_org.setdefault(contact.organization_id, []).append(contact)
+    touchpoints_by_org: dict[str, list[TouchpointRecord]] = {}
+    for touchpoint in touchpoints:
+        touchpoints_by_org.setdefault(touchpoint.organization_id, []).append(touchpoint)
+
+    items: list[dict] = []
+    budget_left = remaining_invites
+    seen: set[str] = set()
+    for run in mapping_runs:
+        if budget_left <= 0:
+            break
+        if not isinstance(run, dict):
+            continue
+        contacts_added = int(run.get("contacts_added") or 0)
+        candidate_count = int(run.get("candidate_count") or 0)
+        if contacts_added <= 0 and candidate_count <= 0:
+            continue
+        org_id = str(run.get("organization_id") or "").strip()
+        company = str(run.get("company") or "").strip()
+        organization = org_by_id.get(org_id) or org_by_name.get(company.casefold())
+        if organization is None:
+            continue
+        key = organization.organization_id or organization.name.casefold()
+        if not key or key in attempted_keys or key in seen:
+            continue
+        org_contacts = contacts_by_org.get(organization.organization_id) or []
+        if not org_contacts and contacts_added <= 0:
+            continue
+        # Mapping often stores draft notes as Prepared touchpoints, which the
+        # mapped-invite gate treats as already handled. Still queue the company
+        # so the invite phase can live-search / merge and send tonight.
+        candidates = build_mapped_invite_candidates(
+            organization=organization,
+            contacts=org_contacts,
+            touchpoints=touchpoints_by_org.get(organization.organization_id) or [],
+            settings=settings,
+        )
+        surface = len(candidates) or contacts_added or candidate_count or len(org_contacts)
+        cap = min(per_company_cap, surface, budget_left)
+        if cap <= 0:
+            continue
+        seen.add(key)
+        items.append(
+            {
+                "company": organization.name,
+                "organization_id": organization.organization_id,
+                "expected_linkedin_invites": cap,
+                "target_role": "",
+                "phase": "5_send_linkedin_invites",
+                "source": "same_run_mapped",
+            }
+        )
+        budget_left -= cap
+    return items
+
+
 def _unresolved_reservation_org_ids(
     *,
     reservations: Mapping[str, object] | None,
@@ -6824,13 +7824,12 @@ def _mapped_backlog_invite_items(
 
     The daily plan only surfaces a narrow slice of ``send_initial_invites``
     companies, so reviewed workbook contacts that were mapped in earlier runs
-    (or mapped earlier in this run) never reach the invite phase and pile up as
-    ``queued`` contacts with drafted notes. This drains that backlog: any
-    company that still has send-eligible mapped contacts and has not been
-    attempted yet becomes an invite target, bounded by the remaining daily
-    invite budget. Candidate eligibility reuses the exact
-    ``build_mapped_invite_candidates`` gate that the invite phase applies, so a
-    drained company can only produce sends the normal path would also allow.
+    never reach the invite phase and pile up as ``queued`` contacts with drafted
+    notes. Same-run mapping is handled first by ``_same_run_mapped_invite_items``
+    (after a workbook reload); this drain catches leftover backlog after that.
+    Candidate eligibility reuses the exact ``build_mapped_invite_candidates``
+    gate that the invite phase applies, so a drained company can only produce
+    sends the normal path would also allow.
     """
 
     if remaining_invites <= 0 or per_company_cap <= 0:
@@ -7064,6 +8063,18 @@ def _apply_linkedin_cadence_guards(
                     "hold_category": "already_answered",
                     "cadence_reasons": list(draft.get("cadence_reasons") or [])
                     or ["This draft already has a terminal resolution state."],
+                }
+            )
+            continue
+        if send_recommendation == "suppress":
+            held.append(
+                {
+                    **draft,
+                    "send_recommendation": "suppress",
+                    "cadence_state": "no_action_needed",
+                    "hold_category": "no_action_needed",
+                    "cadence_reasons": list(draft.get("cadence_reasons") or [])
+                    or ["This thread needs no reply at all."],
                 }
             )
             continue
@@ -9152,6 +10163,10 @@ HUMAN_REVIEW_RECOMMENDATIONS = {
     "human_review_required",
     "rewrite_before_send",
 }
+# Sentinel standing in for "no follow-up cap". Large enough to never bind in
+# practice, finite so it still works as a slice bound.
+UNLIMITED_FOLLOWUP_BUDGET = 1_000_000
+
 SYSTEM_HOLD_RECOMMENDATIONS = {
     "hold",
     "cadence_hold",
@@ -9159,6 +10174,7 @@ SYSTEM_HOLD_RECOMMENDATIONS = {
     "wait",
     "wait_for_trigger",
     "rewrite_hold",
+    "suppress",
 }
 REPLY_DRAFT_KINDS = {
     "conversation_reply",
@@ -9178,6 +10194,8 @@ def _hold_category(item: dict[str, object]) -> str:
     ).casefold()
     if recommendation == "rewrite_hold" or "learned negative" in reason_text:
         return "rewrite_required"
+    if recommendation == "suppress" or draft_kind == "no_action":
+        return "no_action_needed"
     if recommendation == "wait_for_trigger" or draft_kind == "already_asked_wait":
         return "waiting_for_specific_trigger"
     if recommendation == "cadence_hold":
@@ -12020,7 +13038,10 @@ def draft_track_2_emails_cmd(
     max_total_actions: Annotated[int, typer.Option(help="Maximum total Track 2 actions today")] = 24,
     max_companies: Annotated[int, typer.Option(help="Maximum distinct companies to touch today")] = 18,
     max_linkedin_invites: Annotated[int, typer.Option(help="Maximum new LinkedIn invites today")] = 12,
-    max_linkedin_followups: Annotated[int, typer.Option(help="Maximum LinkedIn follow-up/reply messages today")] = 8,
+    max_linkedin_followups: Annotated[
+        int,
+        typer.Option(help="Maximum LinkedIn follow-up/reply messages today (-1 = uncapped, 0 = none)"),
+    ] = -1,
     max_company_mapping: Annotated[int, typer.Option(help="Maximum companies to map contacts for today")] = 5,
     max_email_research: Annotated[int, typer.Option(help="Maximum email/contact-info research tasks today")] = 5,
     max_context_enrichment: Annotated[int, typer.Option(help="Maximum company enrichment tasks today")] = 8,
@@ -12081,10 +13102,19 @@ def run_track_2_daily_plan_cmd(
         Path,
         typer.Option(help="Path to the workspace directory containing CSVs"),
     ] = Path("workspace"),
+    daily_plan_artifact: Annotated[
+        Path | None,
+        typer.Option(
+            help="Optional track-2-daily-plan JSON; if set, use it instead of building a fresh plan",
+        ),
+    ] = None,
     max_total_actions: Annotated[int, typer.Option(help="Maximum total Track 2 actions today")] = 24,
     max_companies: Annotated[int, typer.Option(help="Maximum distinct companies to touch today")] = 18,
     max_linkedin_invites: Annotated[int, typer.Option(help="Maximum new LinkedIn invites today")] = 12,
-    max_linkedin_followups: Annotated[int, typer.Option(help="Maximum LinkedIn follow-up/reply messages today")] = 8,
+    max_linkedin_followups: Annotated[
+        int,
+        typer.Option(help="Maximum LinkedIn follow-up/reply messages today (-1 = uncapped, 0 = none)"),
+    ] = -1,
     max_company_mapping: Annotated[int, typer.Option(help="Maximum companies to map contacts for today")] = 5,
     max_email_research: Annotated[int, typer.Option(help="Maximum LinkedIn Contact Info/email research profiles today")] = 5,
     max_context_enrichment: Annotated[int, typer.Option(help="Maximum company enrichment tasks today")] = 8,
@@ -12097,6 +13127,16 @@ def run_track_2_daily_plan_cmd(
         bool,
         typer.Option(help="Allow LinkedIn invite/follow-up sends. Requires --execute."),
     ] = False,
+    send_linkedin_followups: Annotated[
+        bool,
+        typer.Option(
+            "--send-linkedin-followups/--no-send-linkedin-followups",
+            help=(
+                "When --send-linkedin is set, also send auto-sendable follow-ups. "
+                "Use --no-send-linkedin-followups to draft/refresh only while still sending invites."
+            ),
+        ),
+    ] = True,
     refresh_linkedin: Annotated[
         bool,
         typer.Option(help="Read live LinkedIn messages before drafting follow-ups. Requires a live Chrome CDP session."),
@@ -12109,7 +13149,10 @@ def run_track_2_daily_plan_cmd(
         bool,
         typer.Option(help="Scroll the LinkedIn inbox while refreshing messages"),
     ] = True,
-    linkedin_message_limit: Annotated[int, typer.Option(help="Maximum LinkedIn message threads to read")] = 75,
+    linkedin_message_limit: Annotated[
+        int,
+        typer.Option(help="Maximum LinkedIn message threads to read"),
+    ] = 300,
     invite_min_score: Annotated[int, typer.Option(help="Minimum score for invite send candidates")] = 35,
     invite_verdict: Annotated[str, typer.Option(help="QC verdict required for invite send candidates")] = "send",
     adaptive_invite_min_score: Annotated[
@@ -12152,26 +13195,38 @@ def run_track_2_daily_plan_cmd(
     settings = OutreachSettings()
     allow_live_linkedin = live_linkedin or refresh_linkedin or send_linkedin
     should_refresh_linkedin = refresh_linkedin or send_linkedin
-    daily_plan = _build_daily_plan_for_workspace(
-        workspace=workspace,
-        max_total_actions=max_total_actions,
-        max_companies=max_companies,
-        max_linkedin_invites=max_linkedin_invites,
-        max_linkedin_followups=max_linkedin_followups,
-        max_company_mapping=max_company_mapping,
-        max_email_research=max_email_research,
-        max_context_enrichment=max_context_enrichment,
-        max_email_drafts=max_email_drafts,
-    )
+    if daily_plan_artifact is not None:
+        if not daily_plan_artifact.exists():
+            typer.echo(f"Daily plan artifact not found: {daily_plan_artifact}")
+            raise typer.Exit(code=1)
+        loaded_plan = json.loads(daily_plan_artifact.read_text(encoding="utf-8"))
+        if not isinstance(loaded_plan, dict):
+            typer.echo("Daily plan artifact must contain a JSON object.")
+            raise typer.Exit(code=1)
+        daily_plan = loaded_plan
+        plan_artifact = daily_plan_artifact
+        typer.echo(f"Using provided daily plan artifact: {daily_plan_artifact}")
+    else:
+        daily_plan = _build_daily_plan_for_workspace(
+            workspace=workspace,
+            max_total_actions=max_total_actions,
+            max_companies=max_companies,
+            max_linkedin_invites=max_linkedin_invites,
+            max_linkedin_followups=max_linkedin_followups,
+            max_company_mapping=max_company_mapping,
+            max_email_research=max_email_research,
+            max_context_enrichment=max_context_enrichment,
+            max_email_drafts=max_email_drafts,
+        )
+        plan_artifact = write_artifact(
+            settings.artifacts_dir,
+            "track-2-daily-plan",
+            {
+                "workspace": str(workspace),
+                **daily_plan,
+            },
+        )
     execution_manifest = build_daily_execution_manifest(daily_plan)
-    plan_artifact = write_artifact(
-        settings.artifacts_dir,
-        "track-2-daily-plan",
-        {
-            "workspace": str(workspace),
-            **daily_plan,
-        },
-    )
 
     workbook = OutreachWorkbook(workspace)
     organizations = workbook.list_organizations()
@@ -12189,10 +13244,18 @@ def run_track_2_daily_plan_cmd(
     )
     # Inbox work is an operational lane, not just a campaign-plan lane.  A
     # real inbound reply must be seen even when the planner happened to select
-    # zero warm companies today.  The explicit channel cap remains the hard
-    # bound for replies/follow-ups.
+    # zero warm companies today.
+    #
+    # Follow-ups are uncapped by default (max_linkedin_followups < 0).  Invites
+    # need a cap because LinkedIn rate-limits them; follow-ups go to people who
+    # already accepted, so the funnel itself is the gate.  Capping them just
+    # strands accepted connections that never get a second message.
     followup_budget = (
-        max(0, int(max_linkedin_followups))
+        (
+            UNLIMITED_FOLLOWUP_BUDGET
+            if int(max_linkedin_followups) < 0
+            else int(max_linkedin_followups)
+        )
         if should_refresh_linkedin
         else planned_followup_budget
     )
@@ -12210,11 +13273,16 @@ def run_track_2_daily_plan_cmd(
         if should_refresh_linkedin:
             scraper = LinkedInScraper(settings)
             scraper.require_live_cdp_session()
+            # Deep inbox scrapes stop early when LinkedIn's virtualized list
+            # falsely reports at_bottom. Give backlog-clearing runs enough
+            # scroll budget to actually walk past the first screenful.
+            inbox_scroll_budget = max(120, int(linkedin_message_limit) // 2)
             threads = [
                 item.__dict__
                 for item in scraper.snapshot_message_threads(
                     limit=linkedin_message_limit,
                     deep=deep_messages,
+                    max_scrolls=inbox_scroll_budget,
                 )
             ]
             state_path = linkedin_message_state_path(settings)
@@ -12279,11 +13347,23 @@ def run_track_2_daily_plan_cmd(
                 add_execution_result(item)
             for item in planned_message_results:
                 add_execution_result(item)
+            # Someone who accepted an invite is owed a follow-up regardless of
+            # whether today's planner picked their company. Restricting to
+            # planned orgs left accepted connections permanently unfollowed.
+            for item in list(reconcile_result.get("results") or []):
+                if str(item.get("action") or "").casefold() == "missing_contact":
+                    continue
+                add_execution_result(item)
 
             profile_reconcile_artifact: Path | None = None
             profile_reconcile_count = 0
+            # Profile opens are for stuck Invited rows that may have accepted
+            # outside the inbox window. Do not gate them on the planner's
+            # follow-up company count (often 0 on a follow-up-only run); cap
+            # the expensive opens separately instead.
+            PROFILE_RECONCILE_CAP = 80
             remaining_profile_budget = min(
-                planned_followup_budget,
+                PROFILE_RECONCILE_CAP,
                 max(0, followup_budget - len(execution_results)),
             )
             reservation_ledger = load_invite_reservations(
@@ -12492,9 +13572,15 @@ def run_track_2_daily_plan_cmd(
                         "sendable_count": len(sendable_drafts),
                         "pending_review_count": len(review_drafts),
                         "pending_review_artifact": str(pending_path),
+                        "followup_sends_enabled": send_linkedin_followups,
                     }
                 )
-                if sendable_drafts:
+                if sendable_drafts and not send_linkedin_followups:
+                    followup_result["detail"] = (
+                        "Follow-up drafts refreshed for review; sends disabled for this run "
+                        "(--no-send-linkedin-followups)."
+                    )
+                elif sendable_drafts:
                     send_artifact, progress_artifact, status_counts, touchpoints_added = execute_linkedin_followup_send(
                         settings=settings,
                         draft_artifact=draft_artifact,
@@ -12713,6 +13799,8 @@ def run_track_2_daily_plan_cmd(
         phase_results.append(email_result)
 
     mapping_items = _daily_plan_items_matching(daily_plan, phase_prefix="4_contact_mapping")
+    mapping_runs_executed: list[dict] = []
+    contacts_reloaded_after_mapping = False
     if mapping_items:
         mapping_result: dict[str, object] = {
             "phase": "4_contact_mapping",
@@ -12784,6 +13872,7 @@ def run_track_2_daily_plan_cmd(
                 for run in list(mapping_result.get("runs") or [])
                 if isinstance(run, dict)
             ]
+            mapping_runs_executed = mapping_runs
             mapping_result["completed_count"] = sum(
                 run.get("status") == "completed" for run in mapping_runs
             )
@@ -12797,16 +13886,33 @@ def run_track_2_daily_plan_cmd(
                 mapping_result["status"] = "partial_failed"
             else:
                 mapping_result["status"] = "ran"
+            # Mapping imports write to disk; reload before invites so same-run
+            # mapped seed companies can receive invites tonight.
+            contacts = workbook.list_contacts()
+            touchpoints = workbook.list_touchpoints()
+            organizations = workbook.list_organizations()
+            org_by_id = {org.organization_id: org for org in organizations}
+            contacts_reloaded_after_mapping = True
+            mapping_result["contacts_reloaded_for_invites"] = True
         elif execute:
             mapping_result["status"] = "queued"
             mapping_result["detail"] = "Live LinkedIn is disabled; mapping is queued for an attended run."
         phase_results.append(mapping_result)
 
     invite_items = _daily_plan_items_matching(daily_plan, phase_prefix="5_send_linkedin_invites")
-    if invite_items or list(daily_plan.get("invite_backfill") or []) or any(
-        str(item.get("skip_reason") or "") == "linkedin_invites_budget_exhausted"
-        for item in list(daily_plan.get("skipped") or [])
-        if isinstance(item, dict)
+    same_run_mapped_ready = any(
+        int(run.get("contacts_added") or 0) > 0 or int(run.get("candidate_count") or 0) > 0
+        for run in mapping_runs_executed
+    )
+    if (
+        invite_items
+        or list(daily_plan.get("invite_backfill") or [])
+        or same_run_mapped_ready
+        or any(
+            str(item.get("skip_reason") or "") == "linkedin_invites_budget_exhausted"
+            for item in list(daily_plan.get("skipped") or [])
+            if isinstance(item, dict)
+        )
     ):
         planned_invite_budget = int(
             (daily_plan.get("used") or {}).get("linkedin_invites") or 0
@@ -12832,6 +13938,8 @@ def run_track_2_daily_plan_cmd(
             "backfill_company_count": 0,
             "backfill_sent_count": 0,
             "reservation_prefiltered_count": 0,
+            "same_run_mapped_invite_company_count": 0,
+            "contacts_reloaded_after_mapping": contacts_reloaded_after_mapping,
         }
         remaining_invites = global_invite_budget
         attempted_invite_keys: set[str] = set()
@@ -12854,8 +13962,74 @@ def run_track_2_daily_plan_cmd(
                 reservation_ledger_path(settings.resolved_tracking_workspace_dir)
             )
             work_index = 0
+            same_run_mapped_queued = False
             backfill_queued = False
             drain_queued = False
+
+            def _queue_same_run_mapped_invites() -> None:
+                nonlocal same_run_mapped_queued
+                if same_run_mapped_queued or remaining_invites <= 0:
+                    return
+                # Always mark queued so megacorp backfill is not blocked when
+                # this run had no mapping phase.
+                if not mapping_runs_executed:
+                    same_run_mapped_queued = True
+                    return
+                same_run_items = _same_run_mapped_invite_items(
+                    mapping_runs=mapping_runs_executed,
+                    organizations=organizations,
+                    contacts=contacts,
+                    touchpoints=touchpoints,
+                    settings=settings,
+                    attempted_keys=attempted_invite_keys,
+                    remaining_invites=remaining_invites,
+                    per_company_cap=3,
+                )
+                invite_work.extend((item, True) for item in same_run_items)
+                invite_result["same_run_mapped_invite_company_count"] = len(same_run_items)
+                same_run_mapped_queued = True
+
+            def _extend_deferred_invite_queues() -> None:
+                """Queue same-run mapped / backfill / drain when the work list is drained.
+
+                Must run even on discovery_failed early-continues; otherwise the last
+                planned companies can fail and skip same-night map→invite forever.
+                """
+
+                nonlocal backfill_queued, drain_queued
+                if work_index < len(invite_work) or remaining_invites <= 0:
+                    return
+                _queue_same_run_mapped_invites()
+                if (
+                    same_run_mapped_queued
+                    and not backfill_queued
+                    and max_invite_backfill_companies > 0
+                ):
+                    backfill_items = _invite_backfill_queue(
+                        daily_plan,
+                        attempted_keys=attempted_invite_keys,
+                        limit=max_invite_backfill_companies,
+                    )
+                    invite_work.extend((item, True) for item in backfill_items)
+                    backfill_queued = True
+                if backfill_queued and not drain_queued:
+                    drain_items = _mapped_backlog_invite_items(
+                        organizations=organizations,
+                        contacts=contacts,
+                        touchpoints=touchpoints,
+                        settings=settings,
+                        attempted_keys=attempted_invite_keys,
+                        remaining_invites=remaining_invites,
+                        per_company_cap=2,
+                    )
+                    invite_work.extend((item, True) for item in drain_items)
+                    invite_result["mapped_backlog_drain_company_count"] = len(drain_items)
+                    drain_queued = True
+
+            # No pre-planned invite companies: still invite people mapped earlier
+            # in this same run before falling through to backfill/drain.
+            if not invite_work:
+                _queue_same_run_mapped_invites()
             while work_index < len(invite_work):
                 item, is_backfill = invite_work[work_index]
                 work_index += 1
@@ -12865,9 +14039,11 @@ def run_track_2_daily_plan_cmd(
                 org_id = str(item.get("organization_id") or "").strip()
                 attempt_key = org_id or company.casefold()
                 if not company or (attempt_key and attempt_key in attempted_invite_keys):
+                    _extend_deferred_invite_queues()
                     continue
                 planned_company_cap = int(item.get("expected_linkedin_invites") or 0)
                 if planned_company_cap <= 0:
+                    _extend_deferred_invite_queues()
                     continue
                 if attempt_key:
                     attempted_invite_keys.add(attempt_key)
@@ -12929,6 +14105,7 @@ def run_track_2_daily_plan_cmd(
                             "error": discovery_error,
                         }
                     )
+                    _extend_deferred_invite_queues()
                     continue
                 if pipeline_artifact is None:
                     invite_result["runs"].append(
@@ -12944,6 +14121,7 @@ def run_track_2_daily_plan_cmd(
                             "error": "No mapped or live-search invite source was produced.",
                         }
                     )
+                    _extend_deferred_invite_queues()
                     continue
                 affinity_summary = (
                     payload.get("affinity_expansion")
@@ -12971,19 +14149,6 @@ def run_track_2_daily_plan_cmd(
                     requested_min_score=invite_min_score,
                     adaptive=adaptive_invite_min_score,
                 )
-                batch = select_invite_candidates_with_affinity_lift(
-                    list(payload.get("results") or []),
-                    verdict=invite_verdict,
-                    min_score=effective_min_score_value,
-                    planned_limit=min(planned_company_cap, per_company_limit),
-                    effective_limit=per_company_limit,
-                    target_role_family=str(
-                        affinity_summary.get("target_role_family") or ""
-                    ),
-                    target_company=company,
-                    company_mode=str(payload.get("company_mode") or "default"),
-                    source_payload=payload,
-                )
                 raw_results = [
                     candidate
                     for candidate in list(payload.get("results") or [])
@@ -13010,23 +14175,49 @@ def run_track_2_daily_plan_cmd(
                     )
                     else 0
                 )
-                selected_batch = attach_search_urls_to_candidates(payload, batch)
-                batch, protected_invite_candidates = (
+                # Rank the full eligible pool first, drop reservation/protected
+                # blocks, then apply the per-company cap. Limiting before the
+                # ledger filter zeroed companies when the top hit was already
+                # sent/connected even though lower-ranked people were sendable.
+                eligible_pool = select_invite_candidates(
+                    raw_results,
+                    verdict=invite_verdict,
+                    min_score=effective_min_score_value,
+                    limit=len(raw_results),
+                    start_at=0,
+                    target_company=company,
+                    company_mode=str(payload.get("company_mode") or "default"),
+                    source_payload=payload,
+                    fallback_min_score=0,
+                )
+                eligible_pool = attach_search_urls_to_candidates(payload, eligible_pool)
+                sendable_pool, protected_invite_candidates = (
                     _partition_initial_invites_for_review(
-                        selected_batch,
+                        eligible_pool,
                         organization=org,
                     )
                 )
-                batch, reservation_blocked = filter_candidates_blocked_by_reservations(
-                    batch,
-                    company=company,
-                    reservations=reservation_ledger,
+                sendable_pool, reservation_blocked = (
+                    filter_candidates_blocked_by_reservations(
+                        sendable_pool,
+                        company=company,
+                        reservations=reservation_ledger,
+                    )
                 )
-                selected_batch, _selected_blocked = filter_candidates_blocked_by_reservations(
-                    selected_batch,
-                    company=company,
-                    reservations=reservation_ledger,
+                batch = select_invite_candidates_with_affinity_lift(
+                    sendable_pool,
+                    verdict=invite_verdict,
+                    min_score=effective_min_score_value,
+                    planned_limit=min(planned_company_cap, per_company_limit),
+                    effective_limit=per_company_limit,
+                    target_role_family=str(
+                        affinity_summary.get("target_role_family") or ""
+                    ),
+                    target_company=company,
+                    company_mode=str(payload.get("company_mode") or "default"),
+                    source_payload=payload,
                 )
+                selected_batch = list(batch)
                 invite_result["reservation_prefiltered_count"] = int(
                     invite_result.get("reservation_prefiltered_count") or 0
                 ) + len(reservation_blocked)
@@ -13157,37 +14348,7 @@ def run_track_2_daily_plan_cmd(
                     invite_result["backfill_company_count"] = int(
                         invite_result.get("backfill_company_count") or 0
                     ) + 1
-                if (
-                    not backfill_queued
-                    and work_index >= len(invite_work)
-                    and remaining_invites > 0
-                    and max_invite_backfill_companies > 0
-                ):
-                    backfill_items = _invite_backfill_queue(
-                        daily_plan,
-                        attempted_keys=attempted_invite_keys,
-                        limit=max_invite_backfill_companies,
-                    )
-                    invite_work.extend((item, True) for item in backfill_items)
-                    backfill_queued = True
-                if (
-                    backfill_queued
-                    and not drain_queued
-                    and work_index >= len(invite_work)
-                    and remaining_invites > 0
-                ):
-                    drain_items = _mapped_backlog_invite_items(
-                        organizations=organizations,
-                        contacts=contacts,
-                        touchpoints=touchpoints,
-                        settings=settings,
-                        attempted_keys=attempted_invite_keys,
-                        remaining_invites=remaining_invites,
-                        per_company_cap=2,
-                    )
-                    invite_work.extend((item, True) for item in drain_items)
-                    invite_result["mapped_backlog_drain_company_count"] = len(drain_items)
-                    drain_queued = True
+                _extend_deferred_invite_queues()
             invite_result["affinity_headroom_allocated"] = (
                 initial_affinity_headroom - affinity_headroom
             )
@@ -13669,10 +14830,11 @@ def run_supervised_e2e_pipeline(
     resume_generator_budget_mode: bool = True,
     execute: bool = False,
     send_linkedin: bool = False,
+    send_linkedin_followups: bool = True,
     refresh_linkedin: bool = False,
     live_linkedin: bool = False,
     deep_messages: bool = True,
-    linkedin_message_limit: int = 75,
+    linkedin_message_limit: int = 300,
     resume_jobs: bool = True,
     resume_account_universe: bool = True,
     resume_jobs_limit: int | None = None,
@@ -13683,13 +14845,15 @@ def run_supervised_e2e_pipeline(
     strategic_accounts: bool = True,
     story_fit_targets: bool = True,
     story_fit_source_path: Path = DEFAULT_STORY_FIT_TARGETS_PATH,
-    relationship_leads: bool = True,
+    # Off by default: execute import requires a staged+reviewed CSV and otherwise
+    # aborts the whole supervised E2E before Track 2 can start.
+    relationship_leads: bool = False,
     relationship_leads_source_path: Path = DEFAULT_RELATIONSHIP_LEADS_PATH,
     campaign_limit: int = 30,
     max_total_actions: int = 24,
     max_companies: int = 18,
     max_linkedin_invites: int = 12,
-    max_linkedin_followups: int = 8,
+    max_linkedin_followups: int = -1,
     max_company_mapping: int = 5,
     max_email_research: int = 5,
     max_context_enrichment: int = 8,
@@ -13939,6 +15103,7 @@ def run_supervised_e2e_pipeline(
             max_email_drafts=max_email_drafts,
             execute=execute,
             send_linkedin=send_linkedin,
+            send_linkedin_followups=send_linkedin_followups,
             refresh_linkedin=refresh_linkedin,
             live_linkedin=live_linkedin,
             deep_messages=deep_messages,
@@ -14051,6 +15216,16 @@ def run_supervised_e2e_cmd(
         bool,
         typer.Option(help="Allow actual LinkedIn sends. Requires --execute."),
     ] = False,
+    send_linkedin_followups: Annotated[
+        bool,
+        typer.Option(
+            "--send-linkedin-followups/--no-send-linkedin-followups",
+            help=(
+                "When --send-linkedin is set, also send auto-sendable follow-ups. "
+                "Use --no-send-linkedin-followups to draft/refresh only while still sending invites."
+            ),
+        ),
+    ] = True,
     refresh_linkedin: Annotated[
         bool,
         typer.Option(help="Read live LinkedIn messages during the Track 2 phase"),
@@ -14062,7 +15237,10 @@ def run_supervised_e2e_cmd(
     max_total_actions: Annotated[int, typer.Option(help="Maximum total Track 2 actions today")] = 24,
     max_companies: Annotated[int, typer.Option(help="Maximum distinct companies to touch today")] = 18,
     max_linkedin_invites: Annotated[int, typer.Option(help="Maximum new LinkedIn invites today")] = 12,
-    max_linkedin_followups: Annotated[int, typer.Option(help="Maximum LinkedIn follow-up/reply messages today")] = 8,
+    max_linkedin_followups: Annotated[
+        int,
+        typer.Option(help="Maximum LinkedIn follow-up/reply messages today (-1 = uncapped, 0 = none)"),
+    ] = -1,
     max_company_mapping: Annotated[int, typer.Option(help="Maximum companies to map contacts for today")] = 5,
     max_email_research: Annotated[int, typer.Option(help="Maximum email/contact-info research tasks today")] = 5,
     max_context_enrichment: Annotated[int, typer.Option(help="Maximum company enrichment tasks today")] = 8,
@@ -14083,6 +15261,16 @@ def run_supervised_e2e_cmd(
         str,
         typer.Option(help="External email finder provider: auto, prospeo, or hunter"),
     ] = "auto",
+    relationship_leads: Annotated[
+        bool,
+        typer.Option(
+            "--relationship-leads/--no-relationship-leads",
+            help=(
+                "Import relationship-lead seeds during supervised E2E. Keep off unless the "
+                "staged CSV has already been reviewed; otherwise execute dies before Track 2."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run the supervised daily engine sequence, ending with bounded Track 2 actions."""
     if send_linkedin and not execute:
@@ -14104,6 +15292,7 @@ def run_supervised_e2e_cmd(
         resume_generator_budget_mode=resume_generator_budget_mode,
         execute=execute,
         send_linkedin=send_linkedin,
+        send_linkedin_followups=send_linkedin_followups,
         refresh_linkedin=refresh_linkedin,
         live_linkedin=live_linkedin,
         max_total_actions=max_total_actions,
@@ -14117,6 +15306,7 @@ def run_supervised_e2e_cmd(
         resume_season_focus=resume_season_focus,
         external_email_finder=external_email_finder,
         email_finder_provider=email_finder_provider,
+        relationship_leads=relationship_leads,
     )
     typer.echo(f"{'Ran' if execute else 'Planned'} supervised E2E.")
     typer.echo(f"Workspace counts: {payload['before_counts']} -> {payload['after_counts']}")

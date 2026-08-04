@@ -867,6 +867,10 @@ class LinkedInScraper:
         stale_scrolls = 0
         self._scroll_message_list(page, reset=True)
         page.wait_for_timeout(700)
+        # Virtualized inbox lists often report at_bottom before more rows load.
+        # Require a longer stale streak before giving up, and ignore a single
+        # at_bottom reading unless we have also gone stale.
+        stale_limit = 8 if max_scrolls >= 80 else 3
 
         for _ in range(max_scrolls + 1):
             before_count = len(seen)
@@ -877,12 +881,12 @@ class LinkedInScraper:
                 break
 
             scroll_state = self._scroll_message_list(page)
-            page.wait_for_timeout(900)
+            page.wait_for_timeout(1100)
             if len(seen) == before_count:
                 stale_scrolls += 1
             else:
                 stale_scrolls = 0
-            if stale_scrolls >= 3 or bool(scroll_state.get("at_bottom")):
+            if stale_scrolls >= stale_limit:
                 for thread in self._extract_message_threads(page, limit=limit):
                     if thread.thread_id and thread.thread_id not in seen:
                         seen[thread.thread_id] = thread
@@ -1620,8 +1624,9 @@ class LinkedInScraper:
         page_count_before = len(context.pages)
         last_result: dict | None = None
         # chrome-error:// landings are usually transient CDP navigation flakes,
-        # distinct from authwall / logged-out failures. Retry once.
-        for attempt in range(2):
+        # distinct from authwall / logged-out failures. Retry a few times before
+        # failing the whole invite worker (which previously froze reserved slots).
+        for attempt in range(4):
             page = context.new_page()
             page.set_default_timeout(15000)
             try:
@@ -1646,7 +1651,8 @@ class LinkedInScraper:
                     return result
                 last_result = result
                 current_url = str(result.get("current_url") or "").lower()
-                if "chrome-error://" in current_url and attempt == 0 and not authwall:
+                if "chrome-error://" in current_url and attempt < 3 and not authwall:
+                    time.sleep(0.8 * (attempt + 1))
                     continue
                 return result
             finally:
@@ -1661,7 +1667,7 @@ class LinkedInScraper:
             "cookie_names": [],
             "body_preview": "",
             "context_pages_before": page_count_before,
-            "preflight_attempt": 2,
+            "preflight_attempt": 4,
         }
 
     def _safe_goto(self, page: Page, url: str, timeout_ms: int = 30000) -> bool:

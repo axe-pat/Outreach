@@ -39,15 +39,11 @@ run_log="logs/daily-supervised-e2e-${timestamp}.log"
     --refresh-linkedin \
     --send-linkedin \
     --run-resume-generator-discovery \
-    --run-resume-generator-generation \
-    --resume-generator-top 10 \
-    --resume-generator-min-score 8.0 \
-    --resume-generator-budget-mode \
     --resume-season-focus fall_ft_transition \
     --max-total-actions 24 \
     --max-companies 18 \
     --max-linkedin-invites 12 \
-    --max-linkedin-followups 8 \
+    --max-linkedin-followups -1 \
     --max-company-mapping 5 \
     --max-email-research 0 \
     --max-context-enrichment 8 \

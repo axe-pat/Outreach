@@ -35,7 +35,7 @@ class SearchStrategy(BaseModel):
     invite_candidate_timeout_seconds: int = 45
     # Parent-process watchdog. This must exceed the in-worker soft timer enough
     # to allow Playwright startup/cleanup, while still bounding a C/greenlet hang.
-    invite_worker_timeout_seconds: int = 60
+    invite_worker_timeout_seconds: int = 90
     broad_fallback_min_pool_size: int = 18
     max_pages_high_value: int = 2
     max_pages_default: int = 1

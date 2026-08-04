@@ -12,6 +12,20 @@ from outreach.services.linkedin import LinkedInScraper
 WORKER_SCHEMA_VERSION = 1
 
 
+def _preflight_failure_result(candidate: dict, detail: str) -> dict[str, object]:
+    """Retryable failure before LinkedIn could have clicked Send."""
+
+    return {
+        "name": str(candidate.get("name") or "Unknown"),
+        "linkedin_url": str(candidate.get("linkedin_url") or ""),
+        "status": "preflight_failed",
+        "detail": detail,
+        "note": str(candidate.get("note") or ""),
+        "screenshot_path": None,
+        "reservation_reused": False,
+    }
+
+
 def run_worker(input_path: Path, output_path: Path) -> dict[str, object]:
     """Execute exactly one live candidate inside a killable process boundary."""
 
@@ -25,10 +39,36 @@ def run_worker(input_path: Path, output_path: Path) -> dict[str, object]:
         raise ValueError("Invite worker only accepts execute=true live attempts")
 
     settings = OutreachSettings()
-    results = LinkedInScraper(settings).send_connection_requests(
-        [candidate],
-        execute=True,
-    )
+    try:
+        results = LinkedInScraper(settings).send_connection_requests(
+            [candidate],
+            execute=True,
+        )
+    except Exception as exc:
+        message = str(exc)
+        # chrome-error / CDP / auth preflight never reaches Send — do not crash
+        # the worker into send_unknown_reserved (which freezes the slot).
+        if any(
+            marker in message.casefold()
+            for marker in (
+                "preflight failed",
+                "chrome-error://",
+                "could not attach to chrome",
+                "nothing is listening",
+                "authwall",
+                "login page",
+            )
+        ):
+            output = {
+                "schema_version": WORKER_SCHEMA_VERSION,
+                "result": _preflight_failure_result(
+                    candidate,
+                    f"Invite preflight failed before send (retryable): {exc}",
+                ),
+            }
+            atomic_write_json(output_path, output)
+            return output
+        raise
     if len(results) != 1:
         raise RuntimeError(f"Invite worker expected one result, got {len(results)}")
     output = {

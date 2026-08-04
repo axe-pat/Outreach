@@ -7,7 +7,12 @@ __pycache__/
 playwright/.auth/
 playwright/chrome-data/
 artifacts/
+logs/
 *.log
+*.bak
+workspace/*.bak*
+workspace/contacts.csv.bak*
+workspace/linkedin_profile_viewers_capture_state.json
 .chrome-linkedin-debug/
 Profile/
 Invitations.csv

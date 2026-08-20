@@ -12,7 +12,10 @@ from outreach.style_profile import (
     sync_comms_learning_into_style_profile,
 )
 from outreach.tracking import ContactRecord, OrganizationRecord
-from outreach.cli import build_linkedin_followup_drafts, draft_track_2_email
+from outreach.cli import (
+    _build_legacy_linkedin_followup_drafts as build_linkedin_followup_drafts,
+    draft_track_2_email,
+)
 
 
 def curated_profile() -> CommunicationStyleProfile:

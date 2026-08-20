@@ -8,11 +8,68 @@ import outreach.services.linkedin as linkedin_module
 from outreach.services.linkedin import (
     InviteCandidateTimeoutError,
     InviteSendResult,
+    LinkedInMessageThread,
     LinkedInScraper,
     normalize_typeahead_text,
     primary_typeahead_label,
     score_typeahead_option,
 )
+
+
+def test_chirag_jain_reviewed_send_never_uses_first_name_fallback(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+
+    class _MessagePage:
+        def wait_for_timeout(self, _milliseconds: int) -> None:
+            return None
+
+    other_chirag = LinkedInMessageThread(
+        thread_id="synthetic:chirag-gupta",
+        name="Chirag Gupta",
+        thread_url="",
+        latest_message="Thanks for connecting.",
+    )
+    monkeypatch.setattr(scraper, "_find_message_thread_by_name_search", lambda _page, expected_name: None)
+    monkeypatch.setattr(scraper, "_scroll_message_list", lambda _page, reset=False: {"at_bottom": True})
+    monkeypatch.setattr(scraper, "_extract_message_threads", lambda _page, limit=100: [other_chirag])
+
+    matched = scraper._find_message_thread_for_draft(
+        _MessagePage(),
+        draft={"name": "Chirag Jain", "_reviewed_require_exact_name": True},
+        max_scrolls=1,
+    )
+
+    assert matched is None
+
+
+def test_andrew_pekin_reviewed_send_uses_exact_inbox_search_before_scrolling(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    andrew = LinkedInMessageThread(
+        thread_id="synthetic:andrew-pekin",
+        name="Andrew Pekin",
+        thread_url="",
+        latest_message="Thanks for connecting.",
+    )
+    monkeypatch.setattr(
+        scraper,
+        "_find_message_thread_by_name_search",
+        lambda _page, expected_name: andrew if expected_name == "andrew pekin" else None,
+    )
+    monkeypatch.setattr(
+        scraper,
+        "_scroll_message_list",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Full inbox scroll should not run after an exact search match.")
+        ),
+    )
+
+    matched = scraper._find_message_thread_for_draft(
+        object(),
+        draft={"name": "Andrew Pekin", "_reviewed_require_exact_name": True},
+        max_scrolls=60,
+    )
+
+    assert matched is andrew
 
 
 def test_normalize_typeahead_text_collapses_whitespace_and_case() -> None:
@@ -100,6 +157,15 @@ class _StubLocator:
     def filter(self, **_kwargs):
         return self
 
+    def get_by_role(self, *_args, **_kwargs):
+        return _StubLocator(0)
+
+    def get_by_text(self, *_args, **_kwargs):
+        return _StubLocator(0)
+
+    def wait_for(self, **_kwargs):
+        return None
+
     def bounding_box(self):
         return {"x": 100, "y": 100, "width": 120, "height": 40}
 
@@ -136,8 +202,11 @@ class _ElementLocator:
             return self.href
         return None
 
-    def inner_text(self, timeout: int = 0):
-        return self.text
+    def wait_for(self, **_kwargs):
+        return None
+
+    def get_by_text(self, *_args, **_kwargs):
+        return _LocatorList([])
 
     def text_content(self, timeout: int = 0):
         return self.text
@@ -155,6 +224,19 @@ class _LocatorList:
 
     def filter(self, **_kwargs):
         return self
+
+    def get_by_role(self, *_args, **_kwargs):
+        return _LocatorList([])
+
+    def get_by_text(self, *_args, **_kwargs):
+        return _LocatorList([])
+
+    @property
+    def first(self):
+        return self.items[0] if self.items else _StubLocator(0)
+
+    def wait_for(self, **_kwargs):
+        return None
 
 
 class _StubPage:
@@ -460,6 +542,79 @@ def test_find_connect_button_prefers_named_preload_invite_link() -> None:
             return _LocatorList([])
 
     assert scraper._find_connect_button(_InvitePage(), candidate_name="Abhilasha Juneja") is exact
+
+
+def test_find_connect_button_uses_overflow_menu_not_sidebar_connect() -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    scraper._human_pause = lambda _page: None
+    overflow_connect = _ElementLocator(
+        aria_label="Invite Zoe Zhou to connect",
+        text="Connect",
+        x=180,
+        y=340,
+    )
+    sidebar_connect = _ElementLocator(
+        aria_label="Invite Linda Liu to connect",
+        text="Connect",
+        x=1180,
+        y=260,
+    )
+    clicked = {"more": False}
+
+    class _MoreButton(_ElementLocator):
+        def click(self, timeout: int = 0, force: bool = False):
+            clicked["more"] = True
+
+        def scroll_into_view_if_needed(self, timeout: int = 0):
+            return None
+
+        def evaluate(self, *_args, **_kwargs):
+            clicked["more"] = True
+
+    more_btn = _MoreButton(aria_label="More actions", text="More actions", x=220, y=250)
+
+    class _MenuLocator(_LocatorList):
+        def get_by_role(self, *_args, **_kwargs):
+            return _LocatorList([overflow_connect] if clicked["more"] else [])
+
+    class _OverflowPage(_StubPage):
+        def evaluate(self, script: str, *_args, **_kwargs):
+            if "innerWidth" in script:
+                return 1600
+            return False
+
+        def locator(self, selector, *_args, **_kwargs):
+            if selector == 'a[href*="/preload/custom-invite/"]':
+                return _LocatorList([])
+            if "More" in selector:
+                return _LocatorList([more_btn])
+            if selector == '[role="menu"]':
+                return _MenuLocator([])
+            if "artdeco-dropdown__content" in selector or "artdeco-dropdown__item" in selector:
+                return _LocatorList([overflow_connect] if clicked["more"] else [])
+            if '[role="toolbar"]' in selector:
+                return _LocatorList([])
+            return _LocatorList([])
+
+        def get_by_role(self, role: str, name=None):
+            name_text = str(name or "")
+            if role == "button" and "More" in name_text:
+                return _LocatorList([more_btn])
+            if role == "button" and "Follow" in name_text:
+                return _LocatorList([_ElementLocator(text="Follow", x=420, y=250)])
+            if role == "button" and "Connect" in name_text:
+                return _LocatorList([sidebar_connect])
+            if role == "link" and "Connect" in name_text:
+                return _LocatorList([sidebar_connect])
+            if role == "menuitem":
+                return _LocatorList([overflow_connect] if clicked["more"] else [])
+            if role == "toolbar":
+                return _StubLocator(0)
+            return _LocatorList([])
+
+    result = scraper._find_connect_button(_OverflowPage(), candidate_name="Zoe Zhou")
+    assert clicked["more"] is True
+    assert result is overflow_connect
 
 
 def test_activate_connect_clicks_preload_invite_link_before_navigation() -> None:

@@ -4,7 +4,10 @@ import json
 from dataclasses import dataclass
 
 from outreach.ai_messaging import AIMessagingService, AIMessageRequest
-from outreach.cli import build_linkedin_followup_drafts, draft_track_2_email
+from outreach.cli import (
+    _build_legacy_linkedin_followup_drafts as build_linkedin_followup_drafts,
+    draft_track_2_email,
+)
 from outreach.services.notes import NoteGenerator
 from outreach.style_profile import CommunicationStyleProfile
 from outreach.tracking import ContactRecord, OrganizationRecord

@@ -18,7 +18,8 @@ from outreach.cli import (
     apply_raw_candidate,
     build_linkedin_company_queue_items,
     build_linkedin_contact_info_email_queue,
-    build_linkedin_followup_drafts,
+    _build_legacy_linkedin_followup_drafts as build_linkedin_followup_drafts,
+    build_linkedin_followup_drafts as disabled_linkedin_followup_drafts,
     build_daily_execution_manifest,
     build_external_email_research_queue,
     build_track_2_email_drafts,
@@ -43,6 +44,7 @@ from outreach.cli import (
     _select_profile_reconcile_candidates,
     _unresolved_reservation_org_ids,
     draft_track_2_email,
+    execute_linkedin_followup_send,
     execute_invite_batch,
     extract_linkedin_conversation_action_items,
     extract_team_size_from_notes,
@@ -65,6 +67,7 @@ from outreach.cli import (
     persist_linkedin_followup_send_result,
     recommend_auto_send_limit,
     resolve_pass_definitions,
+    run_reply_engine_review_stage,
     run_supervised_e2e_pipeline,
     score_opportunity_relevance,
     select_invite_candidates,
@@ -5586,6 +5589,72 @@ def test_build_linkedin_followup_drafts_handles_accepts_and_replies() -> None:
     assert drafts[6]["action_items"][0]["email"] == "Alessandra@beyondmedplans.com"
 
 
+def test_build_linkedin_followup_drafts_skips_missing_conversation_context() -> None:
+    organizations = [
+        OrganizationRecord(
+            organization_id="org-acme",
+            name="Acme",
+            organization_type=OrganizationType.COMPANY,
+        )
+    ]
+    contacts = [
+        ContactRecord(
+            contact_id="ct-blank",
+            organization_id="org-acme",
+            full_name="Blank Context",
+            title="Engineer",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-ok",
+            organization_id="org-acme",
+            full_name="Has Invite",
+            title="Engineer",
+            contact_type="Engineering",
+        ),
+        ContactRecord(
+            contact_id="ct-reply-blank",
+            organization_id="org-acme",
+            full_name="Blank Reply",
+            title="Engineer",
+            contact_type="Engineering",
+        ),
+    ]
+    skipped: list[dict[str, object]] = []
+    drafts = build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-blank",
+                "organization_id": "org-acme",
+                "name": "Blank Context",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+            },
+            {
+                "contact_id": "ct-ok",
+                "organization_id": "org-acme",
+                "name": "Has Invite",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Hi — interested in Acme product work. Would love to connect.",
+            },
+            {
+                "contact_id": "ct-reply-blank",
+                "organization_id": "org-acme",
+                "name": "Blank Reply",
+                "normalized_status": "replied",
+            },
+        ],
+        organizations=organizations,
+        contacts=contacts,
+        skipped_missing_context=skipped,
+    )
+    assert [item["contact_id"] for item in drafts] == ["ct-ok"]
+    assert drafts[0]["message_window"]
+    assert drafts[0]["message_window"][0]["message"].startswith("Hi — interested")
+    assert {item["contact_id"] for item in skipped} == {"ct-blank", "ct-reply-blank"}
+
+
 def test_accepted_followup_uses_established_product_framing_not_transition() -> None:
     organizations = [
         OrganizationRecord(
@@ -5612,6 +5681,7 @@ def test_accepted_followup_uses_established_product_framing_not_transition() -> 
                 "name": "Riley Generic",
                 "normalized_status": "connected",
                 "needs_follow_up": True,
+                "original_invite_note": "Hi Riley, interested in Acme product work. Would love to connect.",
             }
         ],
         organizations=organizations,
@@ -5662,6 +5732,7 @@ def test_accepted_followup_fall_intern_campaign_names_the_internship() -> None:
                 "normalized_status": "connected",
                 "needs_follow_up": True,
                 "campaign": "fall_intern",
+                "original_invite_note": "Hi Tyler, interested in Voker's AI product work. Would love to connect.",
             },
             {
                 "contact_id": "ct-regular",
@@ -5669,6 +5740,7 @@ def test_accepted_followup_fall_intern_campaign_names_the_internship() -> None:
                 "name": "Casey Regular",
                 "normalized_status": "connected",
                 "needs_follow_up": True,
+                "original_invite_note": "Hi Casey, interested in Voker's AI product work. Would love to connect.",
             },
         ],
         organizations=organizations,
@@ -5707,6 +5779,7 @@ def test_accepted_followup_operator_audience_uses_contribution_ask() -> None:
                 "name": "Sam Ops",
                 "normalized_status": "connected",
                 "needs_follow_up": True,
+                "original_invite_note": "Hi Sam, interested in Acme product operations. Would love to connect.",
             }
         ],
         organizations=organizations,
@@ -6148,6 +6221,158 @@ def test_ordered_window_beats_same_day_timestamp_collapse() -> None:
     ) is True
 
 
+def test_harsha_singla_legacy_accepted_silent_lane_is_fenced(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    organization = OrganizationRecord(
+        organization_id="org-hirevue",
+        name="HireVue",
+    )
+    harsha = ContactRecord(
+        contact_id="ct-harsha",
+        organization_id="org-hirevue",
+        full_name="Harsha Singla",
+        title="Senior SDET",
+    )
+    assert build_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-harsha",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Would love to connect.",
+            }
+        ],
+        organizations=[organization],
+        contacts=[harsha],
+        include_accepted_silent=False,
+    ) == []
+
+    allowed, held = _apply_linkedin_cadence_guards(
+        workbook=workbook,
+        drafts=[
+            {
+                "contact_id": "ct-harsha",
+                "organization_id": "org-hirevue",
+                "name": "Harsha Singla",
+                "source_status": "connected",
+                "draft_kind": "accepted_follow_up",
+                "send_recommendation": "safe_to_review",
+                "draft_message": "Legacy accepted-silent draft.",
+            }
+        ],
+    )
+
+    assert allowed == []
+    assert held[0]["hold_category"] == "legacy_engine_fenced"
+    assert held[0]["send_recommendation"] == "legacy_engine_fenced"
+
+
+def test_harsha_singla_legacy_cli_cannot_write_copy_in_any_lane() -> None:
+    organization = OrganizationRecord(
+        organization_id="org-hirevue",
+        name="HireVue",
+    )
+    harsha = ContactRecord(
+        contact_id="ct-harsha",
+        organization_id="org-hirevue",
+        full_name="Harsha Singla",
+        title="Senior SDET",
+    )
+
+    assert disabled_linkedin_followup_drafts(
+        reconcile_results=[
+            {
+                "contact_id": "ct-harsha",
+                "normalized_status": "connected",
+                "needs_follow_up": True,
+                "original_invite_note": "Would love to connect.",
+            },
+            {
+                "contact_id": "ct-harsha",
+                "normalized_status": "replied",
+                "latest_message": "Happy to help.",
+                "message_window": [
+                    {"sender": "Harsha", "message": "Happy to help."}
+                ],
+            },
+        ],
+        organizations=[organization],
+        contacts=[harsha],
+    ) == []
+
+
+def test_harsha_singla_legacy_send_executor_fences_every_lane(
+    tmp_path: Path,
+) -> None:
+    artifact, progress, status_counts, touchpoints_added = (
+        execute_linkedin_followup_send(
+            settings=SimpleNamespace(artifacts_dir=tmp_path),
+            draft_artifact=tmp_path / "legacy-drafts.json",
+            drafts=[
+                {
+                    "name": "Harsha Singla",
+                    "source_status": "connected",
+                    "draft_message": "Legacy accepted-silent copy.",
+                },
+                {
+                    "name": "Suresh Mergu",
+                    "source_status": "replied",
+                    "draft_message": "Legacy reply copy.",
+                },
+            ],
+            execute=True,
+            limit=2,
+            start_at=0,
+            include_optional=True,
+        )
+    )
+
+    assert artifact.exists()
+    assert progress.exists()
+    assert status_counts == {"legacy_engine_fenced": 2}
+    assert touchpoints_added == 0
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["count"] == 0
+    assert payload["results"] == []
+
+
+def test_tim_drahn_recurring_followup_stage_writes_review_and_never_sends(
+    tmp_path: Path, monkeypatch
+) -> None:
+    reconcile = tmp_path / "fresh-reconcile.json"
+    reconcile.write_text("{}", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["kwargs"] = kwargs
+        output = Path(command[command.index("--output") + 1])
+        output.write_text("# Review only\n", encoding="utf-8")
+        return SimpleNamespace(
+            returncode=0,
+            stderr="",
+            stdout=(
+                '{"summary": {"with_message": 313}}\n'
+                "send_actions=0\njson_review_artifacts=0\n"
+            ),
+        )
+
+    monkeypatch.setattr("outreach.cli.subprocess.run", fake_run)
+    result = run_reply_engine_review_stage(
+        workspace=tmp_path / "workspace",
+        reconcile_artifact=reconcile,
+        live=True,
+    )
+
+    assert result["status"] == "written"
+    assert result["send_actions"] == 0
+    assert result["summary"] == {"with_message": 313}
+    assert "--live" in observed["command"]
+    assert "--reconcile-artifact" in observed["command"]
+
+
 def test_unanswered_inbound_reply_bypasses_campaign_cadence_hold(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path / "workspace")
     workbook.upsert_organization(
@@ -6530,6 +6755,7 @@ def test_story_fit_metadata_flows_into_senior_followup() -> None:
                 "name": "Avery Senior",
                 "normalized_status": "connected",
                 "needs_follow_up": True,
+                "original_invite_note": "Hi Avery, interested in Anam AI's recruiting workflows. Would love to connect.",
             }
         ],
         organizations=organizations,
@@ -7891,6 +8117,73 @@ def test_match_contact_for_message_thread_allows_abbreviated_surname():
     assert matched is not None and matched.contact_id == "ct-shubhankit"
 
 
+def test_duplicate_name_without_profile_url_holds():
+    contacts = [
+        ContactRecord(
+            contact_id="ct-org-idler-chirag",
+            organization_id="org-idler",
+            full_name="Chirag Jain",
+            linkedin_url="https://www.linkedin.com/in/chiragjain22/",
+        ),
+        ContactRecord(
+            contact_id="ct-org-d-matrix-chirag",
+            organization_id="org-d-matrix",
+            full_name="Chirag Jain",
+            linkedin_url="https://www.linkedin.com/in/chirag-jain-737a83145/",
+        ),
+    ]
+
+    results, _ = build_linkedin_message_reconcile_results(
+        threads=[
+            {
+                "thread_id": "chirag-live-thread",
+                "name": "Chirag Jain",
+                "latest_message": "Happy to help",
+                "last_sender": "Chirag Jain",
+                "unread": True,
+            }
+        ],
+        contacts=contacts,
+        touchpoints=[],
+        state={},
+    )
+
+    assert results[0]["action"] == "ambiguous_contact_match"
+    assert results[0]["decision_action"] == "hold"
+    assert results[0]["candidate_contact_ids"] == [
+        "ct-org-d-matrix-chirag",
+        "ct-org-idler-chirag",
+    ]
+
+
+def test_profile_url_binds_to_the_correct_duplicate_contact():
+    contacts = [
+        ContactRecord(
+            contact_id="ct-org-idler-chirag",
+            organization_id="org-idler",
+            full_name="Chirag Jain",
+            linkedin_url="https://www.linkedin.com/in/chiragjain22/",
+        ),
+        ContactRecord(
+            contact_id="ct-org-d-matrix-chirag",
+            organization_id="org-d-matrix",
+            full_name="Chirag Jain",
+            linkedin_url="https://www.linkedin.com/in/chirag-jain-737a83145/",
+        ),
+    ]
+
+    matched = match_contact_for_message_thread(
+        {
+            "name": "Chirag Jain",
+            "linkedin_url": "https://www.linkedin.com/in/chirag-jain-737a83145/?trk=messages",
+        },
+        contacts,
+    )
+
+    assert matched is not None
+    assert matched.contact_id == "ct-org-d-matrix-chirag"
+
+
 @pytest.mark.parametrize(
     ("latest_message", "message_window", "expected"),
     [
@@ -8412,6 +8705,7 @@ def test_fall_campaign_tag_reaches_the_draft() -> None:
                 "organization_id": "org-voker",
                 "normalized_status": "connected",
                 "needs_follow_up": True,
+                "original_invite_note": "Hi, interested in Voker's product work. Would love to connect.",
             }
         ],
         organizations=organizations,

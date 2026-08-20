@@ -10,7 +10,7 @@ from outreach.communication_lab import build_rewrite_guidance
 from outreach.cli import (
     build_communication_review_csv_rows,
     build_company_note_context,
-    build_linkedin_followup_drafts,
+    _build_legacy_linkedin_followup_drafts as build_linkedin_followup_drafts,
     build_linkedin_message_reconcile_results,
     build_linkedin_reconcile_queue_items,
     build_track_2_email_drafts,

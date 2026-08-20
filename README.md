@@ -748,12 +748,14 @@ scripts/run_manual_supervised_e2e_debug.sh
 `scripts/run_daily_supervised_e2e.sh` is retained only as a compatibility shim
 that prints a warning and delegates to the debug runner.
 
-The installed daily runner is the macOS LaunchAgent
+The intended daily runner is the macOS LaunchAgent
 `com.akshat.resumegenerator.nightly`, which calls ResumeGenerator's
-`discovery/scripts/run_nightly_pipeline.py` at `1am`. That is the blessed daily
-path because it already runs the live ResumeGenerator discovery/generation lane,
-Outreach relationship discovery, bounded app-queue invite sends, account
-maintenance, campaign planning, and the live bounded Track 2 daily plan.
+`discovery/scripts/run_nightly_pipeline.py` at `1am`. Verify that the plist is
+installed and the service is loaded on the current machine before relying on
+that schedule. This is the blessed daily path because it runs the live
+ResumeGenerator discovery/generation lane, Outreach relationship discovery,
+bounded app-queue invite sends, account maintenance, campaign planning, and the
+live bounded Track 2 daily plan.
 
 Current cycle config is `offcycle_light`:
 

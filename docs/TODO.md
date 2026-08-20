@@ -327,6 +327,88 @@ paths visible instead of accidentally filtering them out.
   contacts including the earlier USC/MBA seeds. Keep this low-frequency and
   high-signal; do not turn it into a daily scraper.
 
+## Akshat's Manual Queue — follow-up backlog (2026-08-19)
+
+Personal actions from the review pack. None of these should be automated; each needs
+his own judgement or a relationship the engine cannot see.
+
+- [ ] **Suresh Mergu (Optum)** — draft the resume and reply. He volunteered three things
+  (mostly FTE not intern, doesn't think Akshat wants that route, no sponsorship for new
+  hires) and asked for the resume directly.
+- [ ] **Fivetran messaging — write personally, do not send the generated drafts.** Akshat
+  joined Fivetran, then moved to Hevo a month later for pay. That story is authentic and
+  specific and belongs in the copy. Affects Raajan Ashish Pal (Engineering Manager,
+  personally known), Jagdish Garg, Deepika V, and four Talent Acquisition contacts.
+- [ ] **Raajan Ashish Pal (Fivetran)** — personally known. No cold message. Mark the
+  account so the engine never generates for him.
+- [ ] **FlairX contacts — never message.** Aayush Narang, Hritika Dharaskar and any other
+  FlairX rows. He interned there over the summer and is done. Suppress permanently.
+- [ ] **Review the 65-contact warm/never-invited group** once it is split out of the
+  follow-up pack. These are first messages, not follow-ups, and include nine recruiters
+  and the whole PeopleGrove cluster.
+- [ ] **Tavus — bespoke message, not a lane.** FlairX runs avatar generation on Tavus and
+  Akshat ran the integration. That is the strongest card in the entire deck and a generic
+  INTEL or NAME ask wastes it. See `docs/invite_note_spec.md`.
+
+## Invite Note Quality — NOT IMPLEMENTED
+
+Spec: `docs/invite_note_spec.md`. The rewritten pack that spec was derived from is
+`artifacts/20260818-invite-notes-rewritten.md` (hand-approved, 19 notes, 11 companies).
+None of this is in code yet; the 2026-08-18 send used hand-written notes.
+
+- [ ] **Fix the `interview` trigger in `services/notes.py`.** The surface tuple
+  `(("recruiting", "hiring workflow", "interview"), "recruiting workflows")` matches
+  every avatar and conversational-video company, because interviewing is a use case
+  of their technology rather than their business. Tavus and Anam were told they work
+  on recruiting workflows. Same failure class as the `automation` → `robotics` bug
+  that reached 57 people. The surface must describe what the company does, not the
+  use case connecting Akshat to it. Audit the remaining trigger tuples for the same
+  over-broad matching.
+- [ ] **Fix the reversed biography.** "Worked on AI interview products at FlairX,
+  then an MBA" is wrong: the MBA is in progress and the FlairX work was summer 2026,
+  during it.
+- [ ] **Fix the QC fallback inversion.** `AI note failed QC; kept the sendable
+  template note` fired on the highest-value contacts in the run (Ali Ansari, CEO
+  Micro1; Hassaan Raza, CEO Tavus; Eloi du Bois, Tavus), with nearly every note at
+  275–297 of 300 characters. The composer writes at the ceiling, QC rejects, and the
+  best targets systematically receive the weakest copy. Target 245–299. Specific
+  notes are shorter than generic ones, so this and the quality problem are one problem.
+- [ ] **Implement the swap test as a batch check.** Strip greeting and close, then
+  compare each note against the rest of the batch. High overlap means nothing
+  company-specific was said. The pre-rewrite pack sent one verbatim paragraph to
+  Tavus, Micro1, ConverzAI and Anam with only the name changed; no rewritten note
+  survives a company-name swap.
+- [ ] **Teach the composer the four consequences** in `docs/invite_note_spec.md`:
+  evidence of contact over declaration of interest; specificity costs no extra
+  characters; close the inference loop (every fact followed by what it means for
+  them); compliments must cost the sender something. Note the carve-out — first-person
+  testimony ("I used it and loved it") is not third-person grading ("that's the real
+  insight") and must stay permitted.
+- [ ] **Add `personal_connection` for the eleven companies where one exists only** —
+  Tavus, Anam AI, Apriora, Ribbon, ConverzAI, Airbyte, Jobright.ai and the rest listed
+  in the spec. Not a required field for every company. Where absent, the composer
+  falls back to reading the product.
+- [ ] **Port the em-dash check to the invite path.** The invite path shares no code
+  with `reply_engine`; the only symbol imported outside it anywhere in the codebase is
+  `process_unmatched_threads`, so none of the follow-up critic checks apply to invites
+  even though the invite is the first impression. Decide separately whether meta-text,
+  explicit-company-naming and batch-repetition checks should also port.
+
+## Prioritisation Signals — NOT STARTED
+
+- [ ] **Company heat signal.** Open requisition volume and new-grad hiring intensity
+  per company, feeding prioritisation in both the discovery queue and the outreach
+  queue. Raised while reviewing Jobright.ai, which is hiring heavily across new-grad
+  roles — a fact that should raise its rank in both systems and currently raises it
+  in neither.
+- [ ] **Flagship-programme watchlist (deferred, revisit after the discovery re-run).**
+  No Meta RPM or Google APM listing appears anywhere in the 1,218 rows of
+  `jobs.xlsx`, though 19 other APM/rotational/new-grad titles do. Those two post on
+  their own careers pages and run short windows. If the expanded 60-query pack still
+  misses them, a small watchlist of roughly five programmes is needed. Do not build a
+  general deadline map: deadlines arrive attached to postings, and discovery extracts
+  them.
+
 ## Role-Family Coverage
 
 - [x] Keep the account tracker company-level and add a separate role-surface monitor

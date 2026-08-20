@@ -50,6 +50,7 @@ from outreach.services.linkedin import (
     LinkedInFollowupSendResult,
     LinkedInScraper,
 )
+from outreach.reply_engine.unmatched import process_unmatched_threads
 from outreach.invite_reservations import (
     UNRESOLVED_STATUSES,
     _canonical_linkedin_profile,
@@ -3362,6 +3363,7 @@ def apply_linkedin_reconcile_results(
         "not_connected": 0,
         "unknown": 0,
         "missing_contact": 0,
+        "ambiguous_contact_match": 0,
         "updated_contacts": 0,
         "touchpoints_added": 0,
         "manual_outbound_touchpoints_added": 0,
@@ -3370,6 +3372,20 @@ def apply_linkedin_reconcile_results(
 
     for raw in results:
         status = normalize_reconcile_status(str(raw.get("status") or ""))
+        if str(raw.get("action") or "").casefold() == "ambiguous_contact_match":
+            summary["ambiguous_contact_match"] += 1
+            processed.append(
+                {
+                    **raw,
+                    "normalized_status": status,
+                    "action": "ambiguous_contact_match",
+                    "decision_action": "hold",
+                    "hold_reason": "ambiguous_contact_match",
+                    "needs_follow_up": False,
+                    "applied": False,
+                }
+            )
+            continue
         observed_sender = raw.get("last_sender") or raw.get("live_last_sender")
         if status == "replied" and _linkedin_sender_is_self(observed_sender):
             # Reconcile artifacts are allowed to be stale or supplied by other
@@ -3605,9 +3621,14 @@ def compact_message_window(
     previous_state: dict | None = None,
     touchpoints: list[TouchpointRecord] | None = None,
     original_invite_note: str = "",
-    limit: int = 4,
+    limit: int = 100,
 ) -> list[dict[str, str]]:
-    """Build a small useful context window without storing full LinkedIn history."""
+    """Merge durable and freshly captured conversation history.
+
+    ``thread.message_window`` is authoritative when the live scraper opened the
+    conversation.  Older snapshots only have ``latest_message``; those remain
+    usable as partial evidence but are marked as such by the reconcile layer.
+    """
     previous_state = previous_state or {}
     touchpoints = touchpoints or []
     messages: list[dict[str, str]] = []
@@ -3644,6 +3665,15 @@ def compact_message_window(
     for touchpoint in sorted(touchpoints, key=lambda item: item.recorded_at)[-6:]:
         if touchpoint.message_kind in outbound_kinds:
             add("You", touchpoint.message_text, timestamp=touchpoint.recorded_at, source=touchpoint.message_kind)
+
+    for raw in list(thread.get("message_window") or []):
+        if isinstance(raw, dict):
+            add(
+                str(raw.get("sender") or ""),
+                str(raw.get("message") or ""),
+                timestamp=str(raw.get("timestamp_text") or ""),
+                source=str(raw.get("source") or "linkedin_thread"),
+            )
 
     latest = str(thread.get("latest_message") or thread.get("message_text") or "").strip()
     sender = str(thread.get("last_sender") or "").strip()
@@ -3691,6 +3721,74 @@ def linkedin_profile_key(value: str) -> str:
     return match.group(1).strip().casefold()
 
 
+@dataclass(frozen=True)
+class MessageContactMatch:
+    """Identity-safe result for binding an inbox thread to a contact row."""
+
+    contact: ContactRecord | None = None
+    error: str = ""
+    candidate_contact_ids: tuple[str, ...] = ()
+
+
+def resolve_contact_for_message_thread(
+    thread: dict,
+    contacts: list[ContactRecord],
+) -> MessageContactMatch:
+    """Resolve a thread without guessing between people who share a name."""
+
+    def resolved(candidates: list[ContactRecord]) -> MessageContactMatch:
+        if len(candidates) == 1:
+            return MessageContactMatch(contact=candidates[0])
+        if len(candidates) > 1:
+            return MessageContactMatch(
+                error="ambiguous_contact_match",
+                candidate_contact_ids=tuple(sorted(item.contact_id for item in candidates)),
+            )
+        return MessageContactMatch()
+
+    thread_url = linkedin_profile_key(str(thread.get("linkedin_url") or ""))
+    if thread_url:
+        # A captured profile URL is stronger than every display-name signal.
+        # If it is not in the workbook, do not fall back to a same-name row.
+        return resolved(
+            [
+                contact
+                for contact in contacts
+                if linkedin_profile_key(contact.linkedin_url) == thread_url
+            ]
+        )
+
+    thread_name = normalize_person_name(str(thread.get("name") or ""))
+    if not thread_name:
+        return MessageContactMatch()
+
+    exact = [
+        contact
+        for contact in contacts
+        if normalize_person_name(contact.full_name) == thread_name
+    ]
+    if exact:
+        return resolved(exact)
+
+    # Beyond an exact match, the surnames must agree. LinkedIn often abbreviates
+    # one side ("Shubhankit R." for "Shubhankit Rathore"), so an initial counts
+    # as agreement, but two different surnames never do.
+    thread_tokens = [token for token in thread_name.split(" ") if token]
+    if len(thread_tokens) < 2:
+        return MessageContactMatch()
+    compatible: list[ContactRecord] = []
+    for contact in contacts:
+        contact_name = normalize_person_name(contact.full_name)
+        contact_tokens = [token for token in contact_name.split(" ") if token]
+        if len(contact_tokens) < 2 or thread_tokens[0] != contact_tokens[0]:
+            continue
+        if thread_name in contact_name or contact_name in thread_name:
+            compatible.append(contact)
+        elif _surnames_agree(thread_tokens[-1], contact_tokens[-1]):
+            compatible.append(contact)
+    return resolved(compatible)
+
+
 def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]) -> ContactRecord | None:
     """Bind an inbox thread to a workbook contact only on verifiable identity.
 
@@ -3699,38 +3797,7 @@ def match_contact_for_message_thread(thread: dict, contacts: list[ContactRecord]
     contacts and produced outreach drafts aimed at the wrong human.
     """
 
-    thread_url = linkedin_profile_key(str(thread.get("linkedin_url") or ""))
-    if thread_url:
-        for contact in contacts:
-            if linkedin_profile_key(contact.linkedin_url) == thread_url:
-                return contact
-
-    thread_name = normalize_person_name(str(thread.get("name") or ""))
-    if not thread_name:
-        return None
-
-    for contact in contacts:
-        if normalize_person_name(contact.full_name) == thread_name:
-            return contact
-
-    # Beyond an exact match, the surnames must agree. LinkedIn often abbreviates
-    # one side ("Shubhankit R." for "Shubhankit Rathore"), so an initial counts as
-    # agreement, but two different surnames never do.
-    thread_tokens = [token for token in thread_name.split(" ") if token]
-    if len(thread_tokens) < 2:
-        return None
-    for contact in contacts:
-        contact_name = normalize_person_name(contact.full_name)
-        contact_tokens = [token for token in contact_name.split(" ") if token]
-        if len(contact_tokens) < 2:
-            continue
-        if thread_tokens[0] != contact_tokens[0]:
-            continue
-        if thread_name in contact_name or contact_name in thread_name:
-            return contact
-        if _surnames_agree(thread_tokens[-1], contact_tokens[-1]):
-            return contact
-    return None
+    return resolve_contact_for_message_thread(thread, contacts).contact
 
 
 def _surnames_agree(left: str, right: str) -> bool:
@@ -3837,7 +3904,8 @@ def build_linkedin_message_reconcile_results(
             if include_seen
             else "baseline_seen"
         )
-        contact = match_contact_for_message_thread(thread, contacts)
+        contact_match = resolve_contact_for_message_thread(thread, contacts)
+        contact = contact_match.contact
         original_invite_note = (
             latest_invite_note_for_contact(contact.contact_id, touchpoints)
             if contact is not None
@@ -3865,7 +3933,19 @@ def build_linkedin_message_reconcile_results(
             "last_sender": str(thread.get("last_sender") or ""),
             "timestamp_text": str(thread.get("timestamp_text") or ""),
             "thread_url": str(thread.get("thread_url") or ""),
+            "linkedin_url": str(thread.get("linkedin_url") or ""),
+            "title": str(thread.get("title") or ""),
+            "company": str(thread.get("company") or ""),
             "message_window": message_window,
+            "capture_confidence": str(
+                thread.get("capture_confidence")
+                or next_thread_states.get(key, {}).get("capture_confidence")
+                or "partial"
+            ),
+            "captured_message_count": int(
+                thread.get("captured_message_count") or len(message_window)
+            ),
+            "expected_message_count": thread.get("expected_message_count"),
             "last_seen_at": snapshot_at,
             "first_seen_at": str(next_thread_states.get(key, {}).get("first_seen_at") or snapshot_at),
         }
@@ -3873,17 +3953,33 @@ def build_linkedin_message_reconcile_results(
             continue
 
         if contact is None:
+            ambiguous = contact_match.error == "ambiguous_contact_match"
             results.append(
                 {
                     "thread_id": key,
                     "name": thread.get("name", ""),
                     "status": "unknown",
-                    "detail": "Message thread did not match a workbook contact.",
+                    "detail": (
+                        "Multiple workbook contacts share this display name; "
+                        "a LinkedIn profile URL is required before binding."
+                        if ambiguous
+                        else "Message thread did not match a workbook contact."
+                    ),
+                    "action": "ambiguous_contact_match" if ambiguous else "",
+                    "decision_action": "hold" if ambiguous else "",
+                    "hold_reason": "ambiguous_contact_match" if ambiguous else "",
+                    "candidate_contact_ids": list(contact_match.candidate_contact_ids),
                     "thread_url": thread.get("thread_url", ""),
+                    "linkedin_url": thread.get("linkedin_url", ""),
+                    "title": thread.get("title", ""),
+                    "company": thread.get("company", ""),
                     "latest_message": thread.get("latest_message", ""),
                     "last_sender": thread.get("last_sender", ""),
                     "timestamp_text": thread.get("timestamp_text", ""),
                     "message_window": message_window,
+                    "capture_confidence": next_thread_states[key]["capture_confidence"],
+                    "captured_message_count": next_thread_states[key]["captured_message_count"],
+                    "expected_message_count": next_thread_states[key]["expected_message_count"],
                     "unread": bool(thread.get("unread")),
                     "is_new_thread": is_new_thread,
                     "thread_changed": thread_changed,
@@ -3919,6 +4015,9 @@ def build_linkedin_message_reconcile_results(
                 "last_sender": thread.get("last_sender", ""),
                 "timestamp_text": thread.get("timestamp_text", ""),
                 "message_window": message_window,
+                "capture_confidence": next_thread_states[key]["capture_confidence"],
+                "captured_message_count": next_thread_states[key]["captured_message_count"],
+                "expected_message_count": next_thread_states[key]["expected_message_count"],
                 "unread": bool(thread.get("unread")),
                 "is_new_thread": is_new_thread,
                 "thread_changed": thread_changed,
@@ -3968,7 +4067,7 @@ def build_persisted_inbound_reconcile_results(
         if not latest_message or _linkedin_sender_is_self(last_sender):
             continue
         thread = {**raw_state, "thread_id": str(thread_id)}
-        contact = match_contact_for_message_thread(thread, contacts)
+        contact = resolve_contact_for_message_thread(thread, contacts).contact
         if contact is None or contact.contact_id in excluded:
             continue
         contact_touchpoints = [
@@ -4012,6 +4111,12 @@ def build_persisted_inbound_reconcile_results(
                     touchpoints=contact_touchpoints,
                     original_invite_note=original_invite_note,
                 ),
+                "capture_confidence": str(raw_state.get("capture_confidence") or "partial"),
+                "captured_message_count": int(
+                    raw_state.get("captured_message_count")
+                    or len(list(raw_state.get("message_window") or []))
+                ),
+                "expected_message_count": raw_state.get("expected_message_count"),
                 "state_reason": "persistent_unanswered_inbound",
                 "is_new_thread": False,
                 "thread_changed": False,
@@ -5326,12 +5431,12 @@ def _reply_opener(*, name: str, contact: ContactRecord, latest_message: str) -> 
         return f"Hey {name}! Thanks for getting back."
     if "?" in text:
         if relationship == "friend":
-            return f"All good bro, just grinding through recruiting."
+            return "All good bro, just grinding through recruiting."
         return f"Hey {name}! Doing well, thanks for asking."
     if any(token in lowered for token in ("happy to", "let me know", "that will be great", "sure")):
         return f"Appreciate it {name}, thank you."
     if relationship == "friend":
-        return f"All good bro."
+        return "All good bro."
     return f"Thanks {name}."
 
 
@@ -5388,7 +5493,7 @@ def _no_live_opening_ask(*, company: str, role_area: str, contact: ContactRecord
     # and ends the thread. Ask them to evaluate the person instead.
     if _contact_is_decision_maker(contact, company):
         return (
-            f"Rather than pitch myself, would it be alright if I took a crack at a problem you'd "
+            "Rather than pitch myself, would it be alright if I took a crack at a problem you'd "
             "hand a new PM? Send one over if so, and I'll come back with a short written take."
         )
     if _contact_relationship(contact) == "friend":
@@ -5621,7 +5726,76 @@ def extract_linkedin_conversation_action_items(item: dict) -> list[dict[str, str
     return deduped
 
 
-def build_linkedin_followup_drafts(
+def followup_item_has_conversation_context(item: Mapping[str, object] | dict) -> bool:
+    """True when a reconcile row has enough thread context to draft safely."""
+
+    status = str(item.get("normalized_status") or item.get("status") or "").strip().casefold()
+    invite = str(item.get("original_invite_note") or "").strip()
+    latest = str(item.get("latest_message") or item.get("message_text") or "").strip()
+    window = [
+        message
+        for message in list(item.get("message_window") or [])
+        if isinstance(message, dict) and str(message.get("message") or "").strip()
+    ]
+    if status == "replied":
+        if latest:
+            return True
+        return any(
+            not _linkedin_sender_is_self(str(message.get("sender") or ""))
+            for message in window
+        )
+    if status == "connected":
+        return bool(invite or window or latest)
+    return bool(invite or window or latest)
+
+
+def ensure_followup_conversation_context(item: dict) -> dict | None:
+    """Materialize a usable message window or return None when context is missing.
+
+    Follow-up / reply drafts must never be invented from a blank thread. For accepted
+    connections the original invite note is valid context; for replies we require an
+    inbound latest message (or inbound window entry).
+    """
+
+    enriched = dict(item)
+    status = str(enriched.get("normalized_status") or enriched.get("status") or "").strip().casefold()
+    invite = str(enriched.get("original_invite_note") or "").strip()
+    latest = str(enriched.get("latest_message") or enriched.get("message_text") or "").strip()
+    window = [
+        dict(message)
+        for message in list(enriched.get("message_window") or [])
+        if isinstance(message, dict) and str(message.get("message") or "").strip()
+    ]
+    if not window and invite:
+        window = [
+            {
+                "sender": "You",
+                "message": invite,
+                "timestamp_text": "",
+                "source": "original_invite",
+            }
+        ]
+    if not latest and window:
+        # Prefer the newest inbound message; otherwise keep the last window entry.
+        inbound = [
+            message
+            for message in window
+            if not _linkedin_sender_is_self(str(message.get("sender") or ""))
+        ]
+        latest = str((inbound or window)[-1].get("message") or "").strip()
+    enriched["message_window"] = window
+    if latest:
+        enriched["latest_message"] = latest
+    if invite:
+        enriched["original_invite_note"] = invite
+    if not followup_item_has_conversation_context(enriched):
+        return None
+    if status == "replied" and not str(enriched.get("latest_message") or "").strip():
+        return None
+    return enriched
+
+
+def _build_legacy_linkedin_followup_drafts(
     *,
     reconcile_results: list[dict],
     organizations: list[OrganizationRecord],
@@ -5629,6 +5803,9 @@ def build_linkedin_followup_drafts(
     opportunities: list[OpportunityRecord] | None = None,
     style_profile: CommunicationStyleProfile | None = None,
     ai_messaging: AIMessagingService | None = None,
+    verify_openings_live: bool = False,
+    skipped_missing_context: list[dict[str, object]] | None = None,
+    include_accepted_silent: bool = True,
 ) -> list[dict[str, object]]:
     organization_map = {item.organization_id: item for item in organizations}
     contact_map = {item.contact_id: item for item in contacts}
@@ -5642,7 +5819,22 @@ def build_linkedin_followup_drafts(
     )
     drafts: list[dict[str, object]] = []
 
-    for item in reconcile_results:
+    for raw_item in reconcile_results:
+        item = ensure_followup_conversation_context(dict(raw_item))
+        if item is None:
+            if skipped_missing_context is not None:
+                skipped_missing_context.append(
+                    {
+                        "contact_id": str(raw_item.get("contact_id") or ""),
+                        "name": str(raw_item.get("name") or ""),
+                        "organization_id": str(raw_item.get("organization_id") or ""),
+                        "normalized_status": str(
+                            raw_item.get("normalized_status") or raw_item.get("status") or ""
+                        ),
+                        "reason": "missing_conversation_context",
+                    }
+                )
+            continue
         contact_id = str(item.get("contact_id") or "")
         contact = contact_map.get(contact_id)
         if contact is None:
@@ -5671,6 +5863,8 @@ def build_linkedin_followup_drafts(
         campaign = str(item.get("campaign") or "") or infer_followup_campaign(contact, organization)
         status = str(item.get("normalized_status") or item.get("status") or "")
         if status == "connected" and item.get("needs_follow_up"):
+            if not include_accepted_silent:
+                continue
             recommendation, draft = accepted_followup_draft(
                 company=company,
                 contact=contact,
@@ -5694,7 +5888,7 @@ def build_linkedin_followup_drafts(
                 campaign=campaign,
                 openings=read_company_openings(
                     organization_opportunities,
-                    verify_live=True,
+                    verify_live=verify_openings_live,
                 ),
             )
         else:
@@ -5833,6 +6027,12 @@ def build_linkedin_followup_drafts(
                 "last_sender": item.get("last_sender", ""),
                 "timestamp_text": item.get("timestamp_text", ""),
                 "message_window": item.get("message_window", []),
+                "capture_confidence": str(item.get("capture_confidence") or "partial"),
+                "captured_message_count": int(
+                    item.get("captured_message_count")
+                    or len(list(item.get("message_window") or []))
+                ),
+                "expected_message_count": item.get("expected_message_count"),
                 "reply_intent": reply_intent,
                 "action_items": action_items,
                 "original_invite_note": item.get("original_invite_note", ""),
@@ -5855,6 +6055,92 @@ def build_linkedin_followup_drafts(
         )
 
     return drafts
+
+
+def build_linkedin_followup_drafts(
+    *,
+    reconcile_results: list[dict],
+    organizations: list[OrganizationRecord],
+    contacts: list[ContactRecord],
+    opportunities: list[OpportunityRecord] | None = None,
+    style_profile: CommunicationStyleProfile | None = None,
+    ai_messaging: AIMessagingService | None = None,
+    verify_openings_live: bool = False,
+    skipped_missing_context: list[dict[str, object]] | None = None,
+    include_accepted_silent: bool = True,
+) -> list[dict[str, object]]:
+    """Legacy LinkedIn copy generation is permanently disabled.
+
+    Follow-up drafting belongs to ``scripts/run_reply_engine_all_lanes.py``.
+    Keep the old implementation private only so its historical unit tests can
+    continue to document the failures that motivated the replacement. No CLI
+    or recurring-run path is allowed to opt back into it.
+    """
+
+    del (
+        reconcile_results,
+        organizations,
+        contacts,
+        opportunities,
+        style_profile,
+        ai_messaging,
+        verify_openings_live,
+        include_accepted_silent,
+    )
+    if skipped_missing_context is not None:
+        skipped_missing_context.clear()
+    return []
+
+
+def run_reply_engine_review_stage(
+    *,
+    workspace: Path,
+    reconcile_artifact: Path,
+    live: bool,
+    timeout_seconds: int = 7200,
+) -> dict[str, object]:
+    """Run the replacement follow-up engine as a review-only subprocess."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "run_reply_engine_all_lanes.py"
+    output = reconcile_artifact.parent / f"{artifact_timestamp()}-linkedin-followup-review.md"
+    command = [
+        sys.executable,
+        str(script),
+        "--workspace",
+        str(workspace),
+        "--reconcile-artifact",
+        str(reconcile_artifact),
+        "--output",
+        str(output),
+    ]
+    if live:
+        command.append("--live")
+    result = subprocess.run(
+        command,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    summary: dict[str, object] = {}
+    match = re.search(r"(?s)^\s*(\{.*\})\s*send_actions=", result.stdout or "")
+    if match:
+        try:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict):
+                summary = dict(parsed.get("summary") or {})
+        except json.JSONDecodeError:
+            summary = {}
+    return {
+        "status": "written" if result.returncode == 0 and output.exists() else "failed",
+        "artifact": str(output) if output.exists() else "",
+        "returncode": result.returncode,
+        "summary": summary,
+        "send_actions": 0,
+        "error": (result.stderr or "").strip()[-1000:],
+    }
 
 
 def summarize_linkedin_followup_actions(drafts: list[dict], reconcile_results: list[dict]) -> dict[str, object]:
@@ -5938,6 +6224,17 @@ def persist_linkedin_followup_send_result(
     return created
 
 
+def _legacy_accepted_silent_draft(draft: Mapping[str, object] | dict) -> bool:
+    """The accepted-silent lane belongs exclusively to the reply engine."""
+
+    return (
+        str(draft.get("draft_kind") or "").strip().casefold()
+        == "accepted_follow_up"
+        or str(draft.get("source_status") or "").strip().casefold()
+        == "connected"
+    )
+
+
 def execute_linkedin_followup_send(
     *,
     settings: OutreachSettings,
@@ -5948,68 +6245,38 @@ def execute_linkedin_followup_send(
     start_at: int,
     include_optional: bool,
 ) -> tuple[Path, Path, dict[str, int], int]:
-    workbook = OutreachWorkbook(settings.resolved_tracking_workspace_dir)
-    scraper = LinkedInScraper(settings)
     progress_artifact = settings.artifacts_dir / f"{draft_artifact.stem}-{artifact_timestamp()}-followup-send-progress.json"
     progress_artifact.parent.mkdir(parents=True, exist_ok=True)
-    status_counts: dict[str, int] = {}
-    touchpoints_added = 0
-
-    def _write_progress(results: list[LinkedInFollowupSendResult]) -> None:
-        progress_artifact.write_text(
-            json.dumps(
-                {
-                    "source_artifact": str(draft_artifact),
-                    "execute": execute,
-                    "limit": limit,
-                    "start_at": start_at,
-                    "include_optional": include_optional,
-                    "count": len(results),
-                    "results": [item.__dict__ for item in results],
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    def _on_result(_draft: dict, result: LinkedInFollowupSendResult, results: list[LinkedInFollowupSendResult]) -> None:
-        nonlocal touchpoints_added
-        status_counts[result.status] = status_counts.get(result.status, 0) + 1
-        if execute and result.status == "sent":
-            if persist_linkedin_followup_send_result(
-                workbook=workbook,
-                result=result,
-                source_artifact=draft_artifact,
-                send_artifact=progress_artifact,
-            ):
-                touchpoints_added += 1
-        _write_progress(results)
-
-    results = scraper.send_followup_messages(
-        drafts,
-        execute=execute,
-        limit=limit,
-        start_at=start_at,
-        include_optional=include_optional,
-        on_result=_on_result,
+    # The replacement reply engine is artifact-only. Keep this guard below the
+    # legacy command boundary as well so an old JSON draft cannot be replayed
+    # through a direct Python call.
+    fenced_drafts = list(drafts)
+    status_counts = {"legacy_engine_fenced": len(fenced_drafts)}
+    progress_payload = {
+        "source_artifact": str(draft_artifact),
+        "execute": execute,
+        "limit": limit,
+        "start_at": start_at,
+        "include_optional": include_optional,
+        "legacy_engine_fenced_count": len(fenced_drafts),
+        "legacy_engine_fenced": fenced_drafts,
+        "count": 0,
+        "results": [],
+    }
+    progress_artifact.write_text(
+        json.dumps(progress_payload, indent=2), encoding="utf-8"
     )
     artifact = write_artifact(
         settings.artifacts_dir,
         "linkedin-followup-send-results",
         {
-            "source_artifact": str(draft_artifact),
+            **progress_payload,
             "progress_artifact": str(progress_artifact),
-            "execute": execute,
-            "limit": limit,
-            "start_at": start_at,
-            "include_optional": include_optional,
-            "count": len(results),
             "status_counts": status_counts,
-            "touchpoints_added": touchpoints_added,
-            "results": [item.__dict__ for item in results],
+            "touchpoints_added": 0,
         },
     )
-    return artifact, progress_artifact, status_counts, touchpoints_added
+    return artifact, progress_artifact, status_counts, 0
 
 
 def _followup_pending_review_path(settings: OutreachSettings) -> Path:
@@ -6474,6 +6741,7 @@ register_intelligence_commands(app)
 # for backwards-compatible accepted-connection drafts; new inbound automation
 # uses the unambiguous ``auto_send`` label.
 SAFE_FOLLOWUP_SEND_RECOMMENDATIONS = {"auto_send", "safe_to_review"}
+LEGACY_LINKEDIN_FOLLOWUP_COPY_ENABLED = False
 
 # Contact mapping is a breadth-building maintenance phase, not a full campaign
 # search.  Re-running every affinity and alumni pass for each of 15 companies
@@ -8087,6 +8355,20 @@ def _apply_linkedin_cadence_guards(
                     "hold_category": "waiting_for_specific_trigger",
                     "cadence_reasons": list(draft.get("cadence_reasons") or [])
                     or ["A specific external trigger is required before another message."],
+                }
+            )
+            continue
+        if _legacy_accepted_silent_draft(draft):
+            held.append(
+                {
+                    **draft,
+                    "send_recommendation": "legacy_engine_fenced",
+                    "cadence_state": "fenced",
+                    "hold_category": "legacy_engine_fenced",
+                    "cadence_reasons": [
+                        "Accepted-silent outreach is owned by the reply engine; "
+                        "the legacy follow-up writer cannot send into this lane."
+                    ],
                 }
             )
             continue
@@ -13132,11 +13414,11 @@ def run_track_2_daily_plan_cmd(
         typer.Option(
             "--send-linkedin-followups/--no-send-linkedin-followups",
             help=(
-                "When --send-linkedin is set, also send auto-sendable follow-ups. "
-                "Use --no-send-linkedin-followups to draft/refresh only while still sending invites."
+                "Deprecated safety switch. Follow-ups are always review-only; "
+                "--send-linkedin may still send separately governed invitations."
             ),
         ),
-    ] = True,
+    ] = False,
     refresh_linkedin: Annotated[
         bool,
         typer.Option(help="Read live LinkedIn messages before drafting follow-ups. Requires a live Chrome CDP session."),
@@ -13330,6 +13612,14 @@ def run_track_2_daily_plan_cmd(
                 for item in list(reconcile_result.get("results") or [])
                 if str(item.get("action") or "").casefold() == "missing_contact"
             ]
+            unmatched_artifact: Path | None = None
+            if unmatched_results:
+                unmatched_artifact, _ = process_unmatched_threads(
+                    workbook=workbook,
+                    unmatched_threads=unmatched_results,
+                    artifacts_dir=settings.artifacts_dir,
+                    create_rows=execute,
+                )
 
             execution_results: list[dict[str, object]] = []
             execution_keys: set[str] = set()
@@ -13442,45 +13732,30 @@ def run_track_2_daily_plan_cmd(
                     "profile_reconcile_count": profile_reconcile_count,
                     "execution_result_count": len(execution_results),
                     "unmatched_result_count": len(unmatched_results),
+                    "unmatched_thread_artifact": str(unmatched_artifact or ""),
                     "results": execution_results,
                     "unmatched_results": unmatched_results,
                     "summary": reconcile_result.get("summary", {}),
                 },
             )
-            messaging_profile = load_style_profile_if_exists(
-                workspace / "communication_style_profile.yml"
+            reply_engine_review = run_reply_engine_review_stage(
+                workspace=workspace,
+                reconcile_artifact=reconcile_artifact,
+                live=execute,
             )
-            drafts = build_linkedin_followup_drafts(
-                reconcile_results=execution_results,
-                organizations=organizations,
-                contacts=contacts,
-                opportunities=workbook.list_opportunities(),
-                style_profile=messaging_profile,
-                ai_messaging=build_runtime_ai_messaging(
-                    settings,
-                    style_profile=messaging_profile,
-                ),
-            )[:followup_budget]
-            new_drafts = [
-                draft
-                for draft in drafts
-                if _followup_draft_report_scope(draft) == "this_run"
-            ]
-            regenerated_carryover_drafts = [
-                draft
-                for draft in drafts
-                if _followup_draft_report_scope(draft) == "carryover"
-            ]
-            cadence_allowed_drafts, cadence_held_drafts = _apply_linkedin_cadence_guards(
-                workbook=workbook,
-                drafts=drafts,
-            )
+            drafts: list[dict[str, object]] = []
+            new_drafts: list[dict[str, object]] = []
+            regenerated_carryover_drafts: list[dict[str, object]] = []
+            cadence_allowed_drafts: list[dict[str, object]] = []
+            cadence_held_drafts: list[dict[str, object]] = []
             action_summary = summarize_linkedin_followup_actions(cadence_allowed_drafts, execution_results)
             draft_artifact = write_artifact(
                 settings.artifacts_dir,
                 "track-2-linkedin-followup-drafts",
                 {
                     "source_artifact": str(reconcile_artifact),
+                    "legacy_copy_disabled": True,
+                    "replacement_artifact": reply_engine_review.get("artifact", ""),
                     "count": len(drafts),
                     "new_draft_count": len(new_drafts),
                     "regenerated_carryover_draft_count": len(regenerated_carryover_drafts),
@@ -13494,11 +13769,17 @@ def run_track_2_daily_plan_cmd(
             followup_result.update(
                 {
                     "status": (
-                        "drafted"
-                        if drafts
+                        "review_artifact_written"
+                        if int(
+                            (reply_engine_review.get("summary") or {}).get(
+                                "with_message", 0
+                            )
+                        )
                         else "completed_unmatched_review_required"
                         if unmatched_results
                         else "completed_zero_actions"
+                        if reply_engine_review.get("status") == "written"
+                        else "reply_engine_failed"
                     ),
                     "thread_count": len(threads),
                     "detected_count": len(message_results),
@@ -13509,19 +13790,33 @@ def run_track_2_daily_plan_cmd(
                     "execution_result_count": len(execution_results),
                     "unmatched_thread_count": len(unmatched_results),
                     "draft_count": len(drafts),
+                    "reply_engine_draft_count": int(
+                        (reply_engine_review.get("summary") or {}).get(
+                            "with_message", 0
+                        )
+                    ),
                     "new_draft_count": len(new_drafts),
                     "regenerated_carryover_draft_count": len(regenerated_carryover_drafts),
                     "cadence_allowed_count": len(cadence_allowed_drafts),
                     "cadence_held_count": len(cadence_held_drafts),
                     "action_summary": action_summary,
+                    "reply_engine_review": reply_engine_review,
+                    "legacy_followup_copy_count": 0,
+                    "followup_sends_enabled": False,
                     "artifacts": [
                         str(reconcile_artifact),
                         str(draft_artifact),
+                        *(
+                            [str(reply_engine_review["artifact"])]
+                            if reply_engine_review.get("artifact")
+                            else []
+                        ),
+                        *([str(unmatched_artifact)] if unmatched_artifact else []),
                         *([str(profile_reconcile_artifact)] if profile_reconcile_artifact else []),
                     ],
                 }
             )
-            if send_linkedin:
+            if send_linkedin and LEGACY_LINKEDIN_FOLLOWUP_COPY_ENABLED:
                 organizations_by_id = {
                     item.organization_id: item for item in organizations
                 }
@@ -14830,7 +15125,7 @@ def run_supervised_e2e_pipeline(
     resume_generator_budget_mode: bool = True,
     execute: bool = False,
     send_linkedin: bool = False,
-    send_linkedin_followups: bool = True,
+    send_linkedin_followups: bool = False,
     refresh_linkedin: bool = False,
     live_linkedin: bool = False,
     deep_messages: bool = True,
@@ -15221,11 +15516,11 @@ def run_supervised_e2e_cmd(
         typer.Option(
             "--send-linkedin-followups/--no-send-linkedin-followups",
             help=(
-                "When --send-linkedin is set, also send auto-sendable follow-ups. "
-                "Use --no-send-linkedin-followups to draft/refresh only while still sending invites."
+                "Deprecated safety switch. Follow-ups are always review-only; "
+                "--send-linkedin may still send separately governed invitations."
             ),
         ),
-    ] = True,
+    ] = False,
     refresh_linkedin: Annotated[
         bool,
         typer.Option(help="Read live LinkedIn messages during the Track 2 phase"),
@@ -17968,6 +18263,19 @@ def reconcile_linkedin_messages(
         source_artifact=source_artifact,
         apply_changes=apply_changes,
     )
+    unmatched_results = [
+        item
+        for item in list(reconcile_result.get("results") or [])
+        if str(item.get("action") or "").casefold() == "missing_contact"
+    ]
+    unmatched_artifact: Path | None = None
+    if unmatched_results:
+        unmatched_artifact, _ = process_unmatched_threads(
+            workbook=workbook,
+            unmatched_threads=unmatched_results,
+            artifacts_dir=settings.artifacts_dir,
+            create_rows=apply_changes,
+        )
     should_update_offset = update_offset or apply_changes
     if should_update_offset:
         save_linkedin_message_state(state_path, next_state)
@@ -17985,6 +18293,8 @@ def reconcile_linkedin_messages(
             "state_path": str(state_path),
             "thread_count": len(threads),
             "new_result_count": len(message_results),
+            "unmatched_thread_count": len(unmatched_results),
+            "unmatched_thread_artifact": str(unmatched_artifact or ""),
             **reconcile_result,
         },
     )
@@ -18065,6 +18375,19 @@ def pull_linkedin_followups(
         source_artifact=source_artifact,
         apply_changes=apply_reconcile,
     )
+    unmatched_results = [
+        item
+        for item in list(reconcile_result.get("results") or [])
+        if str(item.get("action") or "").casefold() == "missing_contact"
+    ]
+    unmatched_artifact: Path | None = None
+    if unmatched_results:
+        unmatched_artifact, _ = process_unmatched_threads(
+            workbook=workbook,
+            unmatched_threads=unmatched_results,
+            artifacts_dir=settings.artifacts_dir,
+            create_rows=apply_reconcile,
+        )
     if update_offset or apply_reconcile:
         save_linkedin_message_state(state_path, next_state)
 
@@ -18081,12 +18404,15 @@ def pull_linkedin_followups(
             "state_path": str(state_path),
             "thread_count": len(threads),
             "new_result_count": len(message_results),
+            "unmatched_thread_count": len(unmatched_results),
+            "unmatched_thread_artifact": str(unmatched_artifact or ""),
             **reconcile_result,
         },
     )
     messaging_profile = load_style_profile_if_exists(
         settings.resolved_tracking_workspace_dir / "communication_style_profile.yml"
     )
+    skipped_missing_context: list[dict[str, object]] = []
     drafts = build_linkedin_followup_drafts(
         reconcile_results=list(reconcile_result.get("results") or []),
         organizations=workbook.list_organizations(),
@@ -18097,6 +18423,8 @@ def pull_linkedin_followups(
             settings,
             style_profile=messaging_profile,
         ),
+        skipped_missing_context=skipped_missing_context,
+        include_accepted_silent=False,
     )[:draft_limit]
     action_summary = summarize_linkedin_followup_actions(drafts, list(reconcile_result.get("results") or []))
     draft_artifact = write_artifact(
@@ -18106,6 +18434,8 @@ def pull_linkedin_followups(
             "source_artifact": str(reconcile_artifact),
             "count": len(drafts),
             "summary": action_summary,
+            "skipped_missing_context_count": len(skipped_missing_context),
+            "skipped_missing_context": skipped_missing_context,
             "results": drafts,
         },
     )
@@ -18116,6 +18446,10 @@ def pull_linkedin_followups(
     typer.echo(f"- Optional polite closes: {action_summary['optional_closes']}")
     typer.echo(f"- Missing workbook contacts: {action_summary['missing_contacts']}")
     typer.echo(f"- External action items for Akshat: {action_summary['external_action_items']}")
+    if skipped_missing_context:
+        typer.echo(
+            f"- Skipped missing conversation context: {len(skipped_missing_context)}"
+        )
     company_counts = action_summary.get("by_company") or {}
     if company_counts:
         typer.echo("- Top companies to clear:")
@@ -18152,6 +18486,7 @@ def draft_linkedin_followups(
     messaging_profile = load_style_profile_if_exists(
         settings.resolved_tracking_workspace_dir / "communication_style_profile.yml"
     )
+    skipped_missing_context: list[dict[str, object]] = []
     drafts = build_linkedin_followup_drafts(
         reconcile_results=list(payload.get("results") or []),
         organizations=workbook.list_organizations(),
@@ -18162,6 +18497,8 @@ def draft_linkedin_followups(
             settings,
             style_profile=messaging_profile,
         ),
+        skipped_missing_context=skipped_missing_context,
+        include_accepted_silent=False,
     )[:limit]
 
     kind_summary: dict[str, int] = {}
@@ -18178,12 +18515,19 @@ def draft_linkedin_followups(
             "count": len(drafts),
             "summary": kind_summary,
             "action_summary": action_summary,
+            "skipped_missing_context_count": len(skipped_missing_context),
+            "skipped_missing_context": skipped_missing_context,
             "results": drafts,
         },
     )
 
     typer.echo(f"Drafted {len(drafts)} LinkedIn follow-ups.")
     typer.echo(f"Summary: {kind_summary}")
+    if skipped_missing_context:
+        typer.echo(
+            f"Skipped {len(skipped_missing_context)} rows with missing conversation context "
+            "(refresh LinkedIn inbox before drafting these)."
+        )
     typer.echo(f"External action items for Akshat: {action_summary['external_action_items']}")
     typer.echo(f"Artifact: {artifact}")
     action_items = action_summary.get("action_items") or []
@@ -18232,129 +18576,11 @@ def send_linkedin_followups(
         typer.Option(help="Actually send follow-ups instead of doing a guarded dry run"),
     ] = False,
 ) -> None:
-    settings = OutreachSettings()
-    with draft_artifact.open(encoding="utf-8") as handle:
-        payload = json.load(handle)
-    all_drafts = list(payload.get("results") or [])
-    drafts = all_drafts
-    if not drafts:
-        typer.echo("No follow-up drafts found in artifact.")
-        raise typer.Exit(code=0)
-    allowed_recommendations = {item.strip() for item in (recommendation or ["safe_to_review"]) if item.strip()}
-    skipped_by_recommendation: list[dict] = []
-    if allowed_recommendations:
-        eligible: list[dict] = []
-        for draft in drafts:
-            draft_recommendation = str(draft.get("send_recommendation") or "")
-            if draft_recommendation in allowed_recommendations or (
-                include_optional and draft_recommendation == "optional"
-            ):
-                eligible.append(draft)
-            else:
-                skipped_by_recommendation.append(draft)
-        drafts = eligible
-    cadence_allowed, cadence_held = _apply_linkedin_cadence_guards(
-        workbook=OutreachWorkbook(settings.resolved_tracking_workspace_dir),
-        drafts=drafts,
+    typer.echo(
+        "Legacy LinkedIn follow-up sending is disabled. "
+        "The reply engine writes a human-review Markdown artifact and never sends."
     )
-    drafts = cadence_allowed
-    skipped_by_recommendation.extend(cadence_held)
-    if not drafts:
-        pending_path = update_linkedin_followup_pending_review(
-            settings=settings,
-            pending_drafts=skipped_by_recommendation,
-            cleared_drafts=[],
-            source_artifact=draft_artifact,
-        )
-        artifact = write_artifact(
-            settings.artifacts_dir,
-            "linkedin-followup-send-results",
-            {
-                "source_artifact": str(draft_artifact),
-                "progress_artifact": "",
-                "execute": execute,
-                "limit": limit,
-                "start_at": start_at,
-                "include_optional": include_optional,
-                "allowed_recommendations": sorted(allowed_recommendations),
-                "total_drafts": len(all_drafts),
-                "eligible_count": 0,
-                "skipped_by_recommendation_count": len(skipped_by_recommendation),
-                "cadence_held_count": len(cadence_held),
-                "count": 0,
-                "status_counts": {"skipped_by_recommendation": len(skipped_by_recommendation)},
-                "touchpoints_added": 0,
-                "pending_review_artifact": str(pending_path),
-                "results": [],
-                "skipped_by_recommendation": skipped_by_recommendation,
-            },
-        )
-        typer.echo(f"No follow-up drafts matched recommendation filter: {sorted(allowed_recommendations)}")
-        typer.echo(f"Artifact: {artifact}")
-        raise typer.Exit(code=0)
-    if execute:
-        LinkedInScraper(settings).require_live_cdp_session()
-
-    typer.echo(f"Processing LinkedIn follow-ups from {draft_artifact}")
-    typer.echo(f"Mode: {'execute' if execute else 'dry run'}")
-    pending_path = update_linkedin_followup_pending_review(
-        settings=settings,
-        pending_drafts=skipped_by_recommendation,
-        cleared_drafts=[],
-        source_artifact=draft_artifact,
-    )
-    artifact, progress_artifact, status_counts, touchpoints_added = execute_linkedin_followup_send(
-        settings=settings,
-        draft_artifact=draft_artifact,
-        drafts=drafts,
-        execute=execute,
-        limit=limit,
-        start_at=start_at,
-        include_optional=include_optional,
-    )
-    with artifact.open(encoding="utf-8") as handle:
-        send_payload = json.load(handle)
-    sent_keys = {
-        _followup_pending_key(item)
-        for item in list(send_payload.get("results") or [])
-        if isinstance(item, dict) and item.get("status") == "sent"
-    }
-    sent_drafts = [draft for draft in drafts if _followup_pending_key(draft) in sent_keys]
-    pending_path = update_linkedin_followup_pending_review(
-        settings=settings,
-        pending_drafts=skipped_by_recommendation,
-        cleared_drafts=sent_drafts,
-        source_artifact=draft_artifact,
-    )
-    if skipped_by_recommendation:
-        send_payload["allowed_recommendations"] = sorted(allowed_recommendations)
-        send_payload["total_drafts"] = len(all_drafts)
-        send_payload["eligible_count"] = len(drafts)
-        send_payload["skipped_by_recommendation_count"] = len(skipped_by_recommendation)
-        send_payload["cadence_held_count"] = len(cadence_held)
-        send_payload["skipped_by_recommendation"] = skipped_by_recommendation
-        send_payload["pending_review_artifact"] = str(pending_path)
-        send_payload["status_counts"]["skipped_by_recommendation"] = len(skipped_by_recommendation)
-        artifact.write_text(json.dumps(send_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-        status_counts["skipped_by_recommendation"] = len(skipped_by_recommendation)
-    else:
-        with artifact.open(encoding="utf-8") as handle:
-            send_payload = json.load(handle)
-        send_payload["allowed_recommendations"] = sorted(allowed_recommendations)
-        send_payload["total_drafts"] = len(all_drafts)
-        send_payload["eligible_count"] = len(drafts)
-        send_payload["skipped_by_recommendation_count"] = 0
-        send_payload["cadence_held_count"] = len(cadence_held)
-        send_payload["pending_review_artifact"] = str(pending_path)
-        artifact.write_text(json.dumps(send_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-    typer.echo(f"Status summary: {status_counts}")
-    typer.echo(f"Eligible drafts: {len(drafts)}/{len(all_drafts)}")
-    if skipped_by_recommendation:
-        typer.echo(f"Skipped by recommendation policy: {len(skipped_by_recommendation)}")
-    typer.echo(f"Pending review artifact: {pending_path}")
-    typer.echo(f"Artifact: {artifact}")
-    typer.echo(f"Progress artifact: {progress_artifact}")
-    typer.echo(f"Tracked touchpoints_added: {touchpoints_added}")
+    raise typer.Exit(code=1)
 
 
 @app.command("send-invites")

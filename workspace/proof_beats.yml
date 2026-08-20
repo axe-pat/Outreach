@@ -1,0 +1,45 @@
+version: 1
+source_document: Profile/resume_2026-04-03_r8.7.docx
+source_sha256: 052d55351b67be2c082149255fb99d6b4f46744f36c8abf21e38ef9553fb7318
+verified_at: 2026-08-15
+proof_beats:
+  - id: hevo-scale-reliability
+    domains: [data_infra, reliability]
+    employer: Hevo Data
+    text: Diagnosed reliability tradeoffs across 120K+ pipelines at Hevo.
+  - id: hevo-pipeline-reliability
+    domains: [data_infra, reliability]
+    employer: Hevo Data
+    text: Reshaped job monitoring into an audit-ready product layer, reducing pipeline failure identification time 40% for enterprise data teams.
+  - id: hevo-enterprise-correctness
+    domains: [data_infra, reliability]
+    employer: Hevo Data
+    text: Shifted product priorities from low-latency streaming to correctness guarantees, enabling 8 enterprise customers to onboard within 90 days.
+  - id: intuit-billing-incident
+    domains: [billing_fintech, reliability]
+    employer: Intuit
+    text: Caught a billing failure affecting 1,500+ businesses and coordinated Engineering, QA, and Support to cut resolution from days to hours.
+  - id: intuit-billing-reconciliation
+    domains: [billing_fintech, data_infra]
+    employer: Intuit
+    text: Diagnosed invisible errors across 50,000+ billing accounts and shipped a reconciliation layer resolving 3,000+ discrepancies per month.
+  - id: intuit-billing-trust
+    domains: [billing_fintech, reliability]
+    employer: Intuit
+    text: Restored accurate billing for 80K+ Intuit businesses with a cross-system reconciliation framework that eliminated billing-driven churn.
+  - id: gojek-marketplace-latency
+    domains: [marketplace_logistics, reliability]
+    employer: Gojek
+    text: Diagnosed fare-quote latency driving 40% high-intent drop-offs, then helped cut quote time 70% and enable about 28K additional monthly rides.
+  - id: gojek-pricing-discovery
+    domains: [marketplace_logistics, billing_fintech]
+    employer: Gojek
+    text: Validated a lower-cost ride tier through funnel analysis and 20+ customer interviews; the launch lifted conversion 9% and generated $3.2M incremental revenue.
+  - id: gojek-fleet-platform
+    domains: [marketplace_logistics, data_infra]
+    employer: Gojek
+    text: Built a fleet integration platform from product definition to launch, enabling 18% supply growth and cutting pickup ETAs by 1.5 minutes.
+  - id: optum-affordability-ml
+    domains: [ai_product, billing_fintech, healthcare]
+    employer: Optum
+    text: Designed an ML-based affordability product that identified at-risk members through predictive risk scoring and advanced from hackathon win to clinical pilot.

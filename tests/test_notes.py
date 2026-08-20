@@ -258,7 +258,7 @@ def test_quality_check_flags_thapar_drop() -> None:
     assert "confirmed Thapar connection was dropped from the invite" in quality.flags
 
 
-def test_senior_product_invite_is_warm_and_saves_the_ask_for_followup() -> None:
+def test_natalie_abeysena_invite_close_is_an_exclamation_not_a_question() -> None:
     generator = NoteGenerator()
     note = generator.generate(
         {
@@ -283,7 +283,7 @@ def test_senior_product_invite_is_warm_and_saves_the_ask_for_followup() -> None:
     assert note.within_limit is True
     assert note.length <= NOTE_CHAR_LIMIT
     assert "deep in product for a while now" in note.text
-    assert "Would love to connect." in note.text
+    assert "Would love to connect!" in note.text
     assert "Would love to connect?" not in note.text
     assert "referral" not in note.text.lower()
     assert "quick read on fit" not in note.text.lower()
@@ -345,6 +345,21 @@ def test_founder_note_uses_company_interest_and_product_credibility() -> None:
     assert "connect" in note.text.lower()
     assert "referral" not in note.text.lower()
     assert "Yondu" in note.text.split(".", 1)[0]
+
+
+def test_workflow_automation_does_not_become_robotics_focus() -> None:
+    generator = NoteGenerator()
+
+    line = generator._company_interest_line(
+        "Zapier",
+        {
+            "tags": ["workflow-automation", "productivity", "integration"],
+            "description": "Automation platform connecting business apps and workflows.",
+        },
+    )
+
+    assert "robotics" not in line.lower()
+    assert line == "I've been interested in Zapier and the problems the team is solving."
 
 
 def test_engineering_context_note_starts_with_company_and_established_product_identity() -> None:

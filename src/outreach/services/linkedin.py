@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from contextlib import contextmanager
 import signal
 import subprocess
@@ -172,6 +172,13 @@ class LinkedInMessageThread:
     last_sender: str = ""
     timestamp_text: str = ""
     unread: bool = False
+    linkedin_url: str = ""
+    title: str = ""
+    company: str = ""
+    message_window: list[dict[str, str]] = field(default_factory=list)
+    capture_confidence: str = "partial"
+    captured_message_count: int = 0
+    expected_message_count: int | None = None
 
 
 @dataclass
@@ -619,9 +626,18 @@ class LinkedInScraper:
                     page.wait_for_timeout(2500)
                     if self._is_authwall_or_login(page):
                         raise RuntimeError("LinkedIn messaging redirected to an auth wall or login page.")
-                    if deep:
-                        return self._extract_message_threads_deep(page, limit=limit, max_scrolls=max_scrolls)
-                    return self._extract_message_threads(page, limit=limit)
+                    threads = (
+                        self._extract_message_threads_deep(
+                            page, limit=limit, max_scrolls=max_scrolls
+                        )
+                        if deep
+                        else self._extract_message_threads(page, limit=limit)
+                    )
+                    return self._capture_message_histories(
+                        page,
+                        threads,
+                        max_scrolls=max_scrolls,
+                    )
                 finally:
                     self._close_page_safely(page)
             finally:
@@ -880,7 +896,7 @@ class LinkedInScraper:
             if len(seen) >= limit:
                 break
 
-            scroll_state = self._scroll_message_list(page)
+            self._scroll_message_list(page)
             page.wait_for_timeout(1100)
             if len(seen) == before_count:
                 stale_scrolls += 1
@@ -893,6 +909,232 @@ class LinkedInScraper:
                 break
 
         return list(seen.values())[:limit]
+
+    def _capture_message_histories(
+        self,
+        page: Page,
+        threads: list[LinkedInMessageThread],
+        *,
+        max_scrolls: int = 40,
+        max_messages: int = 100,
+    ) -> list[LinkedInMessageThread]:
+        """Open every inbox row and capture the actual conversation.
+
+        The inbox list exposes only a preview line.  Treating that preview as a
+        thread dropped Dhruvi Sonani's unprompted referral offer and left 25 of
+        29 reviewed conversations with one inbound line.  This pass follows the
+        thread URL, scrolls the message pane toward its start, and records
+        whether the bounded crawl actually reached it.
+        """
+
+        for thread in threads:
+            thread.capture_confidence = "partial"
+            if not thread.thread_url or not self._safe_goto(
+                page, thread.thread_url, timeout_ms=20000
+            ):
+                self._retain_preview_as_partial_capture(thread)
+                continue
+
+            page.wait_for_timeout(900)
+            if self._is_authwall_or_login(page):
+                self._retain_preview_as_partial_capture(thread)
+                continue
+
+            identity = self._extract_open_thread_identity(page)
+            thread.linkedin_url = str(identity.get("linkedin_url") or thread.linkedin_url)
+            thread.title = str(identity.get("title") or thread.title)
+            thread.company = str(identity.get("company") or thread.company)
+
+            reached_start = self._scroll_open_message_thread_to_start(
+                page,
+                max_scrolls=max_scrolls,
+            )
+            payload = self._extract_open_message_thread(page)
+            raw_messages = list(payload.get("messages") or [])
+            expected = int(payload.get("expected_message_count") or len(raw_messages))
+
+            # Keep the most recent bounded window if a very long thread exceeds
+            # the cap.  It remains partial so Layer 0 can fail closed.
+            bounded = raw_messages[-max_messages:]
+            thread.message_window = [
+                {
+                    "sender": str(item.get("sender") or ""),
+                    "message": str(item.get("message") or ""),
+                    "timestamp_text": str(item.get("timestamp_text") or ""),
+                    "source": "linkedin_thread",
+                }
+                for item in bounded
+                if str(item.get("message") or "").strip()
+            ]
+            if not thread.message_window:
+                self._retain_preview_as_partial_capture(thread)
+                continue
+
+            thread.captured_message_count = len(thread.message_window)
+            thread.expected_message_count = max(expected, thread.captured_message_count)
+            thread.capture_confidence = (
+                "full"
+                if reached_start
+                and expected <= max_messages
+                and thread.captured_message_count >= expected
+                else "partial"
+            )
+
+        return threads
+
+    def _extract_open_thread_identity(self, page: Page) -> dict[str, str]:
+        """Read the active participant identity needed for safe row creation."""
+
+        script = """
+        () => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const link = document.querySelector('main a.msg-thread__link-to-profile');
+          const title = document.querySelector(
+            'main .msg-entity-lockup__entity-info, main .msg-entity-lockup__presence-status'
+          );
+          const headline = normalize(title ? title.textContent : '').replace(
+            /^Status is (?:online|offline|reachable)\\s*/i,
+            ''
+          );
+          const employer = headline.match(/(?:@|\\bat\\b)\\s*([^|•·;,]{2,80})/i);
+          return {
+            linkedin_url: link ? link.href : '',
+            title: headline,
+            company: employer ? normalize(employer[1]) : '',
+          };
+        }
+        """
+        try:
+            payload = page.evaluate(script)
+        except PlaywrightError:
+            return {"linkedin_url": "", "title": "", "company": ""}
+        if not isinstance(payload, dict):
+            return {"linkedin_url": "", "title": "", "company": ""}
+        return {key: str(payload.get(key) or "") for key in ("linkedin_url", "title", "company")}
+
+    @staticmethod
+    def _retain_preview_as_partial_capture(thread: LinkedInMessageThread) -> None:
+        """Keep the inbox preview as evidence, but never call it a full thread."""
+
+        if thread.latest_message and not thread.message_window:
+            thread.message_window = [
+                {
+                    "sender": thread.last_sender,
+                    "message": thread.latest_message,
+                    "timestamp_text": thread.timestamp_text,
+                    "source": "linkedin_preview",
+                }
+            ]
+        thread.captured_message_count = len(thread.message_window)
+        thread.expected_message_count = None
+        thread.capture_confidence = "partial"
+
+    def _scroll_open_message_thread_to_start(
+        self,
+        page: Page,
+        *,
+        max_scrolls: int,
+    ) -> bool:
+        """Return True only after the top is stable with no history loader."""
+
+        script = """
+        () => {
+          const scroller = document.querySelector('.msg-s-message-list')
+            || document.querySelector('.msg-s-message-list-content')
+            || document.querySelector('[data-view-name="message-list"]')
+            || document.querySelector('[role="main"] [tabindex="-1"]');
+          if (!scroller) return { found: false, top: -1, count: 0, loading: true };
+          const events = document.querySelectorAll(
+            'li.msg-s-message-list__event, .msg-s-message-list__event'
+          );
+          const loading = Boolean(scroller.querySelector(
+            '.artdeco-loader, [aria-label*="loading" i], [data-test-id*="loader" i]'
+          ));
+          scroller.scrollTop = 0;
+          return { found: true, top: scroller.scrollTop, count: events.length, loading };
+        }
+        """
+        stable_at_top = 0
+        previous_count = -1
+        for _ in range(max(1, max_scrolls)):
+            try:
+                state = page.evaluate(script)
+            except PlaywrightError:
+                return False
+            page.wait_for_timeout(750)
+            if not state or not state.get("found"):
+                return False
+            count = int(state.get("count") or 0)
+            at_top = int(state.get("top") or 0) <= 2
+            loading = bool(state.get("loading"))
+            if at_top and not loading and count == previous_count:
+                stable_at_top += 1
+            else:
+                stable_at_top = 0
+            if stable_at_top >= 2:
+                return True
+            previous_count = count
+        return False
+
+    def _extract_open_message_thread(self, page: Page) -> dict[str, object]:
+        """Extract chronological message bodies from the currently open thread."""
+
+        script = """
+        () => {
+          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+          const candidates = Array.from(document.querySelectorAll(
+            'li.msg-s-message-list__event, .msg-s-message-list__event'
+          ));
+          const seenNodes = new Set();
+          const events = candidates.filter((node) => {
+            if (seenNodes.has(node)) return false;
+            seenNodes.add(node);
+            return true;
+          });
+          const messages = [];
+          let previousSender = '';
+          for (const event of events) {
+            const body = event.querySelector(
+              '.msg-s-event-listitem__body, .msg-s-message-group__message, '
+              + '.msg-s-event-listitem__message-bubble p, [data-event-urn] p'
+            );
+            const message = normalize(body ? body.innerText || body.textContent : '');
+            if (!message) continue;
+            const group = event.closest('.msg-s-message-group') || event;
+            const nameEl = group.querySelector(
+              '.msg-s-message-group__name, [data-anonymize="person-name"]'
+            );
+            let sender = normalize(nameEl ? nameEl.textContent : '') || previousSender;
+            const classText = `${event.className || ''} ${group.className || ''}`;
+            const own = /(?:--own|from-me|outbound|\\bself\\b)/i.test(classText)
+              || /^(?:you|akshat(?: pathak)?)$/i.test(sender);
+            if (own) sender = 'You';
+            if (!sender) sender = 'contact';
+            previousSender = sender;
+            const timeEl = event.querySelector('time, .msg-s-message-group__timestamp')
+              || group.querySelector('time, .msg-s-message-group__timestamp');
+            const timestamp = normalize(
+              timeEl ? (timeEl.getAttribute('datetime') || timeEl.textContent) : ''
+            );
+            messages.push({ sender, message, timestamp_text: timestamp });
+          }
+          const declaredSizes = events
+            .map((event) => Number(event.getAttribute('aria-setsize') || 0))
+            .filter((value) => Number.isFinite(value) && value > 0);
+          const expected = declaredSizes.length
+            ? Math.max(...declaredSizes)
+            : messages.length;
+          return { messages, expected_message_count: expected };
+        }
+        """
+        try:
+            payload = page.evaluate(script)
+        except PlaywrightError:
+            return {"messages": [], "expected_message_count": 0}
+        return payload if isinstance(payload, dict) else {
+            "messages": [],
+            "expected_message_count": 0,
+        }
 
     def _extract_message_threads(self, page: Page, limit: int = 50) -> list[LinkedInMessageThread]:
         script = """
@@ -1143,12 +1385,21 @@ class LinkedInScraper:
     ) -> LinkedInMessageThread | None:
         expected_thread_id = str(draft.get("thread_id") or "").strip()
         reviewed_exact_thread = bool(draft.get("_reviewed_require_exact_thread_id"))
+        reviewed_exact_name = bool(draft.get("_reviewed_require_exact_name"))
         if reviewed_exact_thread and (
             not expected_thread_id or expected_thread_id.casefold().startswith("synthetic:")
         ):
             return None
         expected_name = self._normalize_message_text(str(draft.get("name") or ""))
+        if reviewed_exact_name and not expected_name:
+            return None
         expected_first_name = expected_name.split(" ", maxsplit=1)[0] if expected_name else ""
+
+        if reviewed_exact_name:
+            return self._find_message_thread_by_name_search(
+                page,
+                expected_name=expected_name,
+            )
 
         self._scroll_message_list(page, reset=True)
         page.wait_for_timeout(500)
@@ -1161,6 +1412,8 @@ class LinkedInScraper:
                     continue
                 if expected_name and thread_name == expected_name:
                     return thread
+                if reviewed_exact_name:
+                    continue
                 if expected_first_name and thread_name.split(" ", maxsplit=1)[0] == expected_first_name:
                     return thread
             state = self._scroll_message_list(page)
@@ -1168,6 +1421,45 @@ class LinkedInScraper:
             if bool(state.get("at_bottom")):
                 break
         return None
+
+    def _find_message_thread_by_name_search(
+        self,
+        page: Page,
+        *,
+        expected_name: str,
+    ) -> LinkedInMessageThread | None:
+        """Use LinkedIn's inbox search without ever accepting a fuzzy name."""
+
+        search = None
+        matched = None
+        try:
+            search = page.locator(
+                'input[placeholder*="Search messages" i], '
+                'input[aria-label*="Search messages" i], '
+                'input[placeholder*="Search" i][role="combobox"]'
+            ).first
+            if search.count() < 1:
+                return None
+            search.fill(expected_name)
+            search.press("Enter")
+            for wait_ms in (1600, 1000):
+                page.wait_for_timeout(wait_ms)
+                for thread in self._extract_message_threads(page, limit=100):
+                    if self._normalize_message_text(thread.name) == expected_name:
+                        matched = thread
+                        break
+                if matched is not None:
+                    break
+        except (AttributeError, PlaywrightError):
+            return None
+        finally:
+            if search is not None and matched is None:
+                try:
+                    search.fill("")
+                    page.wait_for_timeout(400)
+                except (AttributeError, PlaywrightError):
+                    pass
+        return matched
 
     def _click_message_thread(
         self,
@@ -2084,22 +2376,32 @@ class LinkedInScraper:
             [
                 page.locator('[role="toolbar"] a[aria-label*="connect" i]'),
                 page.locator('[role="toolbar"] button[aria-label*="connect" i]'),
-                page.get_by_role("toolbar").get_by_role("link", name=re.compile("connect", re.I)),
-                page.get_by_role("toolbar").get_by_role("button", name=re.compile("connect", re.I)),
+                page.get_by_role("toolbar").get_by_role("link", name=re.compile(r"\bConnect\b", re.I)),
+                page.get_by_role("toolbar").get_by_role("button", name=re.compile(r"\bConnect\b", re.I)),
             ]
         )
         for locator in toolbar_candidates:
-            visible = self._visible_action_targets(page, locator, max_y=620, max_x_ratio=0.66)
+            visible = [
+                target
+                for target in self._visible_action_targets(page, locator, max_y=620, max_x_ratio=0.66)
+                if self._looks_like_connect_action(target)
+            ]
             if visible:
                 return visible[0]
 
+        overflow_connect = self._find_overflow_connect_button(page)
+        if overflow_connect is not None:
+            return overflow_connect
+
         candidates = [
+            page.locator('a[aria-label*="Invite"][aria-label*="connect" i]'),
+            page.locator('button[aria-label*="Invite"][aria-label*="connect" i]'),
             page.locator('a[aria-label*="connect" i]'),
             page.locator('button[aria-label*="connect" i]'),
-            page.get_by_role("link", name=re.compile("connect", re.I)),
-            page.get_by_role("button", name=re.compile("connect", re.I)),
-            page.locator("a", has_text="Connect"),
-            page.locator("button", has_text="Connect"),
+            page.get_by_role("link", name=re.compile(r"\bConnect\b", re.I)),
+            page.get_by_role("button", name=re.compile(r"\bConnect\b", re.I)),
+            page.locator("a", has_text=re.compile(r"^\s*Connect\s*$", re.I)),
+            page.locator("button", has_text=re.compile(r"^\s*Connect\s*$", re.I)),
         ]
         if normalized_name:
             candidates.insert(0, page.locator(f'a[aria-label*="{normalized_name}"][aria-label*="connect" i]'))
@@ -2109,6 +2411,8 @@ class LinkedInScraper:
             for button in self._visible_action_targets(page, locator, max_y=780, max_x_ratio=0.66):
                 try:
                     if name_tokens and not self._connect_target_matches_candidate(button, name_tokens):
+                        continue
+                    if not self._looks_like_connect_action(button):
                         continue
                     box = button.bounding_box()
                     if not box:
@@ -2128,50 +2432,176 @@ class LinkedInScraper:
                     target
                     for target in visible
                     if self._connect_target_matches_candidate(target, name_tokens)
+                    and self._looks_like_connect_action(target)
                 ]
             if visible:
                 return visible[0]
 
+        return None
+
+    def _find_overflow_connect_button(self, page: Page):
+        """Open the profile More menu and return its Connect item.
+
+        Follow-primary profiles hide Connect behind the header overflow. A
+        page-wide Connect search after opening that menu matches sidebar
+        '+ Connect' buttons for other people and never opens this invite.
+        """
+
+        connect_text = re.compile(r"(^\s*Connect\s*$|Invite\b.+\bto connect)", re.I)
         more_buttons = [
-            page.get_by_role("button", name=re.compile("More", re.I)),
-            page.get_by_role("button", name=re.compile("More actions", re.I)),
-            page.locator("button", has_text="More"),
+            page.locator('button[aria-label="More"]'),
+            page.locator('button[aria-label="More actions"]'),
+            page.get_by_role("button", name=re.compile(r"^(More|More actions)$", re.I)),
             page.locator('button[aria-label*="More" i]'),
-            page.locator('button[aria-label*="actions" i]'),
         ]
         ranked_more: list = []
+        seen_positions: set[tuple[int, int]] = set()
         for locator in more_buttons:
-            ranked_more.extend(self._visible_action_targets(page, locator, max_y=620, max_x_ratio=0.66))
+            for more in self._visible_action_targets(
+                page, locator, min_y=70, max_y=720, max_x_ratio=0.72
+            ):
+                try:
+                    box = more.bounding_box()
+                except Exception:
+                    box = None
+                key = (
+                    round(box["x"] / 8),
+                    round(box["y"] / 8),
+                ) if box else None
+                if key is not None and key in seen_positions:
+                    continue
+                if key is not None:
+                    seen_positions.add(key)
+                ranked_more.append(more)
+
+        follow_buttons = self._visible_action_targets(
+            page,
+            page.get_by_role("button", name=re.compile(r"Follow", re.I)),
+            min_y=70,
+            max_y=720,
+            max_x_ratio=0.72,
+        )
+        if follow_buttons:
+            try:
+                follow_box = follow_buttons[0].bounding_box()
+            except Exception:
+                follow_box = None
+            if follow_box:
+                follow_row_y = follow_box["y"]
+                same_row = []
+                for more in ranked_more:
+                    try:
+                        more_box = more.bounding_box()
+                    except Exception:
+                        more_box = None
+                    if more_box and abs(more_box["y"] - follow_row_y) <= 48:
+                        same_row.append(more)
+                if same_row:
+                    ranked_more = same_row
+
         for more in ranked_more:
             try:
                 more.scroll_into_view_if_needed(timeout=2000)
             except Exception:
                 pass
             clicked = False
-            for force in (False, True):
-                try:
-                    more.click(timeout=5000, force=force)
-                    clicked = True
-                    break
-                except Exception:
-                    continue
+            try:
+                more.evaluate("(el) => el.click()")
+                clicked = True
+            except Exception:
+                for force in (False, True):
+                    try:
+                        more.click(timeout=5000, force=force)
+                        clicked = True
+                        break
+                    except Exception:
+                        continue
             if not clicked:
                 continue
             self._human_pause(page)
+            try:
+                page.get_by_role("menuitem", name=connect_text).first.wait_for(
+                    state="visible",
+                    timeout=3000,
+                )
+            except Exception:
+                pass
             menu_candidates = [
-                page.locator('[role="menu"] button', has_text="Connect"),
-                page.locator('[role="menu"] [role="menuitem"]', has_text="Connect"),
-                page.locator('[role="menu"] a', has_text="Connect"),
-                page.get_by_role("menuitem", name="Connect"),
-                page.get_by_role("button", name="Connect"),
-                page.get_by_role("link", name="Connect"),
+                page.locator('[role="menu"]').get_by_role("menuitem", name=connect_text),
+                page.locator('[role="menu"]').get_by_text(connect_text),
+                page.locator('[role="menu"] button', has_text=connect_text),
+                page.locator('[role="menu"] [role="menuitem"]', has_text=connect_text),
+                page.locator('[role="menu"] a', has_text=connect_text),
+                page.locator('[class*="artdeco-dropdown__content"]').get_by_text(connect_text),
+                page.locator('[class*="artdeco-dropdown__content"] [class*="artdeco-dropdown__item"]', has_text=connect_text),
+                page.locator('[class*="artdeco-dropdown__content"] button', has_text=connect_text),
+                page.locator('[class*="artdeco-dropdown__content"] [role="button"]', has_text=connect_text),
+                page.locator('[class*="artdeco-dropdown__content"] a', has_text=connect_text),
+                page.locator('[class*="artdeco-dropdown__content"] [aria-label*="connect" i]'),
+                page.locator('[role="menu"] [aria-label*="connect" i]'),
+                page.get_by_role("menuitem", name=connect_text),
             ]
             for connect in menu_candidates:
-                visible = self._visible_action_targets(page, connect, max_y=900, max_x_ratio=0.9)
+                visible = self._visible_action_targets(page, connect, max_y=900, max_x_ratio=0.85)
                 if visible:
                     return visible[0]
+            js_target = self._overflow_connect_from_dom(page)
+            if js_target is not None:
+                return js_target
             self._dismiss_transient_overlays(page)
         return None
+
+    def _overflow_connect_from_dom(self, page: Page):
+        try:
+            found = page.evaluate(
+                """
+                () => {
+                  const roots = Array.from(document.querySelectorAll(
+                    '[role="menu"], [class*="artdeco-dropdown__content"], [class*="artdeco-dropdown--is-open"]'
+                  ));
+                  const visible = (el) => {
+                    const box = el.getBoundingClientRect();
+                    return box.width > 0 && box.height > 0;
+                  };
+                  for (const root of roots) {
+                    if (!visible(root)) continue;
+                    const items = Array.from(root.querySelectorAll(
+                      'button, a, [role="menuitem"], [role="button"], [class*="artdeco-dropdown__item"], li, div, span'
+                    ));
+                    for (const el of items) {
+                      if (!visible(el)) continue;
+                      const label = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`
+                        .replace(/\\s+/g, ' ')
+                        .trim();
+                      if (/disconnect|already connected/i.test(label)) continue;
+                      if (/^Connect$/i.test((el.textContent || '').replace(/\\s+/g, ' ').trim())
+                          || /Invite\\b.+\\bto connect/i.test(label)) {
+                        el.setAttribute('data-outreach-overflow-connect', '1');
+                        return true;
+                      }
+                    }
+                  }
+                  return false;
+                }
+                """
+            )
+        except Exception:
+            return None
+        if not found:
+            return None
+        marked = page.locator('[data-outreach-overflow-connect="1"]')
+        visible = self._visible_action_targets(page, marked, max_y=900, max_x_ratio=0.85)
+        return visible[0] if visible else marked.first
+
+    def _looks_like_connect_action(self, target) -> bool:
+        haystack = self._action_target_text(target)
+        if not haystack:
+            return False
+        if "/preload/custom-invite/" in haystack:
+            return True
+        if re.search(r"\b(connections|connected|disconnect)\b", haystack):
+            return False
+        return bool(re.search(r"\bconnect\b", haystack))
 
     def _candidate_name_tokens(self, candidate_name: str) -> list[str]:
         return [
@@ -2261,6 +2691,7 @@ class LinkedInScraper:
         *,
         max_y: float,
         max_x_ratio: float,
+        min_y: float = 0,
     ) -> list:
         ranked = []
         viewport_width = self._viewport_width(page)
@@ -2277,6 +2708,8 @@ class LinkedInScraper:
             if not box:
                 continue
             if box["width"] <= 0 or box["height"] <= 0:
+                continue
+            if box["y"] < min_y:
                 continue
             if box["y"] > max_y:
                 continue

@@ -118,6 +118,7 @@ class ContactRecord(BaseModel):
     source_url: str = ""
     discovered_at: str = Field(default_factory=utc_now_iso)
     last_contacted_at: str = ""
+    reopen_condition: str = ""
     notes: str = ""
 
 

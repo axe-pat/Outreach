@@ -5186,6 +5186,109 @@ def test_reconcile_write_boundary_reclassifies_own_sender_as_outbound(
     )
 
 
+def test_reconcile_preserves_adam_siegel_followed_up_status_when_still_connected(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-crexi", name="Crexi")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-adam-siegel",
+            organization_id="org-crexi",
+            full_name="Adam Siegel",
+            status="Followed up",
+            linkedin_url="https://www.linkedin.com/in/adam-siegel-2212686/",
+            last_contacted_at="2026-08-20T15:00:00+00:00",
+        )
+    )
+    latest_outbound = "Thanks for connecting."
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-adam-followup",
+            organization_id="org-crexi",
+            contact_id="ct-adam-siegel",
+            channel=OutreachChannel.LINKEDIN,
+            status="Sent",
+            message_kind="linkedin_followup",
+            message_text=latest_outbound,
+        )
+    )
+
+    result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "contact_id": "ct-adam-siegel",
+                "status": "connected",
+                "last_sender": "You",
+                "latest_message": latest_outbound,
+            }
+        ],
+        apply_changes=True,
+    )
+
+    contact = workbook.list_contacts()[0]
+    assert result["results"][0]["action"] == "already_connected"
+    assert result["results"][0]["new_contact_status"] == ""
+    assert contact.status == "Followed up"
+    assert contact.last_contacted_at == "2026-08-20T15:00:00+00:00"
+
+
+def test_reconcile_does_not_retimestamp_ariel_li_duplicate_reply(
+    tmp_path: Path,
+) -> None:
+    workbook = OutreachWorkbook(tmp_path / "workspace")
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-cisco", name="Cisco")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-ariel-li",
+            organization_id="org-cisco",
+            full_name="Ariel Li",
+            status="Replied",
+            last_contacted_at="2026-08-20T15:03:27+00:00",
+        )
+    )
+    reply = "The hiring process varies by team."
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id=workbook.make_touchpoint_id(
+                "org-cisco",
+                "ct-ariel-li",
+                OutreachChannel.LINKEDIN.value,
+                reply,
+            ),
+            organization_id="org-cisco",
+            contact_id="ct-ariel-li",
+            channel=OutreachChannel.LINKEDIN,
+            status="Replied",
+            message_kind="linkedin_reply",
+            message_text=reply,
+        )
+    )
+
+    result = apply_linkedin_reconcile_results(
+        workbook=workbook,
+        results=[
+            {
+                "contact_id": "ct-ariel-li",
+                "status": "replied",
+                "last_sender": "Ariel",
+                "latest_message": reply,
+            }
+        ],
+        apply_changes=True,
+    )
+
+    contact = workbook.list_contacts()[0]
+    assert result["results"][0]["action"] == "already_replied"
+    assert result["summary"]["touchpoints_added"] == 0
+    assert contact.last_contacted_at == "2026-08-20T15:03:27+00:00"
+
+
 def test_reconcile_records_missing_acceptance_for_existing_connected_contact(tmp_path: Path) -> None:
     workbook = OutreachWorkbook(tmp_path / "workspace")
     workbook.upsert_organization(

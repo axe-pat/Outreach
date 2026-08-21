@@ -3416,7 +3416,13 @@ def apply_linkedin_reconcile_results(
         existing_status = (contact.status or "").strip().lower()
         if status == "connected":
             summary["connected"] += 1
-            if existing_status in {"connected", "replied"}:
+            if existing_status in {
+                "connected",
+                "followed up",
+                "replied",
+                "warm",
+                "do not contact",
+            }:
                 action = "already_connected"
                 if existing_status == "connected" and contact.contact_id not in accepted_contacts:
                     action = "record_missing_acceptance"
@@ -3429,8 +3435,11 @@ def apply_linkedin_reconcile_results(
                 message_text = "LinkedIn invite accepted."
         elif status == "replied":
             summary["replied"] += 1
-            action = "mark_replied"
-            new_contact_status = "Replied"
+            if existing_status == "replied":
+                action = "already_replied"
+            else:
+                action = "mark_replied"
+                new_contact_status = "Replied"
             touchpoint_status = "Replied"
             message_kind = "linkedin_reply"
             message_text = str(

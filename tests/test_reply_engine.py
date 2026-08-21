@@ -1643,6 +1643,40 @@ def test_arjun_krishna_invite_acceptance_is_not_an_exchange():
     assert "unsupported_exchange_acknowledgement" in result.flags
 
 
+def test_dikshita_desai_invite_acceptance_is_not_a_prior_exchange():
+    result = review(
+        message=(
+            "Hi Dikshita, thanks for the prior exchange. Have you heard whether "
+            "TRACTIAN is hiring for fall product internships?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(intel_focus="opening"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Dikshita Desai",
+        company="TRACTIAN",
+        last_inbound_message="",
+    )
+
+    assert "unsupported_exchange_acknowledgement" in result.flags
+
+
+def test_aiden_singh_invite_acceptance_is_not_a_thoughtful_conversation():
+    result = review(
+        message=(
+            "Hi Aiden, thanks for the thoughtful conversation. Do you know who "
+            "owns product hiring at Instawork?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Aiden Singh",
+        company="Instawork",
+        last_inbound_message="",
+    )
+
+    assert "unsupported_exchange_acknowledgement" in result.flags
+
+
 def test_chris_gomes_muffat_name_decision_cannot_emit_timing_intel():
     result = review(
         message=(
@@ -1690,6 +1724,27 @@ def test_noel_lin_and_whether_is_still_two_asks():
     )
 
     assert "multiple_asks:2" in result.flags
+
+
+def test_niteesha_thottempudi_bizops_goal_cannot_ask_for_product_hiring():
+    result = review(
+        message=(
+            "Hi Niteesha, thanks for accepting. I'm exploring a fall BizOps or "
+            "strategy internship at Mercor. Who owns product hiring at Mercor?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            word_budget=45,
+            goal_role_family="bizops_strategy",
+        ),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Niteesha Thottempudi",
+        company="Mercor",
+    )
+
+    assert "invite_goal_mismatch:bizops_strategy" in result.flags
 
 
 def test_offchannel_conversations_are_not_redrafted():

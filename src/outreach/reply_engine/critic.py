@@ -209,7 +209,8 @@ _REPEATED_ACCEPTANCE_OPENER = re.compile(
     re.I,
 )
 _UNSUPPORTED_EXCHANGE_THANKS = re.compile(
-    r"\bthanks?\s+(?:you\s+)?for\s+(?:the\s+|our\s+|your\s+|prior\s+)?(?:exchange|responses?|"
+    r"\bthanks?\s+(?:you\s+)?for\s+(?:(?:the|our|your)\s+)?"
+    r"(?:(?:prior|thoughtful)\s+)?(?:exchange|conversation|responses?|"
     r"getting back|letting me know|checking(?: on| with)?|sharing)\b|"
     r"\bappreciate\s+you\s+(?:getting back|replying|responding|checking|sharing)\b",
     re.I,
@@ -1008,6 +1009,8 @@ def review(
             result.fail("large_company_goal_not_explicit")
 
     if decision.ask is not Ask.NONE and decision.goal_role_family == ROLE_BIZOPS_STRATEGY:
+        if re.search(r"\bproduct\s+(?:hiring|recruiting|recruitment)\b", body, re.I):
+            result.fail("invite_goal_mismatch:bizops_strategy")
         if re.search(r"\bproduct\b", body, re.I) and not re.search(
             r"\bbiz\s*ops\b|\bbusiness operations?\b|\bstrategy\b|\boperations\b",
             body,
@@ -1020,6 +1023,8 @@ def review(
         ):
             result.fail("invite_goal_mismatch:product")
     elif decision.ask is not Ask.NONE and decision.goal_role_family == ROLE_ENGINEERING:
+        if re.search(r"\bproduct\s+(?:hiring|recruiting|recruitment)\b", body, re.I):
+            result.fail("invite_goal_mismatch:engineering")
         if re.search(r"\bproduct\b", body, re.I) and not re.search(
             r"\bengineering\b|\bsoftware\b|\bswe\b|\bdeveloper\b",
             body,

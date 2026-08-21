@@ -121,6 +121,14 @@ INTEL_TIMING_GUIDANCE = (
     "owns hiring, whether a programme exists, or how the recipient got in."
 )
 
+INTEL_APPROACH_GUIDANCE = (
+    "This is a verified tiny team, so do not ask who owns product hiring; the "
+    "answer is obviously the founders. Ask exactly ONE casual recommendation "
+    "question: whether they would recommend reaching out directly to the "
+    "founders about the structured goal below. Ask for their judgment only, "
+    "never an introduction or referral."
+)
+
 REQUISITION_GUIDANCE: dict[str, str] = {
     APPLY_NOW: (
         "This requisition is directly actionable. Name it and make the one ask a "
@@ -244,8 +252,11 @@ def build_prompt(
     guidance = ACTION_GUIDANCE.get(decision.action, "")
     if decision.action is Action.ASK or decision.ask is not Ask.NONE:
         ask_guidance = ASK_GUIDANCE.get(decision.ask, "")
-        if decision.ask is Ask.INTEL and read.intel_focus == "timing":
-            ask_guidance = INTEL_TIMING_GUIDANCE
+        if decision.ask is Ask.INTEL:
+            if read.intel_focus == "timing":
+                ask_guidance = INTEL_TIMING_GUIDANCE
+            elif read.intel_focus == "approach":
+                ask_guidance = INTEL_APPROACH_GUIDANCE
         guidance = f"{guidance}\n{ask_guidance}".strip()
     if decision.req_actionability in REQUISITION_GUIDANCE:
         guidance = (
@@ -296,6 +307,18 @@ def build_prompt(
             "this one, promise!' or open with 'Last note from me on this' and end "
             "with a warm sign-off. Never write 'This is my last note on it.' "
             "Remove pressure and do not imply another follow-up.\n" + guidance
+        )
+    if read.prior_outbound_text:
+        prior_kind = read.prior_outbound_ask.value
+        guidance = (
+            "UNANSWERED PRIOR OUTBOUND: this is not a newly accepted connection. "
+            "Open as a light follow-up, never with 'thanks for accepting' or "
+            "'thanks for connecting'. Continue the already-sent ask and do not "
+            "pivot to a new one. If the standing ask was a referral, ask only "
+            "whether they had any luck or a chance to check; do not replace it "
+            "with a hiring-owner question and do not claim the role is still open. "
+            f"Structured prior ask: {prior_kind}. Exact prior outbound: "
+            f"{read.prior_outbound_text}\n" + guidance
         )
 
     availability_qualifier = "not required for this move"

@@ -1363,6 +1363,98 @@ def test_no_context_state_when_only_our_invite_exists():
     assert resolve_state(messages) is ThreadState.NO_CONTEXT
 
 
+def test_pankaj_yadav_unanswered_referral_is_preserved_as_second_touch():
+    messages, _ = order_messages(
+        [
+            {
+                "sender": "You",
+                "message": "Hi Pankaj, would love to connect.",
+                "source": "original_invite",
+            },
+            {
+                "sender": "You",
+                "message": (
+                    "There's this role at Ottimate I'm interested in. "
+                    "Can you help refer me?"
+                ),
+                "source": "linkedin_manual_message",
+            },
+        ],
+        invite_sent_at=NOW,
+    )
+    state = resolve_state(messages)
+    read = deterministic_read(messages)
+    decision = decide(
+        state=state,
+        read=read,
+        contact=contact("Senior Software Engineer", name="Pankaj Yadav"),
+        facts=CompanyFacts(name="Ottimate", team_size=200),
+        touch_count=1,
+        invite_text="Hi Pankaj, would love to connect.",
+        has_prior_outbound=True,
+        now=NOW,
+    )
+
+    assert state is ThreadState.OUTBOUND_UNANSWERED
+    assert read.prior_outbound_ask is Ask.REFER
+    assert decision.ask is Ask.REFER
+    assert decision.touch_number == 2
+
+    _, prompt = build_prompt(
+        messages=messages,
+        decision=decision,
+        read=read,
+        name="Pankaj Yadav",
+        title="Senior Software Engineer",
+        company="Ottimate",
+        facts=CompanyFacts(name="Ottimate", team_size=200),
+        banned=[],
+    )
+    assert "this is not a newly accepted connection" in prompt
+    assert "had any luck or a chance to check" in prompt
+
+
+def test_viraj_jadhav_second_touch_cannot_reset_to_acceptance():
+    result = review(
+        message=(
+            "Thanks for accepting. I'm exploring a fall product internship at "
+            "Qualys. Who owns product hiring at Qualys?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            touch_number=2,
+            word_budget=45,
+        ),
+        read=ThreadRead(
+            prior_outbound_ask=Ask.NAME,
+            prior_outbound_text="Who should I talk to about product roles at Qualys?",
+        ),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Viraj Jadhav",
+        company="Qualys",
+    )
+
+    assert "repeat_acceptance_opener" in result.flags
+
+
+def test_will_nzeuton_missing_inbound_cannot_be_invented_as_an_exchange():
+    result = review(
+        message=(
+            "Thanks for letting me know. I'm following up about a fall product "
+            "internship at Eulerity."
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, touch_number=2),
+        read=ThreadRead(prior_outbound_text="Awesome, thanks for letting me know!"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Will Nzeuton",
+        company="Eulerity",
+        last_inbound_message="",
+    )
+
+    assert "unsupported_exchange_acknowledgement" in result.flags
+
+
 def test_offchannel_conversations_are_not_redrafted():
     """Nagendra moved to a phone call; the engine must not draft again."""
 
@@ -1503,11 +1595,11 @@ def test_kelly_mcdonald_target_company_lead_uses_current_headline_authority():
 @pytest.mark.parametrize(
     "name,title,company,team_size,expected",
     [
-        ("Akash Mahtani", "Founding Electronics Engineer at Anoria", "ANORIA", 5, Capability.CAN_NAME),
+        ("Akash Mahtani", "Founding Electronics Engineer at Anoria", "ANORIA", 5, Capability.CAN_OPINE),
         ("JJ Zhao", "Founding Engineer, Idler | CS, Math @ UPenn", "Idler", 6, Capability.CAN_OPINE),
         ("Max Zou", "Founding Engineer @ LemonLime | Statistics&ML @ CMU", "LemonLime", 5, Capability.CAN_OPINE),
         ("Perkin Yang", "Founder of Still Human Podcast | Interns at Synphony", "Synphony", 10, Capability.CAN_OPINE),
-        ("Zachary Ta", "Founding Engineer @ Voker.ai", "Voker", 6, Capability.CAN_NAME),
+        ("Zachary Ta", "Founding Engineer @ Voker.ai", "Voker", 6, Capability.CAN_OPINE),
     ],
     ids=lambda value: str(value).replace(" ", "-").casefold(),
 )
@@ -1519,6 +1611,119 @@ def test_create_block_false_authority_is_not_promoted(
         CompanyFacts(name=company, team_size=team_size),
         state=ThreadState.NO_CONTEXT,
     ) is expected
+
+
+def test_max_zou_tiny_company_uses_approach_intel_not_org_mapping():
+    read = ThreadRead()
+    facts = CompanyFacts(name="LemonLime", team_size=5, is_startup=True)
+    decision = decide(
+        state=ThreadState.NO_CONTEXT,
+        read=read,
+        contact=contact(
+            "Founding Engineer @ LemonLime | Statistics&ML @ CMU",
+            name="Max Zou",
+        ),
+        facts=facts,
+        invite_text="Exploring product roles at LemonLime.",
+        now=NOW,
+    )
+
+    assert decision.ask is Ask.INTEL
+    assert read.intel_focus == "approach"
+
+    bad = review(
+        message=(
+            "Thanks for connecting. I'm exploring a fall product internship at "
+            "LemonLime. Who owns product hiring at LemonLime?"
+        ),
+        decision=decision,
+        read=read,
+        capability=Capability.CAN_OPINE,
+        recipient_name="Max Zou",
+        company="LemonLime",
+    )
+    assert "intel_focus_mismatch:approach_to_routing" in bad.flags
+
+    good = review(
+        message=(
+            "Thanks for connecting. I'm exploring a fall product internship at "
+            "LemonLime. Would you recommend reaching out directly to the founders "
+            "about it?"
+        ),
+        decision=decision,
+        read=read,
+        capability=Capability.CAN_OPINE,
+        recipient_name="Max Zou",
+        company="LemonLime",
+    )
+    assert "intel_approach_recommendation_missing" not in good.flags
+    assert "intel_focus_mismatch:approach_to_routing" not in good.flags
+
+
+def test_sam_radage_anam_prompt_prescribes_founder_approach_question():
+    read = ThreadRead(intel_focus="approach")
+    _, prompt = build_prompt(
+        messages=[],
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL),
+        read=read,
+        name="Sam Radage",
+        title="Senior Software Engineer",
+        company="Anam AI",
+        facts=CompanyFacts(name="Anam AI", team_size=20),
+        banned=[],
+    )
+
+    assert "reaching out directly to the founders" in prompt
+    assert "do not ask who owns product hiring" in prompt.casefold()
+
+
+@pytest.mark.parametrize(
+    "name,message",
+    [
+        (
+            "JJ Zhao",
+            "Thanks for accepting. I'm exploring a fall product internship at "
+            "Idler and would find it helpful to know if you'd recommend reaching "
+            "out directly to the founders about that?",
+        ),
+        (
+            "Perkin Yang",
+            "Hi Perkin, would it make sense for me to reach out directly to the "
+            "founders about a fall product internship at Synphony?",
+        ),
+    ],
+    ids=lambda value: str(value).replace(" ", "-").casefold(),
+)
+def test_tiny_company_approach_allows_natural_recommendation_phrasing(
+    name, message
+):
+    result = review(
+        message=message,
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(intel_focus="approach"),
+        capability=Capability.CAN_OPINE,
+        recipient_name=name,
+        company="Idler" if name == "JJ Zhao" else "Synphony",
+    )
+
+    assert "intel_approach_recommendation_missing" not in result.flags
+
+
+def test_shaunak_kale_tiny_company_approach_still_allows_only_one_ask():
+    result = review(
+        message=(
+            "Hi Shaunak, I'm exploring a fall product internship at Icarus. "
+            "Would it make sense to reach out directly to the founders, or would "
+            "you recommend a different approach?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(intel_focus="approach"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Shaunak Kale",
+        company="Icarus",
+    )
+
+    assert "multiple_asks:2" in result.flags
 
 
 def test_junior_contacts_get_intel_not_name():
@@ -1573,6 +1778,42 @@ def test_unmarked_requisition_needs_verification():
         discovered_at="2026-08-01T00:00:00+00:00",
     )
     assert requisition_state(opportunity, pursuit_season="fall", now=NOW) == "needs_verification"
+
+
+def test_pratyaksh_c_expired_gemini_role_cannot_drive_the_ask():
+    opportunity = OpportunityRecord(
+        opportunity_id="op-gemini-pm-intern",
+        organization_id="org-gemini",
+        title="Fall 2026 Product Management Intern",
+        opportunity_type="internship",
+        discovered_at="2026-07-01T00:00:00+00:00",
+    )
+    audit_day = datetime(2026, 8, 20, tzinfo=UTC)
+
+    assert requisition_state(
+        opportunity,
+        pursuit_season="fall",
+        now=audit_day,
+    ) == "needs_verification"
+    assert requisition_actionability(
+        opportunity,
+        CompanyFacts(name="Gemini", team_size=1000),
+        pursuit_season="fall",
+        now=audit_day,
+    ) == "not_actionable"
+
+    result = review(
+        message=(
+            "Thanks for accepting. I saw Gemini has a Product Management Intern "
+            "role open for fall. Do you know who owns product hiring at Gemini?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Pratyaksh C.",
+        company="Gemini",
+    )
+    assert "cites_unverified_requisition" in result.flags
 
 
 def test_fulltime_req_at_small_company_is_create_wedge():
@@ -1680,6 +1921,26 @@ def test_real_description_is_kept():
     )
     assert "Cursor for financial modeling" in facts.description
     assert facts.is_small
+
+
+def test_sam_radage_anam_size_uses_tiny_company_approach():
+    """Anam's current 20-person team is small enough for an approach ask."""
+
+    from outreach.reply_engine import company_facts
+
+    facts = company_facts(org("team_size=20 | team_size_source=https://anam.ai/about"))
+    assert facts.team_size == 20
+    assert facts.needs_approach_recommendation
+
+
+def test_gautam_jha_cosm_size_range_is_not_tiny():
+    """A range lower-bounded above 25 must not inherit the startup fallback."""
+
+    from outreach.reply_engine import company_facts
+
+    facts = company_facts(org("team_size_range=501-1000"))
+    assert (facts.team_size_min, facts.team_size_max) == (501, 1000)
+    assert not facts.needs_approach_recommendation
 
 
 # ---------------------------------------------------------------- Layer 3
@@ -1813,16 +2074,18 @@ def test_replied_ic_can_still_get_name():
     assert decision.ask is Ask.NAME
 
 
-def test_silent_ic_at_tiny_company_can_still_get_name():
+def test_achim_munene_tiny_company_ic_gets_approach_intel():
+    read = ThreadRead()
     decision = decide(
         state=ThreadState.NO_CONTEXT,
-        read=ThreadRead(),
+        read=read,
         contact=contact("Software Engineer", name="Achim Munene"),
         facts=CompanyFacts(name="Primer", team_size=2, is_startup=True),
     )
 
     assert decision.action is Action.ASK
-    assert decision.ask is Ask.NAME
+    assert decision.ask is Ask.INTEL
+    assert read.intel_focus == "approach"
 
 
 def test_vitid_nakareseisoon_large_company_ic_stays_intel():
@@ -3393,6 +3656,50 @@ def test_jj_zhao_review_heading_makes_all_intel_holds_explicit(tmp_path):
     assert [draft.ask for draft in parse_review(rendered_path)] == [Ask.INTEL]
 
 
+def test_sunil_kuruba_missing_thread_context_stays_visible_as_data_hold(tmp_path):
+    source = tmp_path / "source-review.md"
+    source.write_text(
+        "# Review\n\n"
+        "## HELD — NO DRAFT\n\n"
+        "## Suppressed for 2027 re-entry\n\n"
+        "## Contact rows to create\n",
+        encoding="utf-8",
+    )
+    rendered = render_reissued_review(
+        rows=[
+            {
+                "draft": SavedDraft(
+                    name="Sunil Kuruba",
+                    company="Airbyte",
+                    title="Software Engineer",
+                    ask=Ask.INTEL,
+                    message="",
+                    old_flags=[],
+                    last_thing="You: Any other Product/Strategy roles?",
+                ),
+                "flags": [
+                    "thread history incomplete; targeted LinkedIn re-pull required"
+                ],
+                "status": "data_hold",
+                "decision": None,
+            }
+        ],
+        original_review=source,
+        meta={},
+    )
+
+    assert "**HELD — data:** thread history incomplete" in rendered
+    assert "- **Held:** 1" in rendered
+    assert "- **Sendable:** 0" in rendered
+    rendered_path = tmp_path / "sunil-data-hold.md"
+    rendered_path.write_text(rendered, encoding="utf-8")
+    parsed = parse_review(rendered_path)
+    assert parsed[0].message == ""
+    assert parsed[0].old_flags == [
+        "thread history incomplete; targeted LinkedIn re-pull required"
+    ]
+
+
 def test_tim_drahn_warm_opener_has_no_false_connection_premise():
     result = review(
         message=(
@@ -3792,6 +4099,88 @@ def test_bratee_placeholder_reply_still_needs_targeted_repull():
 
     assert evidence is not None
     assert evidence.touchpoint_id == "tp-responsive"
+
+
+@pytest.mark.parametrize(
+    "name,message",
+    [
+        ("Shubham Rawat", "You sent an attachment"),
+        ("Will Nzeuton", "Awesome, thanks for letting me know!"),
+        ("Prakash Nidhi Verma", "Thanks a lot!"),
+        (
+            "Ruben Gimenez Linares",
+            "Hi Ruben, had a nice coffee chat with you last fall, and thought "
+            "I'd add you here so that we can stay connected!",
+        ),
+    ],
+    ids=lambda value: str(value).replace(" ", "-").casefold(),
+)
+def test_live_response_shaped_outbounds_require_repull(name, message):
+    evidence = inbound_probably_missing(
+        [
+            TouchpointRecord(
+                touchpoint_id=f"tp-{name.replace(' ', '-').casefold()}",
+                organization_id="org-1",
+                contact_id="ct-1",
+                channel="linkedin",
+                status="Sent",
+                message_kind="linkedin_manual_message",
+                message_text=message,
+            )
+        ]
+    )
+
+    assert evidence is not None
+
+
+def test_pankaj_yadav_manual_outbound_is_not_duplicated(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-ottimate", name="Ottimate")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-pankaj",
+            organization_id="org-ottimate",
+            full_name="Pankaj Yadav",
+            status="Connected",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-pankaj-invite",
+            organization_id="org-ottimate",
+            contact_id="ct-pankaj",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Pankaj, would love to connect.",
+            sent_at="2026-07-01T00:00:00+00:00",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-pankaj-manual",
+            organization_id="org-ottimate",
+            contact_id="ct-pankaj",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_manual_message",
+            message_text="Could you help refer me to this Ottimate role?",
+            sent_at="2026-07-02T00:00:00+00:00",
+        )
+    )
+
+    backlog = build_accepted_silent_backlog(
+        workspace=workspace,
+        pursuit_season="fall",
+    )
+
+    window = backlog["results"][0]["message_window"]
+    assert [row["message"] for row in window].count(
+        "Could you help refer me to this Ottimate role?"
+    ) == 1
 
 
 def test_critic_enforces_prior_commitment():

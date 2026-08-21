@@ -21,6 +21,8 @@ Deterministic critic checks (hard fails, not prompt guidance):
 8. **Word budget scales down with touch count.** Third touch gets roughly half of first.
 9. **Terminal touch says it is terminal, warmly.** Use "I'll stop bugging you after this one, promise!" or open with "Last note from me on this" and end with a warm sign-off. Do not use "This is my last note on it"; it reads like a countdown rather than politeness.
 10. **Ask must be sized to actual authority.** Recruiters and SVPs must not receive INTEL asks.
+11. **A post-invite outbound is context.** If Akshat already sent a real message after the invite, the next draft is a second touch. It must continue the standing ask and must not reopen with "thanks for accepting/connecting." Response-shaped outbounds whose preceding inbound is missing are held for re-pull, not guessed through.
+12. **Tiny-team INTEL asks for approach advice, not an org chart.** At a verified team of 25 or fewer, an IC should be asked whether reaching out directly to the founders is the right move. Do not ask who owns product hiring when the answer is structurally obvious.
 
 ---
 
@@ -224,9 +226,9 @@ Rule: if the recipient's title names an employer that does not match the bound o
 
 **After**
 
-> Hi Wissem, thanks for connecting. Have you seen product interns come through Airtable, or know roughly when recruiting opens? Trying to time things right for fall.
+> Hi Wissem, thanks for connecting. I'm looking for a fall product internship at Airtable. Do you know who owns product hiring at Airtable?
 
-**Why.** Nothing in the CV recital helps him answer whether he has seen interns. "Airtable's platform caught my eye" is filler that reads as flattery. The question is the whole message.
+**Why.** Nothing in the CV recital helps him answer a low-cost routing question. "Airtable's platform caught my eye" is filler that reads as flattery. Ask the IC for the one actionable fact they are likely to know: who owns product hiring. Timing is reserved for a thread where timing is the genuine unresolved fact.
 
 ---
 
@@ -240,13 +242,29 @@ Rule: if the recipient's title names an employer that does not match the bound o
 
 **After**
 
-> Hi Vitid, thanks for connecting. I'm looking for a fall product internship at Adobe. Have you seen interns come through, or know roughly when recruiting opens?
+> Hi Vitid, thanks for connecting. I'm looking for a fall product internship at Adobe. Do you know who owns product hiring at Adobe?
 
-**Why.** Already close. Only the em dash and the missing name change. Included so the spec does not imply everything needs rewriting: roughly this shape is the target for the bulk of the 187 INTEL drafts.
+**Why.** The opening and goal were already close. The corrected default is one casual routing question, not two timing/programme questions. Roughly this shape is the target for a large-company IC when there is no thread-specific timing unknown.
 
 ---
 
-## Case 14 — thread with prior incident, must hold
+## Case 14 — INTEL, tiny-company approach question
+
+### Max Zou, LemonLime — Founding Engineer
+
+**Before**
+
+> Thanks for accepting. I'm exploring a fall product internship or co-op at LemonLime. Who owns product hiring at LemonLime?
+
+**After**
+
+> Thanks for connecting. I'm exploring a fall product internship at LemonLime. Would you recommend reaching out directly to the founders about it?
+
+**Why.** LemonLime has five people. Asking who owns product hiring creates fake uncertainty and makes the recipient perform an org-mapping task whose answer is obvious. Asking whether the direct founder approach is sensible is still one low-cost INTEL question, but it can change what Akshat actually does next.
+
+---
+
+## Case 15 — thread with prior incident, must hold
 
 ### Naman Kothari, Amplitude — Software Engineer
 
@@ -266,7 +284,7 @@ Rule: if the recipient's title names an employer that does not match the bound o
 
 ---
 
-## Case 15 — direct reply that must actually answer
+## Case 16 — direct reply that must actually answer
 
 ### Suresh Mergu, Optum
 

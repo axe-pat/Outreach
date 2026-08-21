@@ -113,8 +113,9 @@ def _parse_entry(lines: list[str], ask: Ask) -> SavedDraft:
             title = line[2:marker]
             last_thing = line[marker + len("** · "):]
             continue
-        if "HELD — critic:** " in line:
-            old_flags = _split_flags(line.split("HELD — critic:** ", 1)[1])
+        held_match = re.search(r"HELD — (?:critic|data):\*\* (.+)$", line)
+        if held_match:
+            old_flags = _split_flags(held_match.group(1))
             continue
         message_lines.append(line)
     message = "\n".join(message_lines).strip()
@@ -272,8 +273,10 @@ def replay(
             rows.append(
                 {
                     "draft": saved,
-                    "flags": ["replay_context_not_found"],
-                    "status": "unmapped",
+                    "flags": [
+                        "thread history incomplete; targeted LinkedIn re-pull required"
+                    ],
+                    "status": "data_hold",
                     "current_ask": Ask.NONE,
                 }
             )
@@ -588,17 +591,27 @@ def render_reissued_review(
             continue
         for sentence in batch_repetition_sentences(row["draft"].message, decision):
             sentence_counts[sentence.casefold()] += 1
+    rows_with_copy = [row for row in rows if row["draft"].message.strip()]
     mean_words = round(
-        sum(len(row["draft"].message.split()) for row in rows) / len(rows),
+        sum(len(row["draft"].message.split()) for row in rows_with_copy)
+        / len(rows_with_copy),
         1,
-    ) if rows else 0
+    ) if rows_with_copy else 0
     max_reuse = max(sentence_counts.values(), default=0)
 
-    original_lines = original_review.read_text(encoding="utf-8").splitlines()
+    original_text = original_review.read_text(encoding="utf-8")
+    original_lines = original_text.splitlines()
     preserved_summary = [
         line
         for line in original_lines
-        if line.startswith("- **Source lanes:**")
+        if line.startswith("- **Manual follow-up holds:**")
+        or line.startswith("- **Suppressed:**")
+        or line.startswith("- **Suppressed permanently:**")
+        or line.startswith("- **Moved to manual first-message review:**")
+        or line.startswith("- **Fivetran manual holds outside this pack:**")
+        or line.startswith("- **Decision-layer ask split before operator verbatim overrides:**")
+        or line.startswith("- **Source lanes:**")
+        or line.startswith("- **Source boundary:**")
         or line.startswith("- **Locked approved threads excluded:**")
     ]
     if not preserved_summary:
@@ -611,10 +624,19 @@ def render_reissued_review(
             f"{meta.get('locked_approved_threads_excluded', 0)}",
         ]
 
+    artifact_note = (
+        "Artifact only. Nothing in this file has been sent or added to a send queue."
+    )
+    if "Henry Kwan is excluded" in original_text:
+        artifact_note += (
+            " Henry Kwan is excluded because his 2026-08-19 manual send is "
+            "already logged."
+        )
+
     lines = [
         f"# LinkedIn follow-up review — {datetime.now().astimezone().date()}",
         "",
-        "Artifact only. Nothing in this file has been sent or added to a send queue.",
+        artifact_note,
         "",
         "## Batch summary",
         "",
@@ -648,7 +670,8 @@ def render_reissued_review(
             f"- **Last thing:** {draft.last_thing or 'No prior message recorded.'}",
         ])
         if row["status"] != "release":
-            lines.append(f"- **HELD — critic:** {', '.join(row['flags'])}")
+            label = "data" if row["status"] == "data_hold" else "critic"
+            lines.append(f"- **HELD — {label}:** {', '.join(row['flags'])}")
         lines.extend(["", draft.message.strip(), ""])
 
     for ask in (Ask.CREATE, Ask.REFER):
@@ -694,7 +717,8 @@ def render_reissued_review(
             "",
         ])
         if row["status"] != "release":
-            lines.append(f"**HELD — critic:** {', '.join(row['flags'])}")
+            label = "data" if row["status"] == "data_hold" else "critic"
+            lines.append(f"**HELD — {label}:** {', '.join(row['flags'])}")
         lines.extend([draft.message.strip(), ""])
 
     lines.extend([footer.rstrip(), ""])

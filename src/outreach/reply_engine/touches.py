@@ -34,8 +34,19 @@ _CONNECTION_THANKS = re.compile(
     r"\bthanks?(?: you)? for (?:connecting|accepting|the connection)\b",
     re.I,
 )
+_OFFCHANNEL_CONTEXT = re.compile(
+    r"\b(?:had|we had)\s+a\s+(?:really\s+)?nice\s+coffee\s+chat\b|"
+    r"\b(?:spoke|talked|chatted|met)\s+(?:by phone|on the phone|offline|in person)\b",
+    re.I,
+)
 _PURE_RESPONSE = re.compile(
     r"^(?:(?:oh|okay|ok|but)\s*[,!.]?\s*)*(?:"
+    r"you sent an attachment\s*[.!]*$|"
+    r"awesome[,!]?\s+thanks?\s+for\s+letting\s+me\s+know\b|"
+    r"sure[,!]?\s+thanks?\s*[.!]*$|"
+    r"thanks?\s+a\s+lot(?:\s+for\s+checking\b[^.!?]*)?\s*[.!]*$|"
+    r"any\s+other\b[^?]{0,80}\broles?\s*\?|"
+    r"(?:we\s+)?had\s+a\s+(?:really\s+)?nice\s+coffee\s+chat\b|"
     r"thanks?\s+anyways?|"
     r"thanks?\s+so\s+much(?:\s+[A-Z][\w'’.-]*)?\s+for\b|"
     r"thank\s+you\s+so\s+much(?:\s+[A-Z][\w'’.-]*)?(?:\s+for\b|[! .😊😃]*$)|"
@@ -76,7 +87,11 @@ def outbound_is_purely_responsive(message: str) -> bool:
     """True when outbound wording presupposes something the recipient did."""
 
     text = " ".join((message or "").split()).strip()
-    if not text or _COLD_OPENER.search(text) or _CONNECTION_THANKS.search(text):
+    if not text:
+        return False
+    if _OFFCHANNEL_CONTEXT.search(text):
+        return True
+    if _COLD_OPENER.search(text) or _CONNECTION_THANKS.search(text):
         return False
     return bool(_PURE_RESPONSE.search(text))
 

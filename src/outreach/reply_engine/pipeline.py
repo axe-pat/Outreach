@@ -191,7 +191,10 @@ def run(
                 pursuit_season=pursuit_season,
                 now=now,
                 invite_text=invite_text,
-                has_prior_outbound=any(message.is_from_us for message in messages),
+                has_prior_outbound=any(
+                    message.is_from_us and message.source != "original_invite"
+                    for message in messages
+                ),
             )
         if decision.ask in {Ask.NAME, Ask.INTEL}:
             usable_proof = []
@@ -219,7 +222,7 @@ def run(
             expected_message_count=item.expected_message_count,
             touch_count=max(0, item.touch_count),
             touch_cap_reached=(
-                state is ThreadState.NO_CONTEXT
+                state in {ThreadState.NO_CONTEXT, ThreadState.OUTBOUND_UNANSWERED}
                 and touch_cap_reached(
                     item.touch_count,
                     reopen_condition_fired=item.reopen_condition_fired,

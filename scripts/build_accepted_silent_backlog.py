@@ -436,7 +436,10 @@ def build_backlog(
         band, fall_score = band_for(organization, bands)
         followup_count = followups_sent(contact_touchpoints)
         manuals = manual_outbounds(contact_touchpoints)
-        outbound = [*sent_followup_touchpoints(contact_touchpoints), *manuals]
+        # ``LINKEDIN_FOLLOWUP_KINDS`` already includes manual messages.  The
+        # old concatenation added every manual outbound twice, which made a
+        # single prior note look like two touches in the visible transcript.
+        outbound = sent_followup_touchpoints(contact_touchpoints)
         window = build_message_window(invite_note=invite_note, outbound=outbound)
         if not window:
             first_outreach_review.append(

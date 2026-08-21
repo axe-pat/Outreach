@@ -17,7 +17,7 @@ import json
 import re
 from typing import Any
 
-from .models import Capability, NamedPerson, ThreadRead
+from .models import Ask, Capability, NamedPerson, ThreadRead
 from .thread import Message
 
 _EXTRACTION_PROMPT = """\
@@ -35,7 +35,7 @@ Return exactly this JSON shape:
   "question_asked_of_me": string or null,
   "question_kind": "background_fit" | "interest_availability_intent" | "other" | "none",
   "intern_economics_objection": boolean,
-  "intel_focus": "routing" | "timing",
+  "intel_focus": "routing" | "timing" | "approach",
   "named_people": [{{"name": string, "role_hint": string, "why": string}}],
   "named_opening": string or null,
   "explicit_request": "resume" | "call" | "feedback" | "upvote" | "intro_material" | "none",
@@ -59,7 +59,8 @@ Rules:
   lack of budget, headcount, bandwidth, or small-team capacity.
 - intel_focus: default to "routing". Use "timing" only when this conversation
   explicitly establishes recruiting timing as the unresolved fact. Never use
-  timing merely because it is an easy generic question.
+  timing merely because it is an easy generic question. "approach" is supplied
+  deterministically from verified company size; do not infer it from prose.
 - named_people: ONLY a third party HUMAN the recipient pointed us toward, by
   name. Never a company, product, tool, website, course or program - a
   recommended resource is not a referral.
@@ -186,6 +187,50 @@ _TIMING_GENUINELY_UNRESOLVED = re.compile(
 )
 _NEED = re.compile(r"opentowork|laid off|layoff|looking for (?:a )?(?:job|role|work)|job search", re.I)
 
+_PRIOR_REFERRAL_ASK = re.compile(
+    r"\b(?:refer(?:ral|red|ring)?|help\s+(?:me\s+)?(?:get\s+)?referred)\b",
+    re.I,
+)
+_PRIOR_FORWARD_ASK = re.compile(
+    r"\b(?:introduce me|intro(?:duction)? to|pass (?:my|this)|forward (?:my|this)|"
+    r"put me in touch)\b",
+    re.I,
+)
+_PRIOR_NAME_ASK = re.compile(
+    r"\bwho\b.{0,60}\b(?:hiring|talk to|speak to|reach out to|right person)\b|"
+    r"\b(?:right person|who should i (?:talk|speak|reach out) to)\b",
+    re.I,
+)
+_PRIOR_CREATE_ASK = re.compile(
+    r"\b(?:take on|bring on|consider|use)\b[^?.]{0,45}\bproduct intern\b|"
+    r"\bconversation\b[^?.]{0,55}\b(?:product )?intern(?:ship)?\b",
+    re.I,
+)
+
+
+def prior_outbound_ask(messages: list[Message]) -> tuple[Ask, str | None]:
+    """Classify the standing ask in the last real post-invite outbound."""
+
+    prior = next(
+        (
+            message.text
+            for message in reversed(messages)
+            if message.is_from_us and message.source != "original_invite"
+        ),
+        None,
+    )
+    if not prior:
+        return Ask.NONE, None
+    if _PRIOR_REFERRAL_ASK.search(prior):
+        return Ask.REFER, prior
+    if _PRIOR_FORWARD_ASK.search(prior):
+        return Ask.FORWARD, prior
+    if _PRIOR_NAME_ASK.search(prior):
+        return Ask.NAME, prior
+    if _PRIOR_CREATE_ASK.search(prior):
+        return Ask.CREATE, prior
+    return Ask.NONE, prior
+
 #: Language that actually declines.  A declared ``cannot_help`` is honoured only
 #: when the recipient said something like this: the model returns that value off
 #: bare greetings ("Hey, Akshat") and off friendly small talk, and rule 6 then
@@ -278,6 +323,9 @@ def deterministic_read(
     inbound = [m for m in messages if not m.is_from_us]
     outbound = [m for m in messages if m.is_from_us]
     if not inbound:
+        read.prior_outbound_ask, read.prior_outbound_text = prior_outbound_ask(
+            messages
+        )
         return read
 
     latest = inbound[-1].text
@@ -491,7 +539,7 @@ def _coerce(
         capability = Capability.CAN_OPINE
 
     intel_focus = str(payload.get("intel_focus") or "routing").strip().casefold()
-    if intel_focus not in {"routing", "timing"}:
+    if intel_focus not in {"routing", "timing", "approach"}:
         intel_focus = "routing"
 
     return ThreadRead(

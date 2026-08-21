@@ -107,7 +107,7 @@ def _decide(
     # instead of writing a ceremonial closing note. An explicit 2027/new-grad
     # requisition can deterministically reopen this condition later.
     if (
-        state is ThreadState.NO_CONTEXT
+        state in {ThreadState.NO_CONTEXT, ThreadState.OUTBOUND_UNANSWERED}
         and facts.is_large_company
         and max(0, touch_count) + 1
         >= effective_touch_cap(reopen_condition_fired=reopen_condition_fired)
@@ -123,7 +123,7 @@ def _decide(
                 f"2027 full-time or new-grad product recruiting opens at {facts.name}"
             ),
         )
-    if state is ThreadState.NO_CONTEXT and touch_cap_reached(
+    if state in {ThreadState.NO_CONTEXT, ThreadState.OUTBOUND_UNANSWERED} and touch_cap_reached(
         touch_count,
         reopen_condition_fired=reopen_condition_fired,
     ):
@@ -297,10 +297,15 @@ def _decide(
         )
 
     # -- Rule 10: nothing to respond to, so we initiate ---------------------
-    ask = select_ask(
-        capability,
-        has_citable_req=req_actionability == APPLY_NOW,
-        req_actionability=req_actionability,
+    ask = (
+        read.prior_outbound_ask
+        if state is ThreadState.OUTBOUND_UNANSWERED
+        and read.prior_outbound_ask is not Ask.NONE
+        else select_ask(
+            capability,
+            has_citable_req=req_actionability == APPLY_NOW,
+            req_actionability=req_actionability,
+        )
     )
     if ask is Ask.NONE:
         return Decision(action=Action.SUPPRESS, rule=11, reason="no viable ask")
@@ -337,6 +342,22 @@ def decide(
 ) -> Decision:
     """Run the priority table, then attach required compose fields."""
 
+    # Layer-2 contextual value: verified tiny-team size changes the useful IC
+    # question from org mapping to an approach recommendation.  The Layer-3
+    # ask remains INTEL; no new decision-table branch is introduced.
+    resolved_capability = resolve_capability(
+        contact,
+        facts,
+        declared=read.capability,
+        state=state,
+    )
+    if (
+        read.intel_focus != "timing"
+        and facts.needs_approach_recommendation
+        and resolved_capability is Capability.CAN_OPINE
+    ):
+        read.intel_focus = "approach"
+
     decision = _decide(
         state=state,
         read=read,
@@ -368,7 +389,7 @@ def decide(
     decision.touch_number = max(0, touch_count) + 1
     decision.terminal_touch = bool(
         decision.emits_message
-        and state is ThreadState.NO_CONTEXT
+        and state in {ThreadState.NO_CONTEXT, ThreadState.OUTBOUND_UNANSWERED}
         and decision.touch_number
         >= effective_touch_cap(reopen_condition_fired=reopen_condition_fired)
     )

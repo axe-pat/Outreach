@@ -123,6 +123,29 @@ _INTEL_TIMING_OR_PERSONAL_ENTRY = re.compile(
     r"\bhow\b.{0,20}\b(?:you|they)\b.{0,20}\b(?:got|joined|landed|hired)\b",
     re.I,
 )
+_INTEL_APPROACH_RECOMMENDATION = re.compile(
+    r"(?:"
+    r"\b(?:would|do)\s+you\s+recommend\b[^?]{0,90}|"
+    r"\bif\s+you(?:'d|\s+would)\s+recommend\b[^?]{0,90}|"
+    r"\bwould\s+it\s+make\s+sense\b[^?]{0,90}"
+    r")\b(?:reach(?:ing)?\s+out|contact(?:ing)?|approach(?:ing)?)\b"
+    r"[^?]{0,70}\b(?:founder|co[- ]?founder)s?\b",
+    re.I,
+)
+_INTEL_APPROACH_SECOND_OPTION = re.compile(
+    r"\bor\s+(?:would|do|should|could)\b[^?]{0,55}"
+    r"\b(?:recommend|approach|instead|else|different)\b",
+    re.I,
+)
+_UNVERIFIED_OPENING_CLAIM = re.compile(
+    r"\b(?:saw|noticed|found|looks? like|appears?|there(?:'s| is)|"
+    r"(?:the company|[A-Z][\w.&'-]+) has)\b[^.!?]{0,90}"
+    r"\b(?:role|opening|requisition|intern(?:ship)?)\b[^.!?]{0,45}"
+    r"\b(?:open|posted|listed|hiring|available)\b|"
+    r"\b(?:role|opening|requisition|intern(?:ship)?)\b[^.!?]{0,55}"
+    r"\b(?:is|was)\s+(?:currently\s+)?open\b",
+    re.I,
+)
 _ORG_CHART_SLOT = re.compile(
     r"\bwho(?:\s+(?:would|'d))?\s+(?:own|owns|run|runs|lead|leads|handle|handles|manage|manages)\b|"
     r"\b(?:owner|head|lead|leader)\s+of\s+(?:product|the\s+product)\b",
@@ -167,6 +190,19 @@ _NAME_ESCALATION = re.compile(
 )
 _FILLER_CLOSER = re.compile(
     r"\blow lift\b|\bwould love to talk through how i could help\b",
+    re.I,
+)
+_REPEATED_ACCEPTANCE_OPENER = re.compile(
+    r"\bthanks?\s+(?:you\s+)?for\s+(?:accepting|connecting|the connection)\b",
+    re.I,
+)
+_UNSUPPORTED_EXCHANGE_THANKS = re.compile(
+    r"\bthanks?\s+(?:you\s+)?for\s+(?:the\s+)?(?:exchange|responses?|"
+    r"getting back|letting me know|checking(?: on| with)?|sharing)\b",
+    re.I,
+)
+_REFERRAL_REQUEST = re.compile(
+    r"\b(?:refer me|referral|get referred|help me get referred)\b",
     re.I,
 )
 _TERMINAL_LANGUAGE = re.compile(
@@ -636,6 +672,15 @@ def review(
     ):
         result.fail("warm_contact_false_acceptance_premise")
 
+    if decision.touch_number > 1 and _REPEATED_ACCEPTANCE_OPENER.search(body):
+        result.fail("repeat_acceptance_opener")
+    if (
+        decision.touch_number > 1
+        and not (last_inbound_message or "").strip()
+        and _UNSUPPORTED_EXCHANGE_THANKS.search(body)
+    ):
+        result.fail("unsupported_exchange_acknowledgement")
+
     if requires_availability_qualifier(decision, read):
         if decision.campaign_track == LARGE_COMPANY_TRACK:
             has_large_track_availability = bool(
@@ -769,8 +814,13 @@ def review(
         result.fail(f"unverified_url:{url[:40]}")
 
     # Never name a requisition that did not pass the freshness gate.
-    if not decision.citable_req and re.search(
-        r"\b(intern(ship)?|role|req|posting|opening)\b.{0,40}\b(20\d{2}|R\d{3,})", body, re.I
+    if not decision.citable_req and (
+        re.search(
+            r"\b(intern(ship)?|role|req|posting|opening)\b.{0,40}\b(20\d{2}|R\d{3,})",
+            body,
+            re.I,
+        )
+        or _UNVERIFIED_OPENING_CLAIM.search(body)
     ):
         result.fail("cites_unverified_requisition")
 
@@ -839,6 +889,15 @@ def review(
         if read.intel_focus == "timing":
             if routing_question:
                 result.fail("intel_focus_mismatch:timing_to_routing")
+        elif read.intel_focus == "approach":
+            if routing_question:
+                result.fail("intel_focus_mismatch:approach_to_routing")
+            if _INTEL_TIMING_OR_PERSONAL_ENTRY.search(body):
+                result.fail("intel_focus_mismatch:approach_to_timing")
+            if not _INTEL_APPROACH_RECOMMENDATION.search(body):
+                result.fail("intel_approach_recommendation_missing")
+            if _INTEL_APPROACH_SECOND_OPTION.search(body):
+                result.fail("multiple_asks:2")
         elif _INTEL_TIMING_OR_PERSONAL_ENTRY.search(body):
             result.fail("intel_focus_mismatch:routing_to_timing")
 
@@ -857,6 +916,16 @@ def review(
                 else capability_has_authority
             ):
                 result.fail("intel_asks_ic_about_org_structure")
+
+    if read.prior_outbound_ask is Ask.REFER:
+        if _ORG_STRUCTURE_QUESTION.search(body) and not _REFERRAL_REQUEST.search(body):
+            result.fail("prior_ask_pivot:refer_to_routing")
+    elif read.prior_outbound_ask in {Ask.NAME, Ask.INTEL}:
+        if _REFERRAL_REQUEST.search(body):
+            result.fail("prior_ask_pivot:routing_to_refer")
+    elif read.prior_outbound_ask is Ask.CREATE:
+        if _ORG_STRUCTURE_QUESTION.search(body):
+            result.fail("prior_ask_pivot:create_to_routing")
 
     if decision.ask is Ask.NAME and _ORG_CHART_SLOT.search(body):
         result.fail("name_ask_targets_org_chart_slot")

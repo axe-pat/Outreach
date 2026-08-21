@@ -203,7 +203,16 @@ def resolve_state(
     if reopen_condition.strip() or "parked" in notes or "suppress follow-up" in notes:
         return ThreadState.PARKED
     if not has_real_conversation(messages):
-        return ThreadState.NO_CONTEXT
+        outbound = [message for message in messages if message.is_from_us]
+        post_invite_outbound = len(outbound) > 1 or any(
+            message.source and message.source != "original_invite"
+            for message in outbound
+        )
+        return (
+            ThreadState.OUTBOUND_UNANSWERED
+            if post_invite_outbound
+            else ThreadState.NO_CONTEXT
+        )
     return (
         ThreadState.YOU_REPLIED_LAST
         if messages[-1].is_from_us

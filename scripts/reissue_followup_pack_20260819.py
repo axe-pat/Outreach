@@ -461,6 +461,14 @@ def main() -> int:
         help="Reuse every non-empty draft and retry composer-error rows only.",
     )
     parser.add_argument(
+        "--regenerate-failing-only",
+        action="store_true",
+        help=(
+            "Replay the current deterministic decision and critic for every saved "
+            "draft, then regenerate only rows whose ask changed or copy still fails."
+        ),
+    )
+    parser.add_argument(
         "--limit-targets",
         type=int,
         default=0,
@@ -578,9 +586,8 @@ def main() -> int:
         season=args.season,
     )
     mapped = [(item, _context_for_saved(item, contexts)) for item in saved]
-    missing = [item.name for item, context in mapped if context is None]
-    if missing:
-        raise RuntimeError(f"saved drafts no longer map to current backlog: {missing}")
+    missing_context_rows = [item for item, context in mapped if context is None]
+    mapped = [(item, context) for item, context in mapped if context is not None]
 
     proof_beats = load_proof_beats(workspace / "proof_beats.yml")
     profile_path = REPO / "Profile" / "profile.md"
@@ -646,9 +653,17 @@ def main() -> int:
         if not current.decision.emits_message:
             reused[current.contact_id] = (current, context)
             continue
+        current.message = saved_item.message
+        current.compose_source = "saved_unaffected_20260819"
+        _review_one(current, context, proof_beats, profile_text)
         needs_regeneration = (
             not saved_item.message.strip()
             if args.resume_empty
+            else (
+                bool(current.critic_flags)
+                or saved_item.ask is not current.decision.ask
+            )
+            if args.regenerate_failing_only
             else (
                 current.decision.ask is Ask.INTEL
                 or saved_item.ask is not current.decision.ask
@@ -659,10 +674,6 @@ def main() -> int:
             if not args.limit_targets or len(targets) < args.limit_targets:
                 targets.append((saved_item, context))
                 continue
-
-        current.message = saved_item.message
-        current.compose_source = "saved_unaffected_20260819"
-        _review_one(current, context, proof_beats, profile_text)
         prior_composer_flags = [
             flag
             for flag in saved_item.old_flags
@@ -689,6 +700,7 @@ def main() -> int:
     print(f"already_sent_from_review={len(already_sent_names)}")
     print(f"locked_approved_excluded={len([s for s in saved_all if normalized(s.name) in locked_names])}")
     print(f"followup_drafts_remaining={len(saved)}")
+    print(f"data_holds_without_current_context={len(missing_context_rows)}")
     print(f"operator_verbatim={len(VERBATIM_DRAFTS)}")
     print(f"targeted_regeneration={len(targets)}")
     print(f"target_candidates_total={target_candidates_seen}")
@@ -752,6 +764,18 @@ def main() -> int:
                 draft.critic_flags.append("composer_unavailable:APIConnectionError")
             draft.critic_passed = False
     render_rows = _render_rows(merged)
+    for saved_item in missing_context_rows:
+        saved_item.message = ""
+        render_rows.append(
+            {
+                "draft": saved_item,
+                "flags": [
+                    "thread history incomplete; targeted LinkedIn re-pull required"
+                ],
+                "status": "data_hold",
+                "decision": None,
+            }
+        )
     review_text = render_reissued_review(
         rows=render_rows,
         original_review=review_path,
@@ -771,7 +795,8 @@ def main() -> int:
     output.write_text(review_text, encoding="utf-8")
 
     sendable = sum(row["status"] == "release" for row in render_rows)
-    critic_held = len(render_rows) - sendable
+    data_held = sum(row["status"] == "data_hold" for row in render_rows)
+    critic_held = len(render_rows) - sendable - data_held
     # The preserved footer contains the prior eight no-draft deterministic holds.
     deterministic_held = len(
         re.findall(
@@ -786,6 +811,7 @@ def main() -> int:
     print(f"drafts_regenerated={len(regenerated)}")
     print(f"sendable={sendable}")
     print(f"critic_held={critic_held}")
+    print(f"data_held={data_held}")
     print(f"deterministic_held={deterministic_held}")
     print(f"manual_followup_holds={len(manual_hold_contacts)}")
     print(f"suppressed={len(permanent_contacts) + 10}")

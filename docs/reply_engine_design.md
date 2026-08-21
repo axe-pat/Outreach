@@ -74,12 +74,18 @@ Nothing below works on bad input. All deterministic, no model:
 | State | Meaning |
 |---|---|
 | `no_context` | Accepted, zero real messages. **139 of 185 today.** |
+| `outbound_unanswered` | A real post-invite outbound exists with no captured reply after it. Preserve that standing ask; never reset the thread to acceptance copy. |
 | `they_replied_unanswered` | Ball in our court |
 | `you_replied_last` | Ball in their court — do not draft |
 | `parked` | No outbound; contact retained; reopen condition recorded |
 | `closed_hard` | Do not contact |
 
 `parked` absorbs both "they can't help" and "ping me when a role opens." Same machinery, different reopen conditions.
+
+If a post-invite outbound is response-shaped (for example, "thanks for letting
+me know" or an attachment marker) but the preceding inbound is absent, Layer 0
+removes it from drafting and emits a targeted re-pull row. The engine does not
+invent the missing exchange.
 
 ---
 

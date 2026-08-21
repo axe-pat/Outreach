@@ -17,6 +17,9 @@ class ThreadState(str, Enum):
     NO_CONTEXT = "no_context"
     """Invite accepted, but no real message exists yet."""
 
+    OUTBOUND_UNANSWERED = "outbound_unanswered"
+    """A real post-invite outbound exists, with no captured reply after it."""
+
     THEY_REPLIED_UNANSWERED = "they_replied_unanswered"
     YOU_REPLIED_LAST = "you_replied_last"
     PARKED = "parked"
@@ -135,7 +138,12 @@ class ThreadRead:
     """They raised budget, headcount, or small-team capacity themselves."""
 
     intel_focus: str = "routing"
-    """routing | timing. Timing must be grounded in a thread-specific unknown."""
+    """routing | timing | approach.
+
+    Timing must be grounded in a thread-specific unknown.  Approach is the
+    tiny-team variant: ask whether contacting the founders directly is the
+    right move instead of asking an obvious org-chart question.
+    """
 
     named_people: list[NamedPerson] = field(default_factory=list)
     named_opening: str | None = None
@@ -161,6 +169,16 @@ class ThreadRead:
     """Promises we made in-thread.  These become reopen conditions and are
     enforced by the critic - e.g. 'only send you a fit if there's a real
     match' must not be followed by a generic resume drop."""
+
+    prior_outbound_ask: Ask = Ask.NONE
+    """Ask already made in an unanswered post-invite outbound.
+
+    This is deterministic Layer-2 context.  Rule 11 may continue this ask but
+    may not silently pivot to a different rung as if the thread were new.
+    """
+
+    prior_outbound_text: str | None = None
+    """The exact prior outbound that the writer must follow up truthfully."""
 
     source: str = "deterministic"
     """ai | deterministic - how this read was produced."""

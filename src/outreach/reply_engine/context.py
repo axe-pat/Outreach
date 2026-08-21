@@ -26,6 +26,10 @@ from .models import Ask, Capability, ThreadState
 # --------------------------------------------------------------------------
 
 _TEAM_SIZE = re.compile(r"team_size=([\d,]+)")
+_TEAM_SIZE_RANGE = re.compile(
+    r"(?:team_size_range|team_size)=~?([\d,]+)\s*-\s*([\d,]+)",
+    re.I,
+)
 _BATCH = re.compile(r"batch=([^|]+)")
 _DESCRIPTION = re.compile(r"description=(.*?)(?: \| [a-z_]+=|$)", re.S)
 
@@ -42,6 +46,7 @@ _ABOUT_US_NOT_THEM = re.compile(
 
 _SMALL_COMPANY_CEILING = 200
 _TIGHT_KNIT_COMPANY_CEILING = 10
+_APPROACH_RECOMMENDATION_CEILING = 25
 _LARGE_COMPANY_FLOOR = 1000
 
 STARTUP_TRACK = "startup"
@@ -56,6 +61,8 @@ ROLE_GENERAL = "general"
 class CompanyFacts:
     name: str
     team_size: int | None = None
+    team_size_min: int | None = None
+    team_size_max: int | None = None
     batch: str = ""
     description: str = ""
     is_startup: bool = False
@@ -64,6 +71,8 @@ class CompanyFacts:
     def is_small(self) -> bool:
         if self.team_size is not None:
             return self.team_size <= _SMALL_COMPANY_CEILING
+        if self.team_size_max is not None:
+            return self.team_size_max <= _SMALL_COMPANY_CEILING
         return self.is_startup and bool(self.batch)
 
     @property
@@ -77,7 +86,32 @@ class CompanyFacts:
 
     @property
     def is_large_company(self) -> bool:
-        return self.team_size is not None and self.team_size >= _LARGE_COMPANY_FLOOR
+        lower_bound = (
+            self.team_size
+            if self.team_size is not None
+            else self.team_size_min
+        )
+        return lower_bound is not None and lower_bound >= _LARGE_COMPANY_FLOOR
+
+    @property
+    def needs_approach_recommendation(self) -> bool:
+        """Tiny teams should get an approach question, not org mapping.
+
+        At twenty-five people or fewer, asking who "owns product hiring" is
+        usually asking the recipient to state the obvious.  A recommendation
+        about whether to approach the founders is the useful low-cost INTEL
+        question instead.
+        """
+
+        upper_bound = (
+            self.team_size
+            if self.team_size is not None
+            else self.team_size_max
+        )
+        return (
+            upper_bound is not None
+            and upper_bound <= _APPROACH_RECOMMENDATION_CEILING
+        )
 
     @property
     def campaign_track(self) -> str:
@@ -94,11 +128,20 @@ def company_facts(organization: OrganizationRecord | None) -> CompanyFacts:
     notes = organization.notes or ""
 
     team_size = None
+    team_size_min = None
+    team_size_max = None
     if match := _TEAM_SIZE.search(notes):
         try:
             team_size = int(match.group(1).replace(",", ""))
         except ValueError:
             team_size = None
+    if range_match := _TEAM_SIZE_RANGE.search(notes):
+        try:
+            team_size_min = int(range_match.group(1).replace(",", ""))
+            team_size_max = int(range_match.group(2).replace(",", ""))
+        except ValueError:
+            team_size_min = None
+            team_size_max = None
 
     batch = match.group(1).strip() if (match := _BATCH.search(notes)) else ""
 
@@ -111,6 +154,8 @@ def company_facts(organization: OrganizationRecord | None) -> CompanyFacts:
     return CompanyFacts(
         name=organization.name or "",
         team_size=team_size,
+        team_size_min=team_size_min,
+        team_size_max=team_size_max,
         batch=batch,
         description=description,
         is_startup=str(getattr(organization.organization_type, "value", organization.organization_type)) == "startup",
@@ -358,13 +403,18 @@ def resolve_capability(
     # executive into a junior contact.
     if _has_target_create_authority(authority_title, facts.name):
         return Capability.CAN_CREATE if facts.is_small else Capability.CAN_REFER
+    if _FOUNDING_ENGINEER.search(title):
+        # At a tiny team the useful question is whether approaching the
+        # founders directly is sensible, not who owns hiring.  This remains
+        # an IC-level INTEL move.  At larger startups a founding engineer is
+        # senior enough to route toward a real requisition.
+        return (
+            Capability.CAN_OPINE
+            if facts.needs_approach_recommendation
+            else Capability.CAN_REFER
+        )
     if _JUNIOR.search(title) or _NON_FTE.search(title):
         return Capability.CAN_OPINE
-    if _FOUNDING_ENGINEER.search(title):
-        # Founding engineer is senior routing authority, never founder-level
-        # role-creation authority. At a tiny team, NAME is the appropriately
-        # sized ask; elsewhere they can refer to a verified requisition.
-        return Capability.CAN_NAME if facts.is_tight_knit else Capability.CAN_REFER
     if _has_target_routing_authority(authority_title, facts.name):
         return Capability.CAN_REFER
     if facts.is_large_company:
@@ -374,11 +424,13 @@ def resolve_capability(
         return Capability.CAN_OPINE
     if _SENIOR.search(title) and not _ROUTING_AUTHORITY.search(title):
         return Capability.CAN_REFER
-    if state is ThreadState.NO_CONTEXT:
+    if state in {ThreadState.NO_CONTEXT, ThreadState.OUTBOUND_UNANSWERED}:
         # Silence is not evidence of routing authority.  NAME must be earned
         # by a relevant function or by a company small enough that most
         # employees plausibly know the organization.  An ordinary IC can
         # still answer one low-cost question from their own seat.
+        if facts.needs_approach_recommendation:
+            return Capability.CAN_OPINE
         if _NAME_FUNCTION.search(title) or facts.is_tight_knit:
             return Capability.CAN_NAME
         return Capability.CAN_OPINE
@@ -510,7 +562,15 @@ def requisition_state(
         except ValueError:
             pass
 
-    return CITABLE if season_match else NEEDS_VERIFICATION
+    opportunity_type = str(
+        getattr(opportunity.opportunity_type, "value", opportunity.opportunity_type)
+    ).casefold()
+    # A fresh full-time role is not seasonal, so absence of "fall" is not a
+    # reason to distrust it.  Internship/co-op claims are seasonal and must
+    # name the campaign season before they may be cited.
+    if season_match or opportunity_type == OpportunityType.FULL_TIME.value:
+        return CITABLE
+    return NEEDS_VERIFICATION
 
 
 def requisition_actionability(
@@ -531,7 +591,7 @@ def requisition_actionability(
     now = now or datetime.now(UTC)
     if requisition_state(
         opportunity, pursuit_season=pursuit_season, now=now
-    ) == STALE:
+    ) != CITABLE:
         return NOT_ACTIONABLE
 
     title = opportunity.title or ""

@@ -16,6 +16,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .context import (
+    APPLY_NOW,
     CREATE_WEDGE,
     LARGE_COMPANY_TRACK,
     ROLE_BIZOPS_STRATEGY,
@@ -108,6 +109,7 @@ _SENIOR_AUTHORITY_TITLE = re.compile(
 _ORG_STRUCTURE_QUESTION = re.compile(
     r"\bwho(?:\s+(?:would|'d))?\s+(?:own|owns|run|runs|lead|leads|handle|handles|manage|manages)\b|"
     r"\bwho\s+(?:should|would|could)\s+i\s+(?:talk|speak|reach out)\s+to\b|"
+    r"\bwho\s+i\s+(?:should|would|could)\s+(?:be\s+)?(?:talking|speaking|reaching out)\s+to\b|"
     r"\b(?:right|best)\s+person\b|\bwhich\s+team\s+(?:owns|runs|handles)\b",
     re.I,
 )
@@ -135,6 +137,16 @@ _INTEL_APPROACH_RECOMMENDATION = re.compile(
 _INTEL_APPROACH_SECOND_OPTION = re.compile(
     r"\bor\s+(?:would|do|should|could)\b[^?]{0,55}"
     r"\b(?:recommend|approach|instead|else|different)\b",
+    re.I,
+)
+_INTEL_OPENING_QUESTION = re.compile(
+    r"\b(?:have|did|do|would|could|can)\s+you\b[^?]{0,45}"
+    r"\b(?:heard?|know|seen|come across)\b[^?]{0,70}"
+    r"\b(?:openings?|roles?|opportunit(?:y|ies)|positions?|internships?|"
+    r"intern|co[- ]?op|hiring|bring on)\b|"
+    r"\b(?:heard?|know|seen|come across)\b[^?]{0,70}"
+    r"\b(?:openings?|roles?|opportunit(?:y|ies)|positions?|internships?|"
+    r"intern|co[- ]?op|hiring|bring on)\b",
     re.I,
 )
 _UNVERIFIED_OPENING_CLAIM = re.compile(
@@ -197,8 +209,14 @@ _REPEATED_ACCEPTANCE_OPENER = re.compile(
     re.I,
 )
 _UNSUPPORTED_EXCHANGE_THANKS = re.compile(
-    r"\bthanks?\s+(?:you\s+)?for\s+(?:the\s+)?(?:exchange|responses?|"
-    r"getting back|letting me know|checking(?: on| with)?|sharing)\b",
+    r"\bthanks?\s+(?:you\s+)?for\s+(?:the\s+|our\s+|your\s+|prior\s+)?(?:exchange|responses?|"
+    r"getting back|letting me know|checking(?: on| with)?|sharing)\b|"
+    r"\bappreciate\s+you\s+(?:getting back|replying|responding|checking|sharing)\b",
+    re.I,
+)
+_SILENT_ACCEPT_META = re.compile(
+    r"\b(?:thanks?(?: you)? for (?:the )?|after (?:the )?)silent accept(?:ance)?\b|"
+    r"\byou accepted (?:but|and) (?:didn'?t|did not|haven'?t|have not) repl(?:y|ied)\b",
     re.I,
 )
 _REFERRAL_REQUEST = re.compile(
@@ -207,6 +225,13 @@ _REFERRAL_REQUEST = re.compile(
 )
 _TERMINAL_LANGUAGE = re.compile(
     r"\b(?:last|final) (?:note|message|follow[- ]?up)\b|"
+    r"\bwon't follow up again\b|\bwill not follow up again\b|"
+    r"\bstop bugging you after this one\b",
+    re.I,
+)
+_TERMINAL_CLOSE_SIGNAL = re.compile(
+    r"\b(?:last|final) (?:note|message|follow[- ]?up) from me\b|"
+    r"\bthis is (?:my )?(?:last|final) (?:note|message|follow[- ]?up)\b|"
     r"\bwon't follow up again\b|\bwill not follow up again\b|"
     r"\bstop bugging you after this one\b",
     re.I,
@@ -466,8 +491,10 @@ def _question_count(message: str) -> int:
     marks = message.count("?")
     joined = len(
         re.findall(
-            r"\band\s+(?:do|does|did|can|could|would|will|is|are|"
-            r"who|what|when|where|why|how)\b",
+            r"\band\s+(?:do|does|did|can|could|would|will|is|are|has|have|had|"
+            r"whether|who|what|when|where|why|how|remember)\b|"
+            r"\bor\s+(?:do|does|did|can|could|would|will|whether|who|what|"
+            r"when|where|why|how|remember)\b",
             message,
             re.I,
         )
@@ -638,6 +665,8 @@ def review(
 
     if "---" in body or re.search(r"\bhere(?:'s| is) the message\b", body, re.I):
         result.fail("meta_text")
+    if _SILENT_ACCEPT_META.search(body):
+        result.fail("meta_silent_acceptance")
     if _recipient_used_in_third_person(body, recipient_name, company):
         result.fail("meta_recipient_third_person")
     if _EVALUATIVE_PREDICATE.search(body):
@@ -675,7 +704,7 @@ def review(
     if decision.touch_number > 1 and _REPEATED_ACCEPTANCE_OPENER.search(body):
         result.fail("repeat_acceptance_opener")
     if (
-        decision.touch_number > 1
+        decision.action is Action.ASK
         and not (last_inbound_message or "").strip()
         and _UNSUPPORTED_EXCHANGE_THANKS.search(body)
     ):
@@ -824,6 +853,16 @@ def review(
     ):
         result.fail("cites_unverified_requisition")
 
+    # A referral is an action against a specific, current requisition. Asking
+    # for one without a posting that survived the freshness and fit gates is
+    # incoherent even when an earlier message made the same mistake.
+    if _REFERRAL_REQUEST.search(body) and not (
+        decision.ask is Ask.REFER
+        and decision.citable_req
+        and decision.req_actionability == APPLY_NOW
+    ):
+        result.fail("referral_without_citable_requisition")
+
     # An unfilled template token must never reach a recipient.
     if re.search(r"\[[^\]]{2,60}\]|<[^>]{2,60}>|\bTODO\b|\byour name here\b", body, re.I):
         result.fail("unfilled_placeholder")
@@ -898,6 +937,13 @@ def review(
                 result.fail("intel_approach_recommendation_missing")
             if _INTEL_APPROACH_SECOND_OPTION.search(body):
                 result.fail("multiple_asks:2")
+        elif read.intel_focus == "opening":
+            if routing_question:
+                result.fail("intel_focus_mismatch:opening_to_routing")
+            if _INTEL_TIMING_OR_PERSONAL_ENTRY.search(body):
+                result.fail("intel_focus_mismatch:opening_to_timing")
+            if not _INTEL_OPENING_QUESTION.search(body):
+                result.fail("intel_opening_question_missing")
         elif _INTEL_TIMING_OR_PERSONAL_ENTRY.search(body):
             result.fail("intel_focus_mismatch:routing_to_timing")
 
@@ -918,7 +964,11 @@ def review(
                 result.fail("intel_asks_ic_about_org_structure")
 
     if read.prior_outbound_ask is Ask.REFER:
-        if _ORG_STRUCTURE_QUESTION.search(body) and not _REFERRAL_REQUEST.search(body):
+        if (
+            decision.ask is Ask.REFER
+            and _ORG_STRUCTURE_QUESTION.search(body)
+            and not _REFERRAL_REQUEST.search(body)
+        ):
             result.fail("prior_ask_pivot:refer_to_routing")
     elif read.prior_outbound_ask in {Ask.NAME, Ask.INTEL}:
         if _REFERRAL_REQUEST.search(body):
@@ -931,6 +981,8 @@ def review(
         result.fail("name_ask_targets_org_chart_slot")
     if decision.ask is Ask.NAME and _NAME_ESCALATION.search(body):
         result.fail("ask_exceeds_decision:name_to_forward")
+    if decision.ask is Ask.NAME and not _ORG_STRUCTURE_QUESTION.search(body):
+        result.fail("name_ask_missing_routing_question")
 
     if decision.create_direct_ask:
         if _CREATE_WORK_OFFER.search(body):
@@ -942,6 +994,8 @@ def review(
 
     if decision.terminal_touch and not _TERMINAL_LANGUAGE.search(body):
         result.fail("terminal_touch_not_named")
+    if decision.terminal_touch and len(_TERMINAL_CLOSE_SIGNAL.findall(body)) > 1:
+        result.fail("multiple_terminal_closers")
 
     if decision.campaign_track == LARGE_COMPANY_TRACK and decision.ask is not Ask.NONE:
         if re.search(r"\bintern(?:ship)?\b|\bco[- ]?op\b", body, re.I):

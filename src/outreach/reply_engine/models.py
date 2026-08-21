@@ -138,11 +138,14 @@ class ThreadRead:
     """They raised budget, headcount, or small-team capacity themselves."""
 
     intel_focus: str = "routing"
-    """routing | timing | approach.
+    """routing | timing | approach | opening.
 
     Timing must be grounded in a thread-specific unknown.  Approach is the
     tiny-team variant: ask whether contacting the founders directly is the
-    right move instead of asking an obvious org-chart question.
+    right move instead of asking an obvious org-chart question. Opening is
+    used when an unanswered referral request outlived its requisition: ask
+    whether the insider has heard of a relevant opening before asking them to
+    refer.
     """
 
     named_people: list[NamedPerson] = field(default_factory=list)
@@ -173,8 +176,10 @@ class ThreadRead:
     prior_outbound_ask: Ask = Ask.NONE
     """Ask already made in an unanswered post-invite outbound.
 
-    This is deterministic Layer-2 context.  Rule 11 may continue this ask but
-    may not silently pivot to a different rung as if the thread were new.
+    This is deterministic Layer-2 context.  Rule 11 normally continues this
+    ask. A referral is the exception: it may only persist while its exact
+    requisition remains actionable, because a referral without an opening is
+    not a real recipient action.
     """
 
     prior_outbound_text: str | None = None

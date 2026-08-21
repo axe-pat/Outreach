@@ -45,6 +45,15 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def reviewed_ask_state_is_sendable(state: ThreadState) -> bool:
+    """A reviewed ask may be either the first or a later unanswered follow-up."""
+
+    return state in {
+        ThreadState.NO_CONTEXT,
+        ThreadState.OUTBOUND_UNANSWERED,
+    }
+
+
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -86,7 +95,7 @@ def build_batch(
             reason = "approved_send_thread_locked"
         elif context is None:
             reason = "missing_current_context"
-        elif context.draft.thread_state is not ThreadState.NO_CONTEXT:
+        elif not reviewed_ask_state_is_sendable(context.draft.thread_state):
             reason = f"current_thread_state:{context.draft.thread_state.value}"
         elif context.draft.decision.action is not Action.ASK:
             reason = f"current_action:{context.draft.decision.action.value}"

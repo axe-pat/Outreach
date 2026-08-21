@@ -129,6 +129,14 @@ INTEL_APPROACH_GUIDANCE = (
     "never an introduction or referral."
 )
 
+INTEL_OPENING_GUIDANCE = (
+    "THREAD-SPECIFIC INTEL FOCUS: the prior referral request no longer has a "
+    "current actionable requisition. Ask exactly ONE casual question about "
+    "whether they have heard of a relevant opening for the structured goal. "
+    "Do not ask for a referral yet, imply an opening exists, or recap Akshat's "
+    "background from the invite."
+)
+
 REQUISITION_GUIDANCE: dict[str, str] = {
     APPLY_NOW: (
         "This requisition is directly actionable. Name it and make the one ask a "
@@ -257,6 +265,8 @@ def build_prompt(
                 ask_guidance = INTEL_TIMING_GUIDANCE
             elif read.intel_focus == "approach":
                 ask_guidance = INTEL_APPROACH_GUIDANCE
+            elif read.intel_focus == "opening":
+                ask_guidance = INTEL_OPENING_GUIDANCE
         guidance = f"{guidance}\n{ask_guidance}".strip()
     if decision.req_actionability in REQUISITION_GUIDANCE:
         guidance = (
@@ -286,6 +296,12 @@ def build_prompt(
                     "LARGE-COMPANY INTEL: ask the one thread-grounded timing question "
                     "about full-time or 2027 new-grad recruiting."
                 )
+            elif read.intel_focus == "opening":
+                track_intel = (
+                    "LARGE-COMPANY INTEL: ask only whether they have heard of a "
+                    "relevant full-time or 2027 new-grad opening. Do not ask for a "
+                    "referral until one is identified."
+                )
             else:
                 track_intel = (
                     "LARGE-COMPANY INTEL: ask only whether they know who owns product "
@@ -310,15 +326,26 @@ def build_prompt(
         )
     if read.prior_outbound_text:
         prior_kind = read.prior_outbound_ask.value
+        if read.prior_outbound_ask is Ask.REFER and decision.ask is not Ask.REFER:
+            prior_guidance = (
+                "The prior referral request has no current actionable requisition. "
+                "Do not repeat it or ask whether they checked. Follow the selected "
+                "ask instead, without over-explaining the correction and without "
+                "repeating biography or proof already used in the invite."
+            )
+        else:
+            prior_guidance = (
+                "Continue the already-sent ask and do not pivot to a new one. If "
+                "the standing ask is a referral, name only the current citable "
+                "requisition below and ask whether they had a chance to check."
+            )
         guidance = (
             "UNANSWERED PRIOR OUTBOUND: this is not a newly accepted connection. "
             "Open as a light follow-up, never with 'thanks for accepting' or "
-            "'thanks for connecting'. Continue the already-sent ask and do not "
-            "pivot to a new one. If the standing ask was a referral, ask only "
-            "whether they had any luck or a chance to check; do not replace it "
-            "with a hiring-owner question and do not claim the role is still open. "
-            f"Structured prior ask: {prior_kind}. Exact prior outbound: "
-            f"{read.prior_outbound_text}\n" + guidance
+            "'thanks for connecting'. Never describe their acceptance as silent "
+            f"or call out that they did not reply. {prior_guidance} Structured prior ask: "
+            f"{prior_kind}. Exact prior outbound: {read.prior_outbound_text}\n"
+            + guidance
         )
 
     availability_qualifier = "not required for this move"

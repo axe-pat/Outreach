@@ -297,10 +297,15 @@ def _decide(
         )
 
     # -- Rule 10: nothing to respond to, so we initiate ---------------------
+    prior_ask_is_still_actionable = not (
+        read.prior_outbound_ask is Ask.REFER
+        and req_actionability != APPLY_NOW
+    )
     ask = (
         read.prior_outbound_ask
         if state is ThreadState.OUTBOUND_UNANSWERED
         and read.prior_outbound_ask is not Ask.NONE
+        and prior_ask_is_still_actionable
         else select_ask(
             capability,
             has_citable_req=req_actionability == APPLY_NOW,
@@ -357,6 +362,25 @@ def decide(
         and resolved_capability is Capability.CAN_OPINE
     ):
         read.intel_focus = "approach"
+
+    # Layer-2 contextual value: an unanswered referral request cannot survive
+    # after its requisition falls out of the freshness/actionability gate. Ask
+    # the IC whether they have heard of a relevant opening first. This keeps
+    # Rule 11 and the ask ladder unchanged; only the structured situation has
+    # become more precise.
+    _current_req, current_req_actionability = pick_actionable_requisition(
+        opportunities or [],
+        facts,
+        pursuit_season=pursuit_season,
+        now=now,
+    )
+    if (
+        state is ThreadState.OUTBOUND_UNANSWERED
+        and read.prior_outbound_ask is Ask.REFER
+        and current_req_actionability != APPLY_NOW
+        and resolved_capability is Capability.CAN_OPINE
+    ):
+        read.intel_focus = "opening"
 
     decision = _decide(
         state=state,

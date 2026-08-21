@@ -96,6 +96,7 @@ from scripts.reissue_followup_pack_20260819 import (
     _sent_from_review_names,
 )
 from scripts.regenerate_reply_review_residual import _preflight_contract
+from scripts.send_reviewed_reply_pack import reviewed_ask_state_is_sendable
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 
@@ -529,6 +530,7 @@ def test_citable_requisition_url_is_still_allowed():
             word_budget=65,
             citable_req="Fall Product Intern",
             citable_req_url="https://example.com/jobs/fall-product-intern",
+            req_actionability=APPLY_NOW,
         ),
         read=ThreadRead(),
         capability=Capability.CAN_REFER,
@@ -1363,12 +1365,12 @@ def test_no_context_state_when_only_our_invite_exists():
     assert resolve_state(messages) is ThreadState.NO_CONTEXT
 
 
-def test_pankaj_yadav_unanswered_referral_is_preserved_as_second_touch():
+def test_shriganesh_hegde_unanswered_referral_without_opening_becomes_intel():
     messages, _ = order_messages(
         [
             {
                 "sender": "You",
-                "message": "Hi Pankaj, would love to connect.",
+                "message": "Hi Shriganesh, would love to connect.",
                 "source": "original_invite",
             },
             {
@@ -1387,31 +1389,183 @@ def test_pankaj_yadav_unanswered_referral_is_preserved_as_second_touch():
     decision = decide(
         state=state,
         read=read,
-        contact=contact("Senior Software Engineer", name="Pankaj Yadav"),
+        contact=contact("SDE-2 @ Ottimate", name="Shriganesh Hegde"),
         facts=CompanyFacts(name="Ottimate", team_size=200),
         touch_count=1,
-        invite_text="Hi Pankaj, would love to connect.",
+        invite_text="Hi Shriganesh, would love to connect.",
         has_prior_outbound=True,
         now=NOW,
     )
 
     assert state is ThreadState.OUTBOUND_UNANSWERED
     assert read.prior_outbound_ask is Ask.REFER
-    assert decision.ask is Ask.REFER
+    assert read.intel_focus == "opening"
+    assert decision.ask is Ask.INTEL
+    assert decision.citable_req == ""
     assert decision.touch_number == 2
 
     _, prompt = build_prompt(
         messages=messages,
         decision=decision,
         read=read,
-        name="Pankaj Yadav",
-        title="Senior Software Engineer",
+        name="Shriganesh Hegde",
+        title="SDE-2 @ Ottimate",
         company="Ottimate",
         facts=CompanyFacts(name="Ottimate", team_size=200),
         banned=[],
     )
     assert "this is not a newly accepted connection" in prompt
-    assert "had any luck or a chance to check" in prompt
+    assert "prior referral request has no current actionable requisition" in prompt
+    assert "whether they have heard of a relevant opening" in prompt
+
+
+def test_shriganesh_hegde_referral_without_citable_opening_fails_critic():
+    result = review(
+        message=(
+            "Hi Shriganesh, following up on the Ottimate role. "
+            "Would you be able to refer me?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.REFER,
+            req_actionability="not_actionable",
+            word_budget=65,
+        ),
+        read=ThreadRead(
+            prior_outbound_ask=Ask.REFER,
+            prior_outbound_text="Can you help refer me?",
+        ),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Shriganesh Hegde",
+        company="Ottimate",
+    )
+
+    assert "referral_without_citable_requisition" in result.flags
+
+
+def test_shriganesh_hegde_opening_question_drops_invite_biography():
+    result = review(
+        message=(
+            "Hi Shriganesh, following up on my earlier note. Have you heard of "
+            "any fall product internship or co-op openings at Ottimate?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            req_actionability="not_actionable",
+            word_budget=45,
+            touch_number=2,
+        ),
+        read=ThreadRead(
+            intel_focus="opening",
+            prior_outbound_ask=Ask.REFER,
+            prior_outbound_text="Can you help refer me?",
+        ),
+        capability=Capability.CAN_OPINE,
+        recipient_title="SDE-2 @ Ottimate",
+        recipient_name="Shriganesh Hegde",
+        company="Ottimate",
+        invite_text=(
+            "I'm a Marshall MBA with 5 years in engineering across enterprise "
+            "data and platform systems, now exploring PM opportunities at Ottimate."
+        ),
+    )
+
+    assert result.passed
+
+
+def test_shriganesh_hegde_reviewed_second_touch_can_reach_live_sender():
+    assert reviewed_ask_state_is_sendable(ThreadState.OUTBOUND_UNANSWERED)
+    assert not reviewed_ask_state_is_sendable(ThreadState.YOU_REPLIED_LAST)
+
+
+def test_shubham_kumar_singh_writer_cannot_call_out_a_silent_accept():
+    result = review(
+        message=(
+            "Hi Shubham, thanks for the silent accept. Have you heard of any "
+            "fall product internship openings at Astronomer?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            word_budget=45,
+            touch_number=2,
+        ),
+        read=ThreadRead(intel_focus="opening"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Shubham kumar Singh",
+        company="Astronomer",
+    )
+
+    assert "meta_silent_acceptance" in result.flags
+
+
+def test_savraj_singh_terminal_touch_uses_one_closing_signal():
+    result = review(
+        message=(
+            "Hi Savraj, last note from me on this. Have you heard of any fall "
+            "product internship openings at Onshore? I'll stop bugging you after "
+            "this one, promise!"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            word_budget=45,
+            touch_number=3,
+            terminal_touch=True,
+        ),
+        read=ThreadRead(intel_focus="opening"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Savraj Singh",
+        company="Onshore",
+    )
+
+    assert "multiple_terminal_closers" in result.flags
+
+
+def test_harshil_khant_opening_focus_accepts_hiring_question():
+    result = review(
+        message=(
+            "Hi Harshil, quick follow-up. Have you heard if Ottimate is hiring "
+            "for fall product internships or co-ops?"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            word_budget=45,
+            touch_number=3,
+            terminal_touch=True,
+        ),
+        read=ThreadRead(intel_focus="opening"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Harshil Khant",
+        company="Ottimate",
+    )
+
+    assert result.passed
+
+
+def test_adam_azoulay_prior_note_reference_is_not_a_second_terminal_close():
+    result = review(
+        message=(
+            "Hi Adam, following up on my last note. Have you heard whether "
+            "Zenyt.ai is looking to bring on a product intern this fall? I'll "
+            "stop bugging you after this one, promise!"
+        ),
+        decision=Decision(
+            action=Action.ASK,
+            ask=Ask.INTEL,
+            word_budget=45,
+            touch_number=3,
+            terminal_touch=True,
+        ),
+        read=ThreadRead(intel_focus="opening"),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Adam Azoulay",
+        company="Zenyt.ai",
+    )
+
+    assert result.passed
 
 
 def test_viraj_jadhav_second_touch_cannot_reset_to_acceptance():
@@ -1453,6 +1607,89 @@ def test_will_nzeuton_missing_inbound_cannot_be_invented_as_an_exchange():
     )
 
     assert "unsupported_exchange_acknowledgement" in result.flags
+
+
+def test_harshil_khant_no_inbound_cannot_be_acknowledged():
+    result = review(
+        message=(
+            "Hi Harshil, appreciate you getting back to me. Have you heard of "
+            "any fall product openings at Ottimate?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Harshil Khant",
+        company="Ottimate",
+        last_inbound_message="",
+    )
+
+    assert "unsupported_exchange_acknowledgement" in result.flags
+
+
+def test_arjun_krishna_invite_acceptance_is_not_an_exchange():
+    result = review(
+        message=(
+            "Hi Arjun, thanks for the exchange. Do you know who owns product "
+            "hiring at Writer?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Arjun Krishna",
+        company="Writer",
+        last_inbound_message="",
+    )
+
+    assert "unsupported_exchange_acknowledgement" in result.flags
+
+
+def test_chris_gomes_muffat_name_decision_cannot_emit_timing_intel():
+    result = review(
+        message=(
+            "Hi Chris, thanks for accepting. I'm exploring a fall product "
+            "internship at Zenyt.ai. Do you remember when recruiting kicks off?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.NAME, word_budget=50),
+        read=ThreadRead(),
+        capability=Capability.CAN_NAME,
+        recipient_name="Chris Gomes Muffat",
+        company="Zenyt.ai",
+    )
+
+    assert "name_ask_missing_routing_question" in result.flags
+
+
+def test_kevin_purcell_name_ask_accepts_who_i_should_talk_to():
+    result = review(
+        message=(
+            "Hi Kevin, thanks for connecting. I'm exploring a fall product "
+            "internship at SLAC National Accelerator Laboratory and would find "
+            "it helpful to know who I should be talking to about that."
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.NAME, word_budget=50),
+        read=ThreadRead(),
+        capability=Capability.CAN_NAME,
+        recipient_name="Kevin Purcell",
+        company="SLAC National Accelerator Laboratory",
+    )
+
+    assert result.passed
+
+
+def test_noel_lin_and_whether_is_still_two_asks():
+    result = review(
+        message=(
+            "Hi Noel, thanks for accepting. Do you know who owns product hiring "
+            "at IXL Learning, and whether internship cycles exist?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Noel Lin",
+        company="IXL Learning",
+    )
+
+    assert "multiple_asks:2" in result.flags
 
 
 def test_offchannel_conversations_are_not_redrafted():
@@ -2342,7 +2579,7 @@ def test_marginal_overage_is_trimmed_not_held():
 
     result = review(
         message=" ".join(["word"] * 46),
-        decision=_decision(budget=45),
+        decision=_decision(budget=45, ask=Ask.NONE),
         read=ThreadRead(),
         capability=Capability.CAN_NAME,
     )

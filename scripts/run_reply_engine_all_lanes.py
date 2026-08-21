@@ -50,6 +50,10 @@ _FROM_US = {"you", "me", "akshat", "akshat pathak"}
 def _has_prior_outbound_linkedin(row: dict) -> bool:
     """Defense-in-depth gate shared by every follow-up lane."""
 
+    if row.get("prior_outbound_verified") is True:
+        return True
+    if row.get("prior_outbound_verified") is False:
+        return False
     if str(row.get("original_invite_note") or "").strip():
         return True
     for item in row.get("message_window") or []:

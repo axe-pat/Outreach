@@ -82,12 +82,20 @@ from scripts.run_reply_engine_all_lanes import (
     _has_prior_outbound_linkedin as followup_has_prior_outbound,
     _locked_names,
 )
+from scripts.build_accepted_silent_backlog import (
+    build_backlog as build_accepted_silent_backlog,
+    has_prior_outbound_linkedin as ledger_has_prior_outbound,
+)
 from scripts.recritic_reply_review import (
     SavedDraft,
     parse_review,
     render_reissued_review,
 )
-from scripts.reissue_followup_pack_20260819 import VERBATIM_DRAFTS
+from scripts.reissue_followup_pack_20260819 import (
+    VERBATIM_DRAFTS,
+    _sent_from_review_names,
+)
+from scripts.regenerate_reply_review_residual import _preflight_contract
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 
@@ -2687,6 +2695,255 @@ def test_tim_drahn_no_prior_outbound_never_enters_followup_pack():
 
     assert followup_has_prior_outbound(no_prior_message) is False
     assert followup_has_prior_outbound(with_prior_message) is True
+
+
+def test_claire_d_unknown_reserved_invite_never_enters_followup_pack(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-assembled", name="Assembled")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-claire",
+            organization_id="org-assembled",
+            full_name="Claire D.",
+            status="Connected",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-claire-reserved",
+            organization_id="org-assembled",
+            contact_id="ct-claire",
+            channel="linkedin",
+            status="Unknown reserved",
+            message_kind="linkedin_invite",
+            message_text="Hi Claire, would love to connect.",
+        )
+    )
+
+    backlog = build_accepted_silent_backlog(
+        workspace=workspace,
+        pursuit_season="fall",
+    )
+
+    assert backlog["count"] == 0
+    assert [row["name"] for row in backlog["first_outreach_review"]] == [
+        "Claire D."
+    ]
+
+
+def test_adam_siegel_sent_invite_remains_in_followup_pack(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-crexi", name="Crexi")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-adam",
+            organization_id="org-crexi",
+            full_name="Adam Siegel",
+            status="Connected",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-adam-sent",
+            organization_id="org-crexi",
+            contact_id="ct-adam",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Adam, would love to connect.",
+            sent_at="2026-08-10T21:51:36+00:00",
+        )
+    )
+
+    backlog = build_accepted_silent_backlog(
+        workspace=workspace,
+        pursuit_season="fall",
+    )
+
+    assert backlog["count"] == 1
+    assert backlog["results"][0]["name"] == "Adam Siegel"
+    assert backlog["results"][0]["prior_outbound_verified"] is True
+
+
+def test_pranav_anand_manual_message_is_prior_outbound_evidence():
+    assert ledger_has_prior_outbound(
+        [
+            TouchpointRecord(
+                touchpoint_id="tp-pranav-manual",
+                organization_id="org-easley-dunn",
+                contact_id="ct-pranav",
+                channel="linkedin",
+                status="Sent",
+                message_kind="linkedin_manual_message",
+                message_text="Hi Pranav, I just saw a PM Intern opening.",
+                sent_at="2026-07-30T19:18:20+00:00",
+            )
+        ]
+    )
+
+
+def test_jj_zhao_prescribed_intel_ask_names_idler_by_rule():
+    result = review(
+        message=(
+            "Thanks for accepting. I'm pursuing a fall product internship or "
+            "co-op at Idler and curious. Who owns product hiring there?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="JJ Zhao",
+        recipient_title="Founding Engineer, Idler",
+        company="Idler",
+    )
+
+    assert result.normalized_message.endswith("Who owns product hiring at Idler?")
+    assert "bare_company_referent" not in result.flags
+
+
+def test_ethan_gross_engineering_intel_names_tavus_by_rule():
+    result = review(
+        message=(
+            "Hi Ethan, thanks for accepting. I'm exploring a fall engineering "
+            "internship at Tavus. Who owns engineering hiring there?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Ethan Gross",
+        company="Tavus",
+    )
+
+    assert result.normalized_message.endswith("Who owns engineering hiring at Tavus?")
+    assert "bare_company_referent" not in result.flags
+
+
+def test_merlin_mckean_company_name_is_not_third_person_meta_text():
+    result = review(
+        message=(
+            "Hi Merlin, thanks for accepting. I'm exploring a fall product "
+            "internship at Merlin AI. Who owns product hiring at Merlin AI?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="Merlin McKean",
+        company="Merlin AI",
+    )
+
+    assert "meta_recipient_third_person" not in result.flags
+
+
+def test_t_m_nikhil_single_letter_first_name_is_not_meta_text():
+    result = review(
+        message=(
+            "Thanks for connecting. I'm exploring a fall product internship at "
+            "Micro1. Who handles product hiring there?"
+        ),
+        decision=Decision(action=Action.ASK, ask=Ask.INTEL, word_budget=45),
+        read=ThreadRead(),
+        capability=Capability.CAN_OPINE,
+        recipient_name="T M Nikhil Sai",
+        company="Micro1",
+    )
+
+    assert "meta_recipient_third_person" not in result.flags
+    assert "bare_company_referent" not in result.flags
+
+
+def test_sabrina_humenik_unverified_live_thread_is_a_visible_hold(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_organization(
+        OrganizationRecord(organization_id="org-parrative", name="Parrative AI")
+    )
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-sabrina",
+            organization_id="org-parrative",
+            full_name="Sabrina Humenik",
+            status="Connected",
+            notes="followup_live_thread_unverified=2026-08-20",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-sabrina-sent",
+            organization_id="org-parrative",
+            contact_id="ct-sabrina",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_invite",
+            message_text="Hi Sabrina, would love to connect.",
+            sent_at="2026-05-28T19:10:46+00:00",
+        )
+    )
+
+    backlog = build_accepted_silent_backlog(
+        workspace=workspace,
+        pursuit_season="fall",
+    )
+
+    assert backlog["count"] == 0
+    assert backlog["summary"]["exclusions"]["live_thread_unverified"] == 1
+    assert backlog["first_outreach_review"][0]["reason"] == (
+        "live LinkedIn thread not verified"
+    )
+
+
+def test_ryan_samadi_sent_review_copy_is_not_regenerated(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workbook = OutreachWorkbook(workspace)
+    workbook.upsert_contact(
+        ContactRecord(
+            contact_id="ct-ryan-samadi",
+            organization_id="org-alt-x",
+            full_name="Ryan Samadi",
+        )
+    )
+    workbook.append_touchpoint(
+        TouchpointRecord(
+            touchpoint_id="tp-ryan-followup",
+            organization_id="org-alt-x",
+            contact_id="ct-ryan-samadi",
+            channel="linkedin",
+            status="Sent",
+            message_kind="linkedin_followup",
+            message_text="Last note from me on this.",
+            source_artifact=(
+                "/Users/akshat/Desktop/Claude projects/Outreach/artifacts/"
+                "20260819-linkedin-followup-review-reissued.md"
+            ),
+        )
+    )
+
+    names = _sent_from_review_names(
+        workbook,
+        Path("artifacts/20260819-linkedin-followup-review-reissued.md"),
+    )
+
+    assert names == {"ryan samadi"}
+
+
+def test_vamshi_preflight_only_applies_when_he_is_in_the_active_batch():
+    residual, ask_split = _preflight_contract(
+        rows=[],
+        contexts=[],
+        expected_residual=0,
+        expected_company_ask_flags=0,
+    )
+
+    assert residual == []
+    assert ask_split == Counter()
 
 
 @pytest.mark.parametrize(

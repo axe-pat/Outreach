@@ -147,6 +147,12 @@ _BARE_COMPANY_REFERENT = re.compile(
     r"product(?: side)?)\s+(?:here|there)\b|\b(?:here|there)\s*[?.!]",
     re.I,
 )
+_PRESCRIBED_INTEL_BARE_COMPANY = re.compile(
+    r"\b(?P<ask>(?:do you (?:happen to )?know )?who "
+    r"(?:owns|runs|leads|handles|manages) [^?.!]{0,80}\bhiring"
+    r"(?:\s+for\s+[^?.!]{1,40})?)\s+(?:here|there)\b",
+    re.I,
+)
 _SELF_PROOF_SIGNAL = re.compile(
     r"\b(?:gojek|hevo|intuit|optum)\b|\b(?:five|5) years\b|"
     r"\b(?:backend|data platform|data systems|billing failure|reconciliation)\b|"
@@ -461,14 +467,21 @@ def _without_target_company(message: str, company: str) -> str:
     return re.sub(phrase, " ", message, flags=re.I)
 
 
-def _recipient_used_in_third_person(message: str, recipient_name: str) -> bool:
+def _recipient_used_in_third_person(
+    message: str,
+    recipient_name: str,
+    company: str = "",
+) -> bool:
     first_name = (recipient_name or "").strip().split()[0] if recipient_name.strip() else ""
-    if not first_name:
+    if len(first_name) < 2:
         return False
     matches = list(re.finditer(re.escape(first_name), message, re.I))
     if not matches:
         return False
+    company_spans = [match.span() for match in re.finditer(re.escape(company), message, re.I)] if company else []
     for match in matches:
+        if any(start <= match.start() and match.end() <= end for start, end in company_spans):
+            continue
         prefix = message[max(0, match.start() - 24):match.start()]
         suffix = message[match.end():match.end() + 3]
         greeting_prefix = bool(
@@ -559,6 +572,11 @@ def review(
     last_inbound_message: str = "",
 ) -> CriticResult:
     normalized_message, em_dash_fragments = normalize_em_dashes(message)
+    if decision.ask is Ask.INTEL and company:
+        normalized_message = _PRESCRIBED_INTEL_BARE_COMPANY.sub(
+            lambda match: f"{match.group('ask')} at {company}",
+            normalized_message,
+        )
     normalized_message = normalize_terminal_close(normalized_message, decision)
     body = normalized_message.strip()
     result = CriticResult(normalized_message=body)
@@ -584,7 +602,7 @@ def review(
 
     if "---" in body or re.search(r"\bhere(?:'s| is) the message\b", body, re.I):
         result.fail("meta_text")
-    if _recipient_used_in_third_person(body, recipient_name):
+    if _recipient_used_in_third_person(body, recipient_name, company):
         result.fail("meta_recipient_third_person")
     if _EVALUATIVE_PREDICATE.search(body):
         result.fail("evaluative_predicate")

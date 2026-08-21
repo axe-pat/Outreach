@@ -80,6 +80,7 @@ def _preflight_contract(
     failures: list[str] = []
     ask_split: Counter[Ask] = Counter()
     vamshi_ask = Ask.NONE
+    vamshi_in_active_batch = False
     cap = effective_touch_cap(reopen_condition_fired=False)
     for context in contexts:
         draft = context.draft
@@ -87,6 +88,7 @@ def _preflight_contract(
         if decision.action is Action.ASK and decision.ask is not Ask.NONE:
             ask_split[decision.ask] += 1
         if draft.name == "Vamshi Ramarapu":
+            vamshi_in_active_batch = True
             vamshi_ask = decision.ask
 
         if decision.emits_message and requires_availability_qualifier(
@@ -122,7 +124,7 @@ def _preflight_contract(
         ):
             failures.append(f"{draft.name}: capped large-company contact was not suppressed")
 
-    if vamshi_ask is not Ask.NAME:
+    if vamshi_in_active_batch and vamshi_ask is not Ask.NAME:
         failures.append(f"Vamshi Ramarapu: expected NAME, found {vamshi_ask.value}")
     if failures:
         raise RuntimeError("preflight contract failed:\n- " + "\n- ".join(failures))

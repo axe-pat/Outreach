@@ -54,6 +54,27 @@ from outreach.tracking import OutreachWorkbook  # noqa: E402
 MANUAL_FOLLOWUP_HOLD_MARKER = "manual_followup_hold"
 
 
+def _sent_from_review_names(
+    workbook: OutreachWorkbook,
+    review_path: Path,
+) -> set[str]:
+    """Return contacts whose exact reviewed follow-up is already durable."""
+
+    contacts = {contact.contact_id: contact for contact in workbook.list_contacts()}
+    names: set[str] = set()
+    for touchpoint in workbook.list_touchpoints():
+        if normalized(touchpoint.status) != "sent":
+            continue
+        if normalized(touchpoint.message_kind) != "linkedin followup":
+            continue
+        if Path(touchpoint.source_artifact or "").name != review_path.name:
+            continue
+        contact = contacts.get(touchpoint.contact_id)
+        if contact is not None:
+            names.add(normalized(contact.full_name))
+    return names
+
+
 VERBATIM_DRAFTS: dict[str, tuple[Ask, str]] = {
     "ryan samadi": (
         Ask.CREATE,
@@ -492,6 +513,7 @@ def main() -> int:
         normalized(contact.full_name) for contact in manual_hold_contacts
     }
     locked_names = _locked_names(approved_sends)
+    already_sent_names = _sent_from_review_names(workbook, review_path)
 
     silent = build_backlog(workspace=workspace, pursuit_season=args.season)
     warm_rows = list(silent.get("first_outreach_review") or [])
@@ -539,7 +561,13 @@ def main() -> int:
             (normalized(item.name), normalized(item.company)): item
             for item in parse_review(REPO / args.recover_empty_from)
         }
-    excluded_names = warm_names | permanent_names | manual_hold_names | locked_names
+    excluded_names = (
+        warm_names
+        | permanent_names
+        | manual_hold_names
+        | locked_names
+        | already_sent_names
+    )
     saved = [
         item for item in saved_all if normalized(item.name) not in excluded_names
     ]
@@ -658,6 +686,7 @@ def main() -> int:
     print(f"moved_to_first_message_review={len(warm_rows)}")
     print(f"permanently_suppressed={len(permanent_contacts)}")
     print(f"manual_followup_holds={len(manual_hold_contacts)}")
+    print(f"already_sent_from_review={len(already_sent_names)}")
     print(f"locked_approved_excluded={len([s for s in saved_all if normalized(s.name) in locked_names])}")
     print(f"followup_drafts_remaining={len(saved)}")
     print(f"operator_verbatim={len(VERBATIM_DRAFTS)}")

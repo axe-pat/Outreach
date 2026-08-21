@@ -177,16 +177,26 @@ def has_prior_outbound_linkedin(
     """A follow-up requires evidence that Akshat already messaged them."""
 
     values = list(touchpoints)
-    return has_sent_invite(values) or bool(sent_followup_touchpoints(values))
+    return (
+        has_sent_invite(values)
+        or bool(sent_followup_touchpoints(values))
+        or bool(manual_outbounds(values))
+    )
 
 
 def _first_outreach_review_row(
     contact,
     organization: OrganizationRecord | None,
+    *,
+    reason: str = "no prior outbound LinkedIn message",
 ) -> dict[str, str]:
     notes = (contact.notes or "").casefold()
     company = organization.name if organization else ""
-    if "suppress follow up permanently" in notes:
+    if reason == "live LinkedIn thread not verified":
+        disposition = (
+            "identity hold; exclude from follow-ups until a live thread is verified"
+        )
+    elif "suppress follow up permanently" in notes:
         disposition = "permanently suppressed; retain for relationship context only"
     elif normalized(company) == "fivetran":
         disposition = "Akshat is handling this company manually"
@@ -202,7 +212,7 @@ def _first_outreach_review_row(
         "linkedin_url": contact.linkedin_url,
         "target_lists": contact.target_lists,
         "disposition": disposition,
-        "reason": "no prior outbound LinkedIn message",
+        "reason": reason,
     }
 
 
@@ -345,18 +355,6 @@ def build_backlog(
         contact_touchpoints = touchpoints_by_contact.get(contact.contact_id, [])
         organization = org_by_id.get(contact.organization_id)
 
-        # First-message contacts are not follow-ups. Run this before note-based
-        # suppression so they remain visible in the manual artifact instead of
-        # disappearing through a missing organization/invite join.
-        if status == WARM_STATUS and not has_prior_outbound_linkedin(
-            contact_touchpoints
-        ):
-            first_outreach_review.append(
-                _first_outreach_review_row(contact, organization)
-            )
-            exclusions["no_prior_outbound_linkedin"] += 1
-            continue
-
         if status not in CONNECTED_STATUSES and status != WARM_STATUS:
             exclusions["not_connected_status"] += 1
             continue
@@ -365,6 +363,27 @@ def build_backlog(
             continue
         if "parked" in notes or "suppress follow up" in notes:
             exclusions["parked_or_suppress_notes"] += 1
+            continue
+        if "followup live thread unverified" in notes:
+            first_outreach_review.append(
+                _first_outreach_review_row(
+                    contact,
+                    organization,
+                    reason="live LinkedIn thread not verified",
+                )
+            )
+            exclusions["live_thread_unverified"] += 1
+            continue
+
+        # First-message contacts are not follow-ups, regardless of a stale
+        # Connected status.  Only a genuinely sent invite/follow-up/manual
+        # message is outbound evidence; Prepared, Unavailable, Unknown
+        # reserved, and synthetic acceptance rows do not qualify.
+        if not has_prior_outbound_linkedin(contact_touchpoints):
+            first_outreach_review.append(
+                _first_outreach_review_row(contact, organization)
+            )
+            exclusions["no_prior_outbound_linkedin"] += 1
             continue
         missing_inbound_evidence = inbound_probably_missing(contact_touchpoints)
         if missing_inbound_evidence is not None:
@@ -395,9 +414,10 @@ def build_backlog(
                 exclusions["parked_unmet_reopen"] += 1
                 continue
 
-        # A connected contact proves the invite was delivered even when an old
-        # worker logged its send status as Error/Unknown.  Prefer a Sent
-        # touchpoint, but recover the original note from any invite attempt.
+        # The gate above proves that some LinkedIn outbound was really sent.
+        # Prefer the sent invite as the opening context, while retaining older
+        # recovery behavior for contacts whose verified outbound was a later
+        # follow-up or manual message.
         invite = original_invite(contact_touchpoints)
         invite_note = (invite.message_text or "").strip() if invite else ""
         invite_at = (invite.sent_at or invite.recorded_at) if invite else ""
@@ -416,7 +436,7 @@ def build_backlog(
         band, fall_score = band_for(organization, bands)
         followup_count = followups_sent(contact_touchpoints)
         manuals = manual_outbounds(contact_touchpoints)
-        outbound = sent_followup_touchpoints(contact_touchpoints)
+        outbound = [*sent_followup_touchpoints(contact_touchpoints), *manuals]
         window = build_message_window(invite_note=invite_note, outbound=outbound)
         if not window:
             first_outreach_review.append(
@@ -454,6 +474,7 @@ def build_backlog(
                 "original_invite_note": invite_note,
                 "invite_date": invite_at,
                 "invite_evidence_status": invite_evidence_status,
+                "prior_outbound_verified": True,
                 "followups_sent": followup_count,
                 "manual_outbound_count": len(manuals),
                 "reopen_condition": contact.reopen_condition,
@@ -487,7 +508,7 @@ def build_backlog(
         "created_at": datetime.now(UTC).isoformat(),
         "source": "workspace ledger after live LinkedIn reconcile",
         "selection": (
-            "connected/accepted/Warm with a prior outbound LinkedIn message; "
+            "connected/accepted/Warm with a genuinely sent prior LinkedIn message; "
             "no logged reply; not do-not-contact; "
             "not parked/suppress notes; not parked with unmet reopen condition"
         ),

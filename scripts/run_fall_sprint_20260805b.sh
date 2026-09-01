@@ -3,7 +3,8 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 REPO_DIR="/Users/akshat/Desktop/Claude projects/Outreach"
 cd "$REPO_DIR"
-export LINKEDIN_CHROME_USER_DATA_DIR="${LINKEDIN_CHROME_USER_DATA_DIR:-$REPO_DIR/playwright/chrome-data}"
+export LINKEDIN_CHROME_USER_DATA_DIR="${LINKEDIN_CHROME_USER_DATA_DIR:-$REPO_DIR/.chrome-linkedin-debug}"
+export LINKEDIN_PROFILE_NAME="${LINKEDIN_PROFILE_NAME:-Default}"
 export LINKEDIN_DEBUG_PORT="${LINKEDIN_DEBUG_PORT:-9222}"
 export PYTHONUNBUFFERED=1
 
@@ -20,6 +21,7 @@ else
   rm -f "$USER_DATA"/SingletonLock "$USER_DATA"/SingletonCookie "$USER_DATA"/SingletonSocket
   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
     --user-data-dir="$USER_DATA" \
+    --profile-directory="$LINKEDIN_PROFILE_NAME" \
     --remote-debugging-port="$LINKEDIN_DEBUG_PORT" \
     --enable-automation --disable-extensions \
     "https://www.linkedin.com/feed/" >>/tmp/outreach-chrome-9222.log 2>&1 &
@@ -45,7 +47,7 @@ echo LIVE_CHECK_OK | tee -a "$LOG"
       echo "$(date -Iseconds) chrome down — relaunch" >>/tmp/outreach-chrome-watchdog-20260805b.log
       rm -f "$USER_DATA"/SingletonLock "$USER_DATA"/SingletonCookie "$USER_DATA"/SingletonSocket
       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-        --user-data-dir="$USER_DATA" --remote-debugging-port="$LINKEDIN_DEBUG_PORT" \
+        --user-data-dir="$USER_DATA" --profile-directory="$LINKEDIN_PROFILE_NAME" --remote-debugging-port="$LINKEDIN_DEBUG_PORT" \
         --enable-automation --disable-extensions \
         "https://www.linkedin.com/feed/" >>/tmp/outreach-chrome-9222.log 2>&1 &
       sleep 8

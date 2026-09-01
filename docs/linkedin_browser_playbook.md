@@ -9,15 +9,21 @@ The point of this document is simple: do not rediscover the same browser-profile
 
 ## Canonical Rules
 
-1. Use one explicit signed-in Chrome profile.
-2. On this machine, the verified working profile is:
+1. Use one explicit signed-in Chrome user-data directory **and** subprofile.
+2. On this machine, the verified working pair is:
 
 ```text
-/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data
+user-data-dir: /Users/akshat/Desktop/Claude projects/Outreach/.chrome-linkedin-debug
+profile-directory: Default
 ```
+
+This pair was re-verified on 2026-09-01 against both LinkedIn and USC Handshake.
+The older `Outreach/playwright/chrome-data` directory contains unrelated Chrome
+subprofiles and must not be used.
 
 3. Always launch that profile with:
    - `--remote-debugging-port=9222`
+   - `--profile-directory=Default`
    - `--enable-automation`
    - `--disable-extensions`
 4. Verify `9222` before running any LinkedIn automation.
@@ -63,7 +69,8 @@ Use this exact shape when launching manually:
 
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --user-data-dir="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data" \
+  --user-data-dir="/Users/akshat/Desktop/Claude projects/Outreach/.chrome-linkedin-debug" \
+  --profile-directory="Default" \
   --remote-debugging-port=9222 \
   --enable-automation \
   --disable-extensions \
@@ -94,7 +101,8 @@ If either check fails, stop and relaunch Chrome correctly.
 
 ```bash
 cd "/Users/akshat/Desktop/Claude projects/Outreach"
-export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data"
+export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/.chrome-linkedin-debug"
+export LINKEDIN_PROFILE_NAME="Default"
 ./scripts/launch_outreach_browser.sh
 ./.venv/bin/python main.py check-linkedin-live
 ```
@@ -169,7 +177,8 @@ is blocked or unknown and marked for reconciliation.
 
 ```bash
 cd "/Users/akshat/Desktop/Claude projects/ResumeGenerator v1"
-export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data"
+export LINKEDIN_CHROME_USER_DATA_DIR="/Users/akshat/Desktop/Claude projects/Outreach/.chrome-linkedin-debug"
+export LINKEDIN_PROFILE_NAME="Default"
 ./discovery/scripts/launch_linkedin_browser.sh
 ./discovery/scripts/check_linkedin_live.sh
 ```
@@ -183,6 +192,8 @@ Then proceed with:
 - Do not assume “Chrome is open” means CDP is available.
 - Do not run LinkedIn automation before verifying `9222`.
 - Do not use a relative `LINKEDIN_CHROME_USER_DATA_DIR`.
+- Do not omit `LINKEDIN_PROFILE_NAME`; a user-data directory can contain several unrelated profiles.
+- Do not use `/Users/akshat/Desktop/Claude projects/Outreach/playwright/chrome-data`.
 - Do not point discovery at `ResumeGenerator v1/discovery/playwright/chrome-data`.
 - Do not point outreach at an unverified fallback profile.
 - Do not treat `prepare-browser` or other persistent-context flows as the default path when a good CDP session is already live.
@@ -201,6 +212,7 @@ ps -p "$(lsof -tiTCP:9222 -sTCP:LISTEN)" -o command=
 
 4. Confirm the command includes:
    - the canonical profile path
+   - `--profile-directory=Default`
    - `--remote-debugging-port=9222`
    - `--enable-automation`
    - `--disable-extensions`

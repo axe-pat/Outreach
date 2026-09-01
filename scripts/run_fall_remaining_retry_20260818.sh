@@ -3,7 +3,8 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 REPO_DIR="/Users/akshat/Desktop/Claude projects/Outreach"
 cd "$REPO_DIR"
-export LINKEDIN_CHROME_USER_DATA_DIR="${LINKEDIN_CHROME_USER_DATA_DIR:-$REPO_DIR/playwright/chrome-data}"
+export LINKEDIN_CHROME_USER_DATA_DIR="${LINKEDIN_CHROME_USER_DATA_DIR:-$REPO_DIR/.chrome-linkedin-debug}"
+export LINKEDIN_PROFILE_NAME="${LINKEDIN_PROFILE_NAME:-Default}"
 export LINKEDIN_DEBUG_PORT="${LINKEDIN_DEBUG_PORT:-9222}"
 export PYTHONUNBUFFERED=1
 LOG="artifacts/20260818-fall-remaining-retry.log"

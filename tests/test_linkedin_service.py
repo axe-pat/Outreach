@@ -1,5 +1,6 @@
 from outreach.config import OutreachSettings
 from contextlib import contextmanager
+import subprocess
 
 import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -14,6 +15,35 @@ from outreach.services.linkedin import (
     primary_typeahead_label,
     score_typeahead_option,
 )
+
+
+def test_validate_cdp_owner_refuses_wrong_chrome_subprofile(tmp_path, monkeypatch) -> None:
+    user_data_dir = tmp_path / "chrome-data"
+    scraper = LinkedInScraper(
+        OutreachSettings(
+            linkedin_chrome_user_data_dir=user_data_dir,
+            linkedin_profile_name="Default",
+        )
+    )
+    responses = iter(
+        (
+            subprocess.CompletedProcess(
+                ["lsof"], 0, "COMMAND PID USER\nGoogle 123 akshat\n", ""
+            ),
+            subprocess.CompletedProcess(
+                ["ps"],
+                0,
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
+                f"--user-data-dir={user_data_dir} --profile-directory=Profile 1 "
+                "--remote-debugging-port=9222",
+                "",
+            ),
+        )
+    )
+    monkeypatch.setattr(linkedin_module.subprocess, "run", lambda *args, **kwargs: next(responses))
+
+    with pytest.raises(RuntimeError, match="wrong Chrome subprofile"):
+        scraper._validate_cdp_owner()
 
 
 def test_chirag_jain_reviewed_send_never_uses_first_name_fallback(monkeypatch) -> None:

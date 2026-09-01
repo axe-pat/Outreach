@@ -1658,6 +1658,16 @@ class LinkedInScraper:
                 f"Chrome on port {debug_port} is not using the configured LinkedIn profile. "
                 f"Expected --user-data-dir={expected_user_data_dir}."
             )
+        expected_profile_name = self.settings.linkedin_profile_name.strip()
+        if not expected_profile_name:
+            raise RuntimeError("LINKEDIN_PROFILE_NAME must identify the exact Chrome subprofile.")
+        if expected_profile_name in {".", ".."} or "/" in expected_profile_name:
+            raise RuntimeError("LINKEDIN_PROFILE_NAME must be a Chrome subprofile directory name, not a path.")
+        if f"--profile-directory={expected_profile_name}" not in command and f'--profile-directory="{expected_profile_name}"' not in command:
+            raise RuntimeError(
+                f"Chrome on port {debug_port} is using the wrong Chrome subprofile. "
+                f"Expected --profile-directory={expected_profile_name}."
+            )
 
     def _goto(self, page: Page, url: str, steps: list[str], label: str) -> None:
         steps.append(f"Navigating to {label}: {url}")

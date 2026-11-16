@@ -15,9 +15,12 @@ DEFAULT_TARGET_LISTS = "jobs;resume_generator;pre_apply"
 DEFAULT_COMPANY_OVERRIDES_FILENAME = "company_overrides.csv"
 DEFAULT_SEASON_FOCUS = "all"
 TRANSITION_SEASON_FOCUS = "fall_ft_transition"
+CURRENT_SEASON_FOCUS = "spring_ft_2027"
 SEASON_FOCUS_VALUES = {
     "all",
     TRANSITION_SEASON_FOCUS,
+    CURRENT_SEASON_FOCUS,
+    "spring_2027",
     "full_time",
     "fall",
     "summer",
@@ -385,6 +388,18 @@ def classify_role_season_text(text: str) -> str:
 
 def season_focus_allows_job(job: ResumeJob, season_focus: str = DEFAULT_SEASON_FOCUS) -> bool:
     normalized = normalize_season_focus(season_focus)
+    if normalized in {CURRENT_SEASON_FOCUS, 'spring_2027'}:
+        # The same eligibility policy used by discovery; company relationship
+        # targeting remains independent of this opportunity-only gate.
+        import sys
+        shared_root=Path(__file__).resolve().parents[3]/'ResumeGenerator v1'
+        if str(shared_root) not in sys.path:sys.path.insert(0,str(shared_root))
+        from shared.job_eligibility import classify_discovery_job_offline
+        title=job.role_title
+        lane='A' if re.search(r'\bintern(?:ship)?\b|co-?op',title,re.I) else 'B'
+        if normalized=='spring_2027'and lane!='A':return False
+        result=classify_discovery_job_offline({'role_title':title,'jd_text':job.jd_text,'lane':lane},default_lane=lane)
+        return result.get('classification')=='keep'
     bucket = classify_resume_role_season(job)
     if normalized == "all":
         return True

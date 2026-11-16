@@ -55,3 +55,8 @@ workspace/relationship_leads_*.decisions.json
 workspace/relationship_leads_*.staged.md
 workspace/USC resources/
 Consulting/
+
+# Private reviewed-message execution state and environment variants
+workspace/.reviewed_linkedin/
+.env.*
+!.env.example

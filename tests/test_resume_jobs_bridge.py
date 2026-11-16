@@ -221,3 +221,13 @@ def test_classify_resume_role_season_does_not_promote_generic_internship_noise()
 
     assert classify_resume_role_season(noisy_job) == GENERIC_INTERNSHIP_BUCKET
     assert classify_resume_role_season(_resume_job("2", "MBA Intern")) == GENERIC_INTERNSHIP_BUCKET
+
+
+def test_spring_2027_mode_keeps_spring_and_future_fulltime_only():
+    from outreach.resume_jobs_bridge import season_focus_allows_job
+    from dataclasses import replace
+    assert season_focus_allows_job(replace(_resume_job('s','Product Manager Intern - Spring 2027'),jd_text='Spring 2027 internship for currently enrolled MBA students.'),'spring_ft_2027')
+    assert season_focus_allows_job(replace(_resume_job('f','Product Manager - 2027 Graduates'),jd_text='Full-time start June 2027. MBA graduates welcome.'),'spring_ft_2027')
+    assert not season_focus_allows_job(_resume_job('old','Product Manager Intern - Fall 2026'),'spring_ft_2027')
+    assert not season_focus_allows_job(_resume_job('summer','Product Manager Intern - Summer 2027'),'spring_ft_2027')
+    assert not season_focus_allows_job(_resume_job('jit','Product Manager'),'spring_ft_2027')

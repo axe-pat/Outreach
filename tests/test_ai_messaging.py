@@ -303,6 +303,7 @@ def test_invite_batch_falls_back_before_ungrounded_ai_copy_can_be_sendable() -> 
     assert row["ai_messaging"]["used_ai"] is False
     assert row["ai_messaging"]["status"] == "fallback"
     assert row["ai_messaging"]["fallback_reason"] == "validation_failed"
+    assert row['note_qc']['verdict']=='review'
     assert "Google" not in row["note"]
     assert "engineering role" not in row["note"]
     assert row["note"] == row["ai_messaging"]["applied_message"]

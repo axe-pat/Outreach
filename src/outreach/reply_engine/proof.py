@@ -19,6 +19,7 @@ class ProofBeat:
 
 
 _DOMAIN_TERMS: dict[str, tuple[str, ...]] = {
+    "hiring_interview_ai": ("recruiting", "recruitment", "hiring tech", "interview ai", "ai interview", "applicant tracking", "talent platform", "hr tech", "hiring_interview_ai"),
     "data_infra": (
         "data platform", "data infrastructure", "infrastructure", "pipeline",
         "developer platform", "api", "integration", "enterprise saas", "database",
@@ -143,6 +144,10 @@ def load_proof_beats(path: Path) -> list[ProofBeat]:
     beats: list[ProofBeat] = []
     seen: set[str] = set()
     for raw in payload.get("proof_beats") or []:
+        for evidence in raw.get('sources',[]):
+            source=path.parent.parent/evidence['path']
+            if not source.is_file()or hashlib.sha256(source.read_bytes()).hexdigest()!=evidence['sha256']:
+                raise ValueError(f"proof beat evidence changed or missing: {source}")
         beat_id = str(raw.get("id") or "").strip()
         text = " ".join(str(raw.get("text") or "").split())
         employer = str(raw.get("employer") or "").strip()

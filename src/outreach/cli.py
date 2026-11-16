@@ -99,7 +99,7 @@ from outreach.resume_jobs_bridge import (
     DEFAULT_INCLUDE_STATUSES,
     DEFAULT_COMPANY_OVERRIDES_FILENAME,
     DEFAULT_SEASON_FOCUS,
-    TRANSITION_SEASON_FOCUS,
+    CURRENT_SEASON_FOCUS as TRANSITION_SEASON_FOCUS,
     build_resume_opportunity_notes,
     build_resume_organization_notes,
     build_resume_outreach_queue,
@@ -7345,6 +7345,8 @@ def _gate_high_value_followup_draft(
         organization=organization,
         explicit_required=_explicit_high_value_gate_is_current(draft),
     )
+    if (draft.get('ai_messaging')or{}).get('status')=='fallback':
+        reasons.append('AI composition fallback requires review')
     if not reasons:
         return draft
     draft["high_value_review_required"] = True
@@ -7374,6 +7376,8 @@ def _partition_initial_invites_for_review(
             organization=organization,
             explicit_required=_explicit_high_value_gate_is_current(candidate),
         )
+        if (candidate.get('ai_messaging')or{}).get('status')=='fallback':
+            reasons.append('AI composition fallback requires review')
         if reasons:
             candidate["high_value_review_required"] = True
             candidate["high_value_review_reasons"] = reasons
@@ -15553,7 +15557,7 @@ def run_supervised_e2e_cmd(
         str,
         typer.Option(
             help=(
-                "ResumeGenerator season filter: all, fall_ft_transition, full_time, fall, or summer"
+                "ResumeGenerator season filter: all, spring_ft_2027, spring_2027, fall_ft_transition, full_time, fall, or summer"
             )
         ),
     ] = TRANSITION_SEASON_FOCUS,
@@ -17504,7 +17508,7 @@ def import_resume_jobs(
         typer.Option(
             "--resume-season-focus",
             help=(
-                "ResumeGenerator season filter: all, fall_ft_transition, full_time, fall, or summer"
+                "ResumeGenerator season filter: all, spring_ft_2027, spring_2027, fall_ft_transition, full_time, fall, or summer"
             ),
         ),
     ] = DEFAULT_SEASON_FOCUS,
@@ -17671,7 +17675,7 @@ def build_resume_outreach_queue_command(
         typer.Option(
             "--resume-season-focus",
             help=(
-                "ResumeGenerator season filter: all, fall_ft_transition, full_time, fall, or summer"
+                "ResumeGenerator season filter: all, spring_ft_2027, spring_2027, fall_ft_transition, full_time, fall, or summer"
             ),
         ),
     ] = TRANSITION_SEASON_FOCUS,

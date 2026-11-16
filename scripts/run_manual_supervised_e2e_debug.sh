@@ -39,7 +39,7 @@ run_log="logs/daily-supervised-e2e-${timestamp}.log"
     --refresh-linkedin \
     --send-linkedin \
     --run-resume-generator-discovery \
-    --resume-season-focus fall_ft_transition \
+    --resume-season-focus spring_ft_2027 \
     --max-total-actions 24 \
     --max-companies 18 \
     --max-linkedin-invites 12 \

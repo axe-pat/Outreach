@@ -457,6 +457,9 @@ class NoteGenerator:
                     **ai_result.as_dict(),
                     "applied_message": generated.text,
                 }
+                if ai_result.status=='fallback':
+                    enriched['note_qc']['verdict']='review'
+                    enriched['note_qc']['flags'].append('AI composition unavailable or invalid; review fallback before sending')
             annotated.append(enriched)
             recent_notes.append(generated.text)
         return annotated
@@ -509,6 +512,10 @@ class NoteGenerator:
                     message=result.message,
                 )
                 qc = self.quality_check(candidate, polished_note, recent_polished)
+                if result.status=='fallback':
+                    qc.verdict='review'
+                    qc.flags.append('AI composition unavailable or invalid; review fallback before sending')
+                    enriched['note_qc']={**(candidate.get('note_qc')or{}),'verdict':'review','flags':list((candidate.get('note_qc')or{}).get('flags',[]))+['AI polish fallback requires review']}
                 base_verdict = str(
                     (candidate.get("note_qc") or {}).get("verdict") or ""
                 )

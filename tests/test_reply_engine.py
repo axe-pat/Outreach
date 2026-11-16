@@ -4576,3 +4576,14 @@ def test_same_day_reply_sorts_after_the_invite():
     assert confident
     assert messages[0].text == "Hi Pranav"
     assert resolve_state(messages) is ThreadState.THEY_REPLIED_UNANSWERED
+
+
+def test_additional_proof_source_must_still_match(tmp_path):
+    import hashlib,yaml
+    workspace=tmp_path/'workspace';workspace.mkdir()
+    source=tmp_path/'source.md';source.write_text('Verified project evidence')
+    catalog=workspace/'proof.yml'
+    catalog.write_text(yaml.safe_dump({'proof_beats':[{'id':'project','domains':['hiring_interview_ai'],'employer':'Project','text':'Built a recruiting workflow.','sources':[{'path':'source.md','sha256':hashlib.sha256(source.read_bytes()).hexdigest()}]}]}))
+    assert load_proof_beats(catalog)[0].beat_id=='project'
+    source.write_text('Changed evidence')
+    with pytest.raises(ValueError,match='evidence changed'):load_proof_beats(catalog)

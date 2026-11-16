@@ -945,3 +945,23 @@ cycles, review the resulting queues, activate a small SMTP batch only after the
 manual gates pass, and use observed coverage/outcomes to tune source and role
 breadth. Additional company-discovery inputs can then reuse the same review
 contract.
+
+## Spring/full-time combined restart (November 15)
+
+The current opportunity bridge accepts `spring_ft_2027` and `spring_2027`;
+Spring/full-time mode uses ResumeGenerator's canonical eligibility policy.
+Company-led relationship selection stays independent of posted-job eligibility.
+The CLI transition default now uses Spring/full-time; explicit legacy Fall modes remain supported.
+The reply proof library includes conservative FlairX and recruiting-engine examples
+with individually hashed source files; changed/missing evidence blocks proof loading.
+
+The review-only combined preview is built from the existing company action queue:
+`../ResumeGenerator v1/discovery/scripts/run_recruiting_daily.py` (run with that
+project's Python from its root). It joins the posted-opportunity queue, company
+actions, learning notes and an explicitly supplied dated warm-thread snapshot.
+It does not execute outreach or imply fresh company/inbox verification.
+See `artifacts/20261115-studyfetch-restart-preview.md` for the checked StudyFetch
+conversation chronology and an unsent email proposal. AI fallback invites and replies are held for review, including failed polish results.
+The full live sending/scheduling path still requires validation before activation.
+
+Git maintenance: private reviewed-message execution state and environment variants remain local. Contact/touchpoint changes and live conversation artifacts are excluded from public code publication.

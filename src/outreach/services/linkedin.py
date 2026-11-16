@@ -2397,10 +2397,6 @@ class LinkedInScraper:
             if visible:
                 return visible[0]
 
-        overflow_connect = self._find_overflow_connect_button(page)
-        if overflow_connect is not None:
-            return overflow_connect
-
         candidates = [
             page.locator('a[aria-label*="Invite"][aria-label*="connect" i]'),
             page.locator('button[aria-label*="Invite"][aria-label*="connect" i]'),
@@ -2445,7 +2441,9 @@ class LinkedInScraper:
             if visible:
                 return visible[0]
 
-        return None
+        # Current profile layouts can expose a named Connect action outside
+        # the toolbar. Opening More first hides it and adds needless waits.
+        return self._find_overflow_connect_button(page)
 
     def _find_overflow_connect_button(self, page: Page):
         """Open the profile More menu and return its Connect item.

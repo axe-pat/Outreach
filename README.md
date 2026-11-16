@@ -967,6 +967,11 @@ The full live sending/scheduling path still requires validation before activatio
 Git maintenance: private reviewed-message execution state and environment variants remain local. Contact/touchpoint changes and live conversation artifacts are excluded from public code publication.
 # Connection evidence during daily reconciliation
 
+Connect detection checks visible profile actions (including the left-hand named
+Connect button outside the toolbar) before opening More. It retains recipient-name
+and position checks to avoid another person's Connect button in recommendations.
+The overflow menu is used only when a suitable visible action was not found.
+
 The combined recruiting runner checks current LinkedIn messages and pending
 connections before company selection. These reads update local relationship
 state without sending or drafting messages. A Message button alone does not prove

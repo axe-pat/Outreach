@@ -574,6 +574,29 @@ def test_find_connect_button_prefers_named_preload_invite_link() -> None:
     assert scraper._find_connect_button(_InvitePage(), candidate_name="Abhilasha Juneja") is exact
 
 
+def test_find_connect_button_prefers_visible_named_action_before_overflow(monkeypatch) -> None:
+    scraper = LinkedInScraper(OutreachSettings())
+    direct = _ElementLocator(
+        aria_label="Invite Test Person to connect", href="https://www.linkedin.com/",
+        text="Connect", x=60, y=462,
+    )
+    other_person = _ElementLocator(
+        aria_label="Invite Another Person to connect", text="Connect", x=100, y=300,
+    )
+
+    class _DirectPage(_StubPage):
+        def locator(self, selector, *_args, **_kwargs):
+            if selector == 'a[aria-label*="Invite"][aria-label*="connect" i]':
+                return _LocatorList([other_person, direct])
+            return _LocatorList([])
+
+    def overflow_should_not_open(_page):
+        raise AssertionError("A visible named Connect action should win before More")
+
+    monkeypatch.setattr(scraper, "_find_overflow_connect_button", overflow_should_not_open)
+    assert scraper._find_connect_button(_DirectPage(), candidate_name="Test Person") is direct
+
+
 def test_find_connect_button_uses_overflow_menu_not_sidebar_connect() -> None:
     scraper = LinkedInScraper(OutreachSettings())
     scraper._human_pause = lambda _page: None

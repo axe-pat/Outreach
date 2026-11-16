@@ -967,6 +967,10 @@ The full live sending/scheduling path still requires validation before activatio
 Git maintenance: private reviewed-message execution state and environment variants remain local. Contact/touchpoint changes and live conversation artifacts are excluded from public code publication.
 # Connection evidence during daily reconciliation
 
+The planner honors `max_linkedin_followups=-1` as uncapped within the overall
+daily action/company budgets. It must not interpret that CLI default as a negative
+allowance and exclude every warm conversation. Zero continues to disable follow-ups.
+
 The combined daily planner passes `--current-hiring-only` to
 `build-track-2-daily-plan`. Hiring credit uses recent (at most 30 days old), open
 opportunities and excludes explicit Fall 2026 roles. All companies, including

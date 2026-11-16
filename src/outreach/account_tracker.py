@@ -1837,6 +1837,8 @@ def _daily_plan_skip_reason(
         ("email_drafts", item.expected_email_drafts, budget.max_email_drafts),
     ]
     for key, increment, cap in checks:
+        if key == 'linkedin_followups' and cap < 0:
+            continue  # CLI -1 means uncapped within the overall daily action budget.
         if increment and used[key] + increment > cap:
             return f"{key}_budget_exhausted"
     return ""

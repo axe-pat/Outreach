@@ -2325,11 +2325,9 @@ class LinkedInScraper:
         return self._has_visible_profile_action(page, locators)
 
     def _profile_has_connected_signal(self, page: Page) -> bool:
+        # Open Profile and InMail can expose Message to non-connections.
+        # Require an action that proves an existing connection.
         locators = [
-            page.get_by_role("button", name=re.compile("^Message$", re.I)),
-            page.get_by_role("link", name=re.compile("^Message$", re.I)),
-            page.locator('button[aria-label*="Message" i]'),
-            page.locator('a[aria-label*="Message" i]'),
             page.get_by_role("button", name=re.compile("Remove connection", re.I)),
             page.locator('button[aria-label*="Remove connection" i]'),
         ]

@@ -965,3 +965,11 @@ conversation chronology and an unsent email proposal. AI fallback invites and re
 The full live sending/scheduling path still requires validation before activation.
 
 Git maintenance: private reviewed-message execution state and environment variants remain local. Contact/touchpoint changes and live conversation artifacts are excluded from public code publication.
+# Connection evidence during daily reconciliation
+
+The combined recruiting runner checks current LinkedIn messages and pending
+connections before company selection. These reads update local relationship
+state without sending or drafting messages. A Message button alone does not prove
+an accepted connection (Open Profile/InMail can expose it); profile reconciliation
+requires an explicit Remove connection action. Ambiguous profiles remain unknown.
+`tests/test_connection_evidence.py` covers this distinction.

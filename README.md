@@ -967,6 +967,14 @@ The full live sending/scheduling path still requires validation before activatio
 Git maintenance: private reviewed-message execution state and environment variants remain local. Contact/touchpoint changes and live conversation artifacts are excluded from public code publication.
 # Connection evidence during daily reconciliation
 
+The combined daily planner passes `--current-hiring-only` to
+`build-track-2-daily-plan`. Hiring credit uses recent (at most 30 days old), open
+opportunities and excludes explicit Fall 2026 roles. All companies, including
+larger strategic accounts, remain eligible through fit and relationship strength.
+`tests/test_current_hiring_evidence.py` checks this rule. Pending-profile checks
+run in durable three-person batches in the combined runner rather than one
+all-or-nothing fifty-person sweep.
+
 Connect detection checks visible profile actions (including the left-hand named
 Connect button outside the toolbar) before opening More. It retains recipient-name
 and position checks to avoid another person's Connect button in recommendations.

@@ -1354,7 +1354,22 @@ _LABEL = {
 # Main builder
 # ---------------------------------------------------------------------------
 
-def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
+def current_hiring_evidence(opps: list[OpportunityRecord], today: date | None = None) -> list[OpportunityRecord]:
+    """Relationship fit persists; historical vacancies stop earning hiring credit."""
+    today = today or date.today()
+    current = []
+    for opp in opps:
+        if str(opp.status).strip().casefold() in {'closed','expired','rejected','archived','filled'}:
+            continue
+        if re.search(r'\b(?:fall|autumn)\s*2026\b',opp.title,re.I):
+            continue
+        try:age = (today-date.fromisoformat(str(opp.discovered_at)[:10])).days
+        except ValueError:continue
+        if 0 <= age <= 30:current.append(opp)
+    return current
+
+
+def build_account_rows(workbook_dir: Path, *, current_hiring_only: bool = False) -> list[AccountRow]:
     wb = OutreachWorkbook(workbook_dir)
     orgs = wb.list_organizations()
     contacts = wb.list_contacts()
@@ -1374,12 +1389,13 @@ def build_account_rows(workbook_dir: Path) -> list[AccountRow]:
         oc = contacts_by_org[org.organization_id]
         company_contacts = _company_relevant_contacts(org, oc)
         oo = opps_by_org[org.organization_id]
+        hiring_opps = current_hiring_evidence(oo) if current_hiring_only else oo
 
         s_profile, p_signals, tags_str, team_size = _score_profile_fit(org)
-        s_role, best_role, hiring_signal = _score_role_fit(oo)
+        s_role, best_role, hiring_signal = _score_role_fit(hiring_opps)
         s_team = _score_team_gate(team_size)
         s_reach, r_signals = _score_reachability(org, company_contacts)
-        s_hiring, _ = _score_hiring(oo)
+        s_hiring, _ = _score_hiring(hiring_opps)
         s_rel_momentum, momentum_label = _score_relationship_depth(company_contacts)
         s_rel_priority, rel_label = _score_relationship_priority(company_contacts)
         quality_flags = _data_quality_flags(

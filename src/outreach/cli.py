@@ -6894,6 +6894,7 @@ def build_track_2_daily_plan_cmd(
     max_email_research: Annotated[int, typer.Option(help="Maximum email/contact-info research tasks today")] = 5,
     max_context_enrichment: Annotated[int, typer.Option(help="Maximum company enrichment tasks today")] = 8,
     max_email_drafts: Annotated[int, typer.Option(help="Maximum cold email drafts today; keep 0 until email engine is ready")] = 0,
+    current_hiring_only: Annotated[bool, typer.Option(help="Exclude historical/closed vacancies from current hiring credit; retain company and relationship fit.")] = False,
 ) -> None:
     """Build a bounded review-only daily Track 2 operating plan."""
     from outreach.account_tracker import (
@@ -6915,8 +6916,9 @@ def build_track_2_daily_plan_cmd(
         max_email_drafts=max_email_drafts,
     )
     selection_history = load_selection_history(workspace)
+    account_rows = build_account_rows(workspace, current_hiring_only=True) if current_hiring_only else build_account_rows(workspace)
     plan = build_track_2_daily_plan(
-        build_account_rows(workspace),
+        account_rows,
         budget=budget,
         selection_history=selection_history,
     )
